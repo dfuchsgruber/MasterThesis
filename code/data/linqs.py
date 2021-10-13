@@ -6,7 +6,6 @@ from warnings import warn
 from torch_geometric.data import Dataset, download_url, Data
 import tarfile
 
-
 dataset_dir = '.datasets'
 
 def parse_linqs_tab_dataset(content_file, cites_file, print_warnings=True):
@@ -168,7 +167,6 @@ class Cora(Dataset):
         assert idx == 0
         data = torch.load(osp.join(self.processed_dir, self.processed_file_names[0]))
         return data
-
 
 class Citeseer(Dataset):
     def __init__(self, root=osp.join(dataset_dir, 'citeseer'), transform=None, pre_transform=None):
