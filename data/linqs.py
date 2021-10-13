@@ -4,7 +4,9 @@ import os.path as osp
 from collections import defaultdict
 from warnings import warn
 from torch_geometric.data import Dataset, download_url, Data
+import torch_geometric.transforms as T
 import tarfile
+from transform import NormalizeGraph
 
 dataset_dir = '.datasets'
 
@@ -239,11 +241,13 @@ class Pubmed(Dataset):
         return data
 
 if __name__ == '__main__':
-    d = Cora()
-    print(d[0].x, d[0].y, d[0].edge_index)
+    transforms = T.Compose([T.ToUndirected(), NormalizeGraph(min_class_count = 5 / 0.05, verbose = True)])
 
-    d = Citeseer()
-    print(d[0].x, d[0].y, d[0].edge_index)
+    d = Cora(transform=transforms)[0]
+    print(d.x, d.y, d.edge_index)
 
-    d = Pubmed()
-    print(d[0].x, d[0].y, d[0].edge_index)
+    d = Citeseer(transform=transforms)[0]
+    print(d.x, d.y, d.edge_index)
+
+    d = Pubmed(transform=transforms)[0]
+    print(d.x, d.y, d.edge_index)
