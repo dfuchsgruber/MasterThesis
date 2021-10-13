@@ -241,7 +241,7 @@ class Pubmed(Dataset):
         return data
 
 if __name__ == '__main__':
-    transforms = T.Compose([T.ToUndirected(), NormalizeGraph(min_class_count = 5 / 0.05, verbose = True)])
+    transforms = T.Compose([T.ToUndirected(), NormalizeGraph(min_class_count = 20 / 0.05, verbose = True)])
 
     d = Cora(transform=transforms)[0]
     print(d.x, d.y, d.edge_index)

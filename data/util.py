@@ -46,10 +46,10 @@ def stratified_split(ys, num_splits, sizes=[0.05, 0.15, 0.8], random_state=GLOBA
     return mask
 
 def data_get_num_attributes(data):
-    return data[0].x.size(1)
+    return data.x.size(1)
 
 def data_get_num_classes(data):
-    return int((data[0].y.max() + 1).item())
+    return int((data.y.max() + 1).item())
 
 def graph_make_symmetric(edge_index):
     """ Makes a graph symmetric. 
@@ -217,7 +217,6 @@ def graph_select_idxs(mask, x, edge_index, y, vertex_to_idx):
     idx_mapping = {idx_old : idx for idx, idx_old in enumerate(np.arange(N, dtype=int)[mask])}
     vertex_to_idx = {v : idx_mapping[idx] for v, idx in vertex_to_idx.items() if idx in idx_mapping}
     return x, edge_index, y, vertex_to_idx
-
 
 if __name__ == '__main__':
     ys = np.array([0] * 100 + [1] * 150 + [2] * 250)
