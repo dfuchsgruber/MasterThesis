@@ -15,16 +15,67 @@ class GCNConv(nn.Module):
         if use_spectral_norm:
             self.conv.lin = spectral_norm(self.conv.lin, name='weight', rescaling=upper_lipschitz_bound)
 
-
     def forward(self, x, edge_index, edge_weight=None):
         return self.conv(x, edge_index, edge_weight=edge_weight) 
+
+class GATConv(nn.Module):
+    """ Wrapper for a GAT convolution. """
+
+    def __init__(self, input_dim, output_dim, num_heads=2, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0):
+        super().__init__()
+        self.conv = torch_geometric.nn.GATConv(input_dim, num_heads, num_heads, concat=True, bias=use_bias)
+        if use_spectral_norm:
+            self.conv.lin_src = spectral_norm(self.conv.lin_src, name='weight', rescaling=upper_lipschitz_bound)
+
+    def forward(self, x, edge_index, edge_weight=None):
+        x = self.conv(x, edge_index) 
+        return x
+
+class SAGEConv(nn.Module):
+    """ Wrapper for a GraphSAGE convolution. """
+
+    def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0, normalize=True):
+        super().__init__()
+        self.conv = torch_geometric.nn.SAGEConv(input_dim, output_dim, bias=use_bias, normalize=normalize)
+        # Apply spectral norm to both linear transformations in the SAGE layer
+        if use_spectral_norm:
+            self.conv.lin_l = spectral_norm(self.conv.lin_l, name='weight', rescaling=upper_lipschitz_bound)
+            self.conv.lin_r = spectral_norm(self.conv.lin_r, name='weight', rescaling=upper_lipschitz_bound)
+
+    def forward(self, x, edge_index, edge_weight=None):
+        return self.conv(x, edge_index) 
+
+class GINConv(nn.Module):
+    """ Wrapper for a GIN convolution. """
+
+    def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0, normalize=True):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, output_dim, bias=use_bias)
+        if use_spectral_norm:
+            self.linear = spectral_norm(self.linear, name='weight', rescaling=upper_lipschitz_bound)
+        self.conv = torch_geometric.nn.GINConv(self.linear)
+
+    def forward(self, x, edge_index, edge_weight=None):
+        return self.conv(x, edge_index) 
+
+class LinearWithSpectralNormaliatzion(nn.Module):
+    """ Wrapper for a linear layer that applies spectral normalization and rescaling to the weight. """
+
+    def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, output_dim, bias=use_bias)
+        if use_spectral_norm:
+            self.linear = spectral_norm(self.linear, name='weight', rescaling=upper_lipschitz_bound)
+        
+    def forward(self, x, edge_index, edge_weight=None):
+        return self.linear(x)
 
 class GNN(nn.Module):
     """ Wrapper module for different GNN layer types. """
 
     def __init__(self, layer_type, input_dim, layer_dims, num_classes, 
         use_bias=True, use_spectral_norm=True, activation='leaky_relu', leaky_relu_slope=0.01,
-        upper_lipschitz_bound=1.0):
+        upper_lipschitz_bound=1.0, num_heads=1):
         """ Builds a general GNN with a specified layer type. 
         
         Parameters:
@@ -47,6 +98,9 @@ class GNN(nn.Module):
             Slope of the leaky relu if used.
         upper_lipschitz_bound : float
             If spectral normalization is used, re-scales the weight matrix. This induces a new upper_lipschitz_bound.
+        num_heads : int
+            How many heads are used for multi-head convolutions like GAT.
+        
         """
         super().__init__()
         all_dims = [input_dim] + list(layer_dims) + [num_classes]
@@ -56,10 +110,22 @@ class GNN(nn.Module):
         self.layer_type = layer_type
         self.leaky_relu_slope = leaky_relu_slope
         self.upper_lipschitz_bound = upper_lipschitz_bound
+        self.num_heads = num_heads
 
         if self.layer_type == 'gcn':
             make_layer = lambda in_dim, out_dim: GCNConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm, 
                 upper_lipschitz_bound=self.upper_lipschitz_bound)
+        elif self.layer_type == 'gat':
+            make_layer = lambda in_dim, out_dim: GATConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm, 
+                upper_lipschitz_bound=self.upper_lipschitz_bound, num_heads = self.num_heads)
+        elif self.layer_type == 'sage':
+            make_layer = lambda in_dim, out_dim: SAGEConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm, 
+                upper_lipschitz_bound=self.upper_lipschitz_bound,)
+        # elif self.layer_type = 'appnp': # A bit hacky, since technically this isn't a layer.
+        #     # A MLP is used to preprocess the features.
+        #     make_layer = lambda in_dim, out_dim: LinearWithSpectralNormaliatzion(in_dim, out_dim, bias=self.use_bias, use_spectral_norm=self.use_spectral_norm,
+        #         upper_lipschitz_bound=self.upper_lipschitz_bound)
+        #     self.appnp = torch_geometric.nn.APPNP()
         else:
             raise RuntimeError(f'Unsupported layer type {self.layer_type}')
         self.layers = torch.nn.ModuleList([

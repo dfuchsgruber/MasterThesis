@@ -1,3 +1,6 @@
+# The code for this module was taken by the latest version of pytorch's Spectral Normalization module and adapted.
+# https://pytorch.org/docs/stable/_modules/torch/nn/utils/parametrizations.html#spectral_norm
+
 import torch
 from torch.nn.utils import parametrize
 from torch.nn import Module
