@@ -1,38 +1,70 @@
 import numpy as np
 import scipy.sparse as sp
 
-GLOBAL_SPLIT_SEED = 1337
+from seed import data_split_seeds
 
-def stratified_split(ys, num_splits, sizes=[0.05, 0.15, 0.8], random_state=GLOBAL_SPLIT_SEED):
+def stratified_split_with_fixed_test_set_portion(ys, num_splits, portion_train=0.05, portion_val=0.15, portion_test_fixed=0.2, portion_test_not_fixed=0.6):
+    """ Splits the dataset using a stratified strategy into training, validation and testing data.
+    A certain portion of the testing data will be fixed and shared among all splits.
+
+    Parameters:
+    -----------
+    ys : ndarray, shape [N]
+        Labels that are used for a stratified split.
+    num_splits : int
+        How many splits are performed.
+    portion_train : float
+        Training portion.
+    portion_val : float
+        Validation portion.
+    portion_test_fixed : float
+        Testing portion that is shared among all splits.
+    portion_test_not_fixed : float
+        Testing portion that is not shared among all splits.
+    
+    Returns:
+    --------
+    mask : ndarray, shape [3, num_splits, N]
+        Masks for these 3 splits: training, validation, testing_not_fixed
+    mask_fixed : ndarray, shape [N]
+        Mask for test data that is fixed among all splits.
+    """
+    seeds = data_split_seeds(num_splits + 1) # The first seed is used to fix the shared testing data
+    norm = portion_train + portion_val + portion_test_not_fixed
+    mask_non_fixed, mask_fixed = stratified_split(ys, seeds[0:1], [norm, 1 - norm])[:, 0, :]
+
+    mask = np.zeros((3, num_splits, ys.shape[0]), bool)
+    mask[:, :, mask_non_fixed] = stratified_split(ys[mask_non_fixed], seeds[1:], sizes=np.array([portion_train, portion_val, portion_test_not_fixed]) / norm)
+    return mask, mask_fixed
+
+
+def stratified_split(ys, seeds, sizes=[0.05, 0.15, 0.8]):
     """ Performs several splits of a dataset into index sets using a stratified strategy.
     
     Parameters:
     -----------
     ys : ndarray, shape [N]
         Labels that are used for a stratified split.
-    num_splits : int
-        How many splits are calculated.
+    seeds : int
+        Seed for each split.
     sizes : sequence of ints
         Size of each split. Should sum up to 1.0
-    random_state : int or None
-        If given, seed for generating all splits to ensure reproducability.
 
     Returns:
     --------
-    mask : list or ndarrays, shape [sizes, num_splits, N]
+    mask : list or ndarrays, shape [len(sizes), len(seeds), N]
         Masks for all sets.
     """
     sizes = np.array(sizes)
     assert np.allclose(sizes.sum(), 1.0), f'Sizes should sum up to 1.0'
 
-    if random_state is not None:
-        np.random.seed(random_state)
         
-    mask = np.zeros((len(sizes), num_splits, len(ys)), dtype=bool)
-    for split_idx in range(num_splits):
+    mask = np.zeros((len(sizes), len(seeds), len(ys)), dtype=bool)
+    for split_idx, seed in enumerate(seeds):
         for v, count in zip(*np.unique(ys, return_counts=True)):
             idxs = np.where(ys == v)[0]
-            np.random.shuffle(idxs)
+            rng = np.random.RandomState(seed)
+            rng.shuffle(idxs)
             
             # Partition this subset by splitting the shuffled idx in portions
             start_idx = 0

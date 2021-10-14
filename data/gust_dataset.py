@@ -4,7 +4,6 @@ import os.path as osp
 from collections import defaultdict
 from warnings import warn
 from torch_geometric.data import Dataset, Data
-from transform import NormalizeGraph
 import gust.datasets
 
 class GustDataset(Dataset):

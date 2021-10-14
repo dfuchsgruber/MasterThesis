@@ -3,16 +3,18 @@ import torch.nn as nn
 import torch
 import torch_geometric
 import torch.nn.functional as F
+from model.spectral_norm import spectral_norm
 
 class GCNConv(nn.Module):
     """ Wrapper for a vanilla GCN convolution. """
 
-    def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False):
+    def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0):
         super().__init__()
         self.conv = torch_geometric.nn.GCNConv(input_dim, output_dim, bias=use_bias)
         # Apply spectral norm to the linear layer of the GCN conv
         if use_spectral_norm:
-            self.conv.lin = nn.utils.spectral_norm(self.conv.lin)
+            self.conv.lin = spectral_norm(self.conv.lin, name='weight', rescaling=upper_lipschitz_bound)
+
 
     def forward(self, x, edge_index, edge_weight=None):
         return self.conv(x, edge_index, edge_weight=edge_weight) 
@@ -21,7 +23,8 @@ class GNN(nn.Module):
     """ Wrapper module for different GNN layer types. """
 
     def __init__(self, layer_type, input_dim, layer_dims, num_classes, 
-        use_bias=True, use_spectral_norm=True, activation='leaky_relu', leaky_relu_slope=0.01):
+        use_bias=True, use_spectral_norm=True, activation='leaky_relu', leaky_relu_slope=0.01,
+        upper_lipschitz_bound=1.0):
         """ Builds a general GNN with a specified layer type. 
         
         Parameters:
@@ -42,6 +45,8 @@ class GNN(nn.Module):
             Activation function after each layer.
         leaky_relu_slope : float
             Slope of the leaky relu if used.
+        upper_lipschitz_bound : float
+            If spectral normalization is used, re-scales the weight matrix. This induces a new upper_lipschitz_bound.
         """
         super().__init__()
         all_dims = [input_dim] + list(layer_dims) + [num_classes]
@@ -50,9 +55,11 @@ class GNN(nn.Module):
         self.activation = activation
         self.layer_type = layer_type
         self.leaky_relu_slope = leaky_relu_slope
+        self.upper_lipschitz_bound = upper_lipschitz_bound
 
         if self.layer_type == 'gcn':
-            make_layer = lambda in_dim, out_dim: GCNConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm)
+            make_layer = lambda in_dim, out_dim: GCNConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm, 
+                upper_lipschitz_bound=self.upper_lipschitz_bound)
         else:
             raise RuntimeError(f'Unsupported layer type {self.layer_type}')
         self.layers = torch.nn.ModuleList([

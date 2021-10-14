@@ -1,15 +1,23 @@
 import torch
+import numpy as np
 
 from train import train_model_semi_supervised_node_classification
 from model.gnn import GNN
-from data.linqs import Citeseer
-from data.util import data_get_num_attributes, data_get_num_classes, stratified_split
+from data.gust_dataset import GustDataset
+from data.util import data_get_num_attributes, data_get_num_classes, stratified_split_with_fixed_test_set_portion
+from seed import model_seeds
 
-data = Citeseer()[0]
-model = GNN('gcn', data_get_num_attributes(data), [16, 16], data_get_num_classes(data), use_spectral_norm=True)
+data = GustDataset('cora_ml')[0]
+mask_split, mask_fixed = stratified_split_with_fixed_test_set_portion(data.y.numpy(), 5, portion_train=0.05, portion_val=0.15, portion_test_fixed=0.2, portion_test_not_fixed=0.6)
+
+model_name = 'gcn'
+model_seeds = model_seeds(50, model_name=model_name)
+torch.manual_seed(model_seeds[0])
+
+model = GNN(model_name, data_get_num_attributes(data), [64], data_get_num_classes(data), use_spectral_norm=True, activation='leaky_relu', upper_lipschitz_bound=5)
 if torch.cuda.is_available():
     model.cuda()
 
-mask_train, mask_val, mask_test = torch.tensor(stratified_split(data[0].y.numpy(), 1, [0.05, 0.15, 0.8]))
-
-train_model_semi_supervised_node_classification(model, mask_train[0], mask_val[0], epochs=5, early_stopping_patience=10)
+train_history, val_history, best_model_state_dict = train_model_semi_supervised_node_classification(model, data, mask_split[0, 0], mask_split[1, 0], 
+    epochs=1000, early_stopping_patience=100, 
+    early_stopping_metrics={'val_loss' : 'min'}, learning_rate=1e-3)

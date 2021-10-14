@@ -6,7 +6,6 @@ from warnings import warn
 from torch_geometric.data import Dataset, download_url, Data
 import torch_geometric.transforms as T
 import tarfile
-from transform import NormalizeGraph
 
 dataset_dir = '.datasets'
 
@@ -241,7 +240,7 @@ class Pubmed(Dataset):
         return data
 
 if __name__ == '__main__':
-    transforms = T.Compose([T.ToUndirected(), NormalizeGraph(min_class_count = 20 / 0.05, verbose = True)])
+    # transforms = T.Compose([T.ToUndirected(), NormalizeGraph(min_class_count = 20 / 0.05, verbose = True)])
 
     d = Cora(transform=transforms)[0]
     print(d.x, d.y, d.edge_index)
