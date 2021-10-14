@@ -136,7 +136,7 @@ def parse_pubmed(node_file, cites_file):
     return x, y, edge_idxs, vertex_to_idx, label_to_idx
 
 class Cora(Dataset):
-    def __init__(self, root=osp.join(dataset_dir, 'cora'), transform=None, pre_transform=None):
+    def __init__(self, root=osp.join(dataset_dir, 'linqs',  'cora'), transform=None, pre_transform=None):
         super().__init__(root, transform, pre_transform)
 
     @property
@@ -171,7 +171,7 @@ class Cora(Dataset):
         return data
 
 class Citeseer(Dataset):
-    def __init__(self, root=osp.join(dataset_dir, 'citeseer'), transform=None, pre_transform=None):
+    def __init__(self, root=osp.join(dataset_dir, 'linqs', 'citeseer'), transform=None, pre_transform=None):
         super().__init__(root, transform, pre_transform)
 
     @property
@@ -206,7 +206,7 @@ class Citeseer(Dataset):
         return data
 
 class Pubmed(Dataset):
-    def __init__(self, root=osp.join(dataset_dir, 'pubmed'), transform=None, pre_transform=None):
+    def __init__(self, root=osp.join(dataset_dir, 'linqs',  'pubmed'), transform=None, pre_transform=None):
         super().__init__(root, transform, pre_transform)
 
     @property
