@@ -54,85 +54,102 @@
 
 
 seml:
-  executable: seml_example.py
-  name: example_experiment
-  output_dir: .
-  project_root_dir: .
+  executable: training_experiments.py
+  name: week1_training_lipschitz_normed_models
+  output_dir: ../seml_outputs/week1_training_lipschitz_normed_models
+  project_root_dir: ..
 
 slurm:
   experiments_per_job: 1
   sbatch_options:
-    gres: gpu:1       # num GPUs
+    gres: gpu:0       # num GPUs
     mem: 16G          # memory
-    cpus-per-task: 2  # num cores
+    cpus-per-task: 1  # num cores
     time: 0-08:00     # max time, D-HH:MM
 
 ###### BEGIN PARAMETER CONFIGURATION ######
 
 fixed:
-  max_epochs: 500
+  training.early_stopping_patience: 100
+  training.num_epochs: 10000
+  data.num_dataset_splits : 10
+  data.train_portion : 0.05
+  data.val_portion : 0.15
+  data.test_portion : 0.6
+  data.test_portion_fixed : 0.2
+  model.weight_scale : 5
+  model.num_initializations : 50
+  model.use_bias: true
+  model.activation: leaky_relu
+  model.leaky_relu_slope: 0.01
 
 grid:
-  learning_rate:
-    type: loguniform
-    min: 1e-5
-    max: 1e-1
-    num: 5
-
-random:
-  samples: 3
-  seed: 821
-
-  # SEML supports dot-notation for nested dictionaries.
-  regularization_params.dropout:
-    type: uniform
-    min: 0.0
-    max: 0.7
-    seed: 222
-
-small_datasets:
-
-  grid:
-    dataset:
+  optimization.learning_rate:
+    type: choice
+    options:
+      - 1e-2
+    # type: loguniform
+    # min: 1e-5
+    # max: 1e-1
+    # num: 5
+  data.dataset:
+    type: choice
+    options:
+      - cora_ml
+      # - citeseer
+      # - pubmed
+  model.hidden_sizes:
+    type: choice
+    options:
+      - [16]
+      # - [32]
+      # - [64]
+      # - [16, 16]
+      # - [32, 32]
+      # - [64, 64]
+  model.use_spectral_norm:
       type: choice
       options:
-        - small_dataset_1
-        - small_dataset_2
-
-    hidden_sizes:
-      type: choice
-      options:
-        - [16]
-        - [32, 16]  # this will be parsed into a Python list.
-
-  random:
-    samples: 3
-    seed: 2223
-
-    max_epochs:
-       type: randint
-       min: 200
-       max: 1000
-
-large_datasets:
-
+        - true
+      #  - false
+gat:
   fixed:
-    max_epochs: 1000
-
+    model.model_type: gat
   grid:
-    learning_rate:
+    model.num_heads:
       type: choice
       options:
-        - 0.001
-
-    dataset:
-      type: choice
-      options:
-        - large_dataset_1
-        - large_dataset_2
-
-    hidden_sizes:
-      type: choice
-      options:
-        - [64]
-        - [64, 32]
+        - 1
+        # - 2
+        # - 4
+        # - 8
+# gcn:
+#   fixed:
+#     model.model_type: gcn
+# gin:
+#   fixed:
+#     model.model_type: gin
+# sage:
+#   fixed:
+#     model.model_type: sage
+# appnp:
+#   fixed:
+#     model.model_type: appnp
+#   grid:
+#     model.teleportation_probability:
+#       type: choice
+#       options:
+#         - 0.1
+#         - 0.2
+#         - 0.5
+#         - 0.8
+#     model.diffusion_iterations:
+#       type: choice
+#       options:
+#         - 2
+#         - 5
+#         - 10
+# mlp:
+#   fixed:
+#     model.model_type: mlp
+  

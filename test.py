@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from train import train_model_semi_supervised_node_classification
+from model.train import train_model_semi_supervised_node_classification
 from model.gnn import GNN
 from data.gust_dataset import GustDataset
 from data.util import data_get_num_attributes, data_get_num_classes, stratified_split_with_fixed_test_set_portion
