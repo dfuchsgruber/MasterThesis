@@ -30,6 +30,8 @@ class EarlyStopping:
 
         self._should_stop = False
         self.best_model_state_dict = None
+        self._epoch = 0
+        self.best_epoch = None
 
     def log(self, metrics, model):
         """ Logs a certain metric.
@@ -56,11 +58,13 @@ class EarlyStopping:
         if improvement:
             self.steps = 0
             self.best_model_state_dict = model.state_dict()
+            self.best_epoch = self._epoch
         else:
             self.steps += 1
             if self.steps >= self.patience:
                 self._should_stop = True
-    
+        self._epoch += 1
+
 
     def should_stop(self):
         """ If training should be stopped. Needs at least `patience + 1` logging steps.
@@ -102,6 +106,8 @@ def train_model_semi_supervised_node_classification(model, data, mask_train_idx,
         A dictionary containing a history for each metric on the validation set.
     best_model : dict
         The state dict of the best model.
+    best_epoch : int
+        Which epoch the model state dict corresponds to.
     """
 
     x, edge_index, y = data.x.float(), data.edge_index.long(), data.y.long()
@@ -139,5 +145,5 @@ def train_model_semi_supervised_node_classification(model, data, mask_train_idx,
                 print(f'Early stopping criterion reached after {epoch + 1} epochs.')
                 break
 
-    return dict(metrics_train), dict(metrics_val), monitor.best_model_state_dict
+    return dict(metrics_train), dict(metrics_val), monitor.best_model_state_dict, monitor.best_epoch
 

@@ -10,7 +10,7 @@ class GCNConv(nn.Module):
 
     def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0):
         super().__init__()
-        self.conv = torch_geometric.nn.GCNConv(input_dim, output_dim, bias=use_bias)
+        self.conv = torch_geometric.nn.GCNConv(input_dim, output_dim, bias=use_bias, cached=True)
         # Apply spectral norm to the linear layer of the GCN conv
         if use_spectral_norm:
             self.conv.lin = spectral_norm(self.conv.lin, name='weight', rescaling=upper_lipschitz_bound)
@@ -75,7 +75,7 @@ class GNN(nn.Module):
 
     def __init__(self, layer_type, input_dim, layer_dims, num_classes, 
         use_bias=True, use_spectral_norm=True, activation='leaky_relu', leaky_relu_slope=0.01,
-        upper_lipschitz_bound=1.0, num_heads=1):
+        upper_lipschitz_bound=1.0, num_heads=1, teleportation_probability=0.1, diffusion_iterations=3):
         """ Builds a general GNN with a specified layer type. 
         
         Parameters:
@@ -100,7 +100,10 @@ class GNN(nn.Module):
             If spectral normalization is used, re-scales the weight matrix. This induces a new upper_lipschitz_bound.
         num_heads : int
             How many heads are used for multi-head convolutions like GAT.
-        
+        teleportation_probability : float
+            Probability of teleportation in APPNP.
+        diffusion_iterations : int
+            How many diffusion iterations are used to approximate PPR in APPNP.
         """
         super().__init__()
         all_dims = [input_dim] + list(layer_dims) + [num_classes]
@@ -111,6 +114,8 @@ class GNN(nn.Module):
         self.leaky_relu_slope = leaky_relu_slope
         self.upper_lipschitz_bound = upper_lipschitz_bound
         self.num_heads = num_heads
+        self.teleportation_probability = teleportation_probability
+        self.diffusion_iterations = diffusion_iterations
 
         if self.layer_type == 'gcn':
             make_layer = lambda in_dim, out_dim: GCNConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm, 
@@ -121,11 +126,14 @@ class GNN(nn.Module):
         elif self.layer_type == 'sage':
             make_layer = lambda in_dim, out_dim: SAGEConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm, 
                 upper_lipschitz_bound=self.upper_lipschitz_bound,)
-        # elif self.layer_type = 'appnp': # A bit hacky, since technically this isn't a layer.
-        #     # A MLP is used to preprocess the features.
-        #     make_layer = lambda in_dim, out_dim: LinearWithSpectralNormaliatzion(in_dim, out_dim, bias=self.use_bias, use_spectral_norm=self.use_spectral_norm,
-        #         upper_lipschitz_bound=self.upper_lipschitz_bound)
-        #     self.appnp = torch_geometric.nn.APPNP()
+        elif self.layer_type == 'appnp': # A bit hacky, since technically this isn't a layer.
+            # A MLP is used to preprocess the features.
+            make_layer = lambda in_dim, out_dim: LinearWithSpectralNormaliatzion(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm,
+                upper_lipschitz_bound=self.upper_lipschitz_bound)
+            self.appnp = torch_geometric.nn.APPNP(self.diffusion_iterations, self.teleportation_probability, cached=True)
+        elif self.layer_type == 'mlp':
+            make_layer = lambda in_dim, out_dim: LinearWithSpectralNormaliatzion(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm,
+                upper_lipschitz_bound=self.upper_lipschitz_bound)
         else:
             raise RuntimeError(f'Unsupported layer type {self.layer_type}')
         self.layers = torch.nn.ModuleList([
@@ -158,6 +166,9 @@ class GNN(nn.Module):
                     x = F.relu(x)
                 else:
                     raise RuntimeError(f'Unsupported activation type {self.activation}')
+            embeddings.append(x)
+        if self.layer_type == 'appnp':
+            x = self.appnp(x, edge_index)
             embeddings.append(x)
         return embeddings
 
