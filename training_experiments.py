@@ -99,9 +99,9 @@ class ExperimentWrapper:
                     # print(f'Val {metric} of best model {history[best_epoch]}')
                     result[metric].append(history[best_epoch])
 
-                torch.save(best_model_state_dict, osp.join(self.output_dir, f'model_{best_epoch}_state_dict.pt'))
+                torch.save(best_model_state_dict, osp.join(self.output_dir, f'split_{split_idx}_reinitialization_{reinitialization}_model_epoch_{best_epoch}_state_dict.pt'))
                 result['best_epoch'].append(best_epoch)
-                
+
         return dict(result)
 
 
