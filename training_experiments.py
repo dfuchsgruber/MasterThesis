@@ -4,6 +4,7 @@ import torch
 import seml
 from collections import defaultdict
 import os.path as osp
+import os
 
 from model.train import train_model_semi_supervised_node_classification
 from model.gnn import GNN
@@ -31,13 +32,14 @@ class ExperimentWrapper:
         if init_all:
             self.init_all()
         self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
+        if self.output_dir is not None:
+            os.makedirs(self.output_dir, exist_ok=True)
 
     # With the prefix option we can "filter" the configuration for the sub-dictionary under "data".
     @ex.capture(prefix="data")
     def init_dataset(self, dataset, num_dataset_splits, train_portion, val_portion, test_portion, test_portion_fixed):
         self.data = GustDataset(dataset)[0]
-        self.data_mask_split, self.data_mask_test_fixed = stratified_split_with_fixed_test_set_portion(data.y.numpy(), num_dataset_splits, 
+        self.data_mask_split, self.data_mask_test_fixed = stratified_split_with_fixed_test_set_portion(self.data.y.numpy(), num_dataset_splits, 
             portion_train=train_portion, portion_val=val_portion, portion_test_fixed=test_portion_fixed, portion_test_not_fixed=test_portion)
 
     @ex.capture(prefix="model")
@@ -73,33 +75,34 @@ class ExperimentWrapper:
 
     @ex.capture(prefix="training")
     def train(self, early_stopping_patience, num_epochs):
-        best_results = defaultdict(list)
+
+        result = defaultdict(list)
         for split_idx in range(self.data_mask_split.shape[1]):
             mask_train, mask_val = self.data_mask_split[0, split_idx], self.data_mask_split[1, split_idx]
             for reinitialization, seed in enumerate(self.model_seeds):
                 torch.manual_seed(seed)
 
-                # model = GNN(self.model_config['type'], data_get_num_attributes(self.data), self.model_config['hidden_sizes'], 
-                #             data_get_num_classes(self.data), use_spectral_norm=self.model_config['use_spectral_norm'], activation='leaky_relu', 
-                #             upper_lipschitz_bound=self.model_config['weight_scale'], num_heads=self.model_config['num_heads'], 
-                #             diffusion_iterations=self.model_config['diffusion_iterations'], teleportation_probability=self.model_config['teleportation_probability'],
-                #             use_bias=self.model_config['use_bias'], activation=self.model_config['activation'], leaky_relu_slope=self.model_config['leaky_relu_slope'],)
+                model = GNN(self.model_config['type'], data_get_num_attributes(self.data), self.model_config['hidden_sizes'], 
+                            data_get_num_classes(self.data), use_spectral_norm=self.model_config['use_spectral_norm'],
+                            upper_lipschitz_bound=self.model_config['weight_scale'], num_heads=self.model_config['num_heads'], 
+                            diffusion_iterations=self.model_config['diffusion_iterations'], teleportation_probability=self.model_config['teleportation_probability'],
+                            use_bias=self.model_config['use_bias'], activation=self.model_config['activation'], leaky_relu_slope=self.model_config['leaky_relu_slope'],)
                 
-                # if torch.cuda.is_available():
-                #     model.cuda()
+                if torch.cuda.is_available():
+                    model.cuda()
 
-                # train_history, val_history, best_model_state_dict, best_epoch = train_model_semi_supervised_node_classification(model, self.data, 
-                #     mask_train, mask_val, epochs=num_epochs, early_stopping_patience=early_stopping_patience,  
-                #     early_stopping_metrics={'val_loss' : 'min'}, learning_rate=self.learning_rate)
+                train_history, val_history, best_model_state_dict, best_epoch = train_model_semi_supervised_node_classification(model, self.data, 
+                    mask_train, mask_val, epochs=num_epochs, early_stopping_patience=early_stopping_patience,  
+                    early_stopping_metrics={'val_loss' : 'min'}, learning_rate=self.optimization_config['learning_rate'])
 
-                # for metric, history in val_history.items():
-                #     # print(f'Val {metric} of best model {history[best_epoch]}')
-                #     results[metric].append(history[best_epoch])
-                # result['best_epoch'].append(best_epoch)
-                results[split_idx][reinitialization] = 1.0 # For testing
-        with open(osp.join(self.output_dir, 'test_artifact.txt')) as f:
-            f.write(f'{self.model_config}')
-        return dict(results)
+                for metric, history in val_history.items():
+                    # print(f'Val {metric} of best model {history[best_epoch]}')
+                    result[metric].append(history[best_epoch])
+
+                torch.save(best_model_state_dict, osp.join(self.output_dir, f'model_{best_epoch}_state_dict.pt'))
+                result['best_epoch'].append(best_epoch)
+                
+        return dict(result)
 
 
 # We can call this command, e.g., from a Jupyter notebook with init_all=False to get an "empty" experiment wrapper,
@@ -118,5 +121,5 @@ def train(_config, experiment=None,):
     run_id = _config['overwrite']
     db_collection = _config['db_collection']
     if experiment is None:
-        experiment = ExperimentWrapper(output_dir=os.path.join('..', 'artifacts', f'collection_{db_collection}_run_{run_id}'))
+        experiment = ExperimentWrapper(output_dir=osp.join('..', 'artifacts', f'collection_{db_collection}_run_{run_id}'))
     return experiment.train()

@@ -23,7 +23,7 @@ class GATConv(nn.Module):
 
     def __init__(self, input_dim, output_dim, num_heads=2, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0):
         super().__init__()
-        self.conv = torch_geometric.nn.GATConv(input_dim, num_heads, num_heads, concat=True, bias=use_bias)
+        self.conv = torch_geometric.nn.GATConv(input_dim, output_dim, num_heads, concat=False, bias=use_bias)
         if use_spectral_norm:
             self.conv.lin_src = spectral_norm(self.conv.lin_src, name='weight', rescaling=upper_lipschitz_bound)
 
@@ -80,7 +80,7 @@ class GNN(nn.Module):
         
         Parameters:
         -----------
-        layer_type : ('gcn', 'gat', 'gin', 'appnp')
+        layer_type : ('gcn', 'gat', 'gin', 'appnp', 'mlp', 'sage')
             Which layer to use in the GNN.
         input_dim : int
             Number of input features.
@@ -134,6 +134,9 @@ class GNN(nn.Module):
         elif self.layer_type == 'mlp':
             make_layer = lambda in_dim, out_dim: LinearWithSpectralNormaliatzion(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm,
                 upper_lipschitz_bound=self.upper_lipschitz_bound)
+        elif self.layer_type == 'gin':
+            make_layer = lambda in_dim, out_dim: GINConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm,
+                upper_lipschitz_bound=self.upper_lipschitz_bound,)
         else:
             raise RuntimeError(f'Unsupported layer type {self.layer_type}')
         self.layers = torch.nn.ModuleList([
