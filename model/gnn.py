@@ -4,179 +4,209 @@ import torch
 import torch_geometric
 import torch.nn.functional as F
 from model.spectral_norm import spectral_norm
+import pytorch_lightning as pl
+from metrics import accuracy
 
-class GCNConv(nn.Module):
-    """ Wrapper for a vanilla GCN convolution. """
-
-    def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0):
-        super().__init__()
-        self.conv = torch_geometric.nn.GCNConv(input_dim, output_dim, bias=use_bias, cached=True)
-        # Apply spectral norm to the linear layer of the GCN conv
-        if use_spectral_norm:
-            self.conv.lin = spectral_norm(self.conv.lin, name='weight', rescaling=upper_lipschitz_bound)
-
-    def forward(self, x, edge_index, edge_weight=None):
-        return self.conv(x, edge_index, edge_weight=edge_weight) 
-
-class GATConv(nn.Module):
-    """ Wrapper for a GAT convolution. """
-
-    def __init__(self, input_dim, output_dim, num_heads=2, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0):
-        super().__init__()
-        self.conv = torch_geometric.nn.GATConv(input_dim, output_dim, num_heads, concat=False, bias=use_bias)
-        if use_spectral_norm:
-            self.conv.lin_src = spectral_norm(self.conv.lin_src, name='weight', rescaling=upper_lipschitz_bound)
-
-    def forward(self, x, edge_index, edge_weight=None):
-        x = self.conv(x, edge_index) 
-        return x
-
-class SAGEConv(nn.Module):
-    """ Wrapper for a GraphSAGE convolution. """
-
-    def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0, normalize=True):
-        super().__init__()
-        self.conv = torch_geometric.nn.SAGEConv(input_dim, output_dim, bias=use_bias, normalize=normalize)
-        # Apply spectral norm to both linear transformations in the SAGE layer
-        if use_spectral_norm:
-            self.conv.lin_l = spectral_norm(self.conv.lin_l, name='weight', rescaling=upper_lipschitz_bound)
-            self.conv.lin_r = spectral_norm(self.conv.lin_r, name='weight', rescaling=upper_lipschitz_bound)
-
-    def forward(self, x, edge_index, edge_weight=None):
-        return self.conv(x, edge_index) 
-
-class GINConv(nn.Module):
-    """ Wrapper for a GIN convolution. """
-
-    def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0, normalize=True):
-        super().__init__()
-        self.linear = nn.Linear(input_dim, output_dim, bias=use_bias)
-        if use_spectral_norm:
-            self.linear = spectral_norm(self.linear, name='weight', rescaling=upper_lipschitz_bound)
-        self.conv = torch_geometric.nn.GINConv(self.linear)
-
-    def forward(self, x, edge_index, edge_weight=None):
-        return self.conv(x, edge_index) 
+def _make_convolutions(input_dim, num_classes, hidden_dims, convolution_class, *args, **kwargs):
+    all_dims = [input_dim] + list(hidden_dims) + [num_classes]
+    convs = []
+    return nn.ModuleList([
+       convolution_class(in_dim, out_dim, *args, **kwargs) for in_dim, out_dim in zip(all_dims[:-1], all_dims[1:])
+    ])
 
 class LinearWithSpectralNormaliatzion(nn.Module):
     """ Wrapper for a linear layer that applies spectral normalization and rescaling to the weight. """
 
-    def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False, upper_lipschitz_bound=1.0):
+    def __init__(self, input_dim, output_dim, use_bias=True, use_spectral_norm=False, weight_scale=1.0):
         super().__init__()
         self.linear = nn.Linear(input_dim, output_dim, bias=use_bias)
         if use_spectral_norm:
-            self.linear = spectral_norm(self.linear, name='weight', rescaling=upper_lipschitz_bound)
+            self.linear = spectral_norm(self.linear, name='weight', rescaling=weight_scale)
         
-    def forward(self, x, edge_index, edge_weight=None):
+    def forward(self, x):
         return self.linear(x)
 
-class GNN(nn.Module):
-    """ Wrapper module for different GNN layer types. """
+class GCN(nn.Module):
+    """ Vanilla GCN """
 
-    def __init__(self, layer_type, input_dim, layer_dims, num_classes, 
-        use_bias=True, use_spectral_norm=True, activation='leaky_relu', leaky_relu_slope=0.01,
-        upper_lipschitz_bound=1.0, num_heads=1, teleportation_probability=0.1, diffusion_iterations=3):
-        """ Builds a general GNN with a specified layer type. 
-        
-        Parameters:
-        -----------
-        layer_type : ('gcn', 'gat', 'gin', 'appnp', 'mlp', 'sage')
-            Which layer to use in the GNN.
-        input_dim : int
-            Number of input features.
-        layer_dims : iterable of ints
-            Each value depicts a hidden layer.
-        num_classes : int
-            How many output classes to give.
-        use_bias : bool
-            If layers have bias.
-        use_spectral_norm : bool
-            If spectral normalization is applied to the weights of each layer.
-        activation : ('relu', 'leaky_relu')
-            Activation function after each layer.
-        leaky_relu_slope : float
-            Slope of the leaky relu if used.
-        upper_lipschitz_bound : float
-            If spectral normalization is used, re-scales the weight matrix. This induces a new upper_lipschitz_bound.
-        num_heads : int
-            How many heads are used for multi-head convolutions like GAT.
-        teleportation_probability : float
-            Probability of teleportation in APPNP.
-        diffusion_iterations : int
-            How many diffusion iterations are used to approximate PPR in APPNP.
-        """
+    def __init__(self, input_dim, num_classes, hidden_dims, activation=F.leaky_relu, 
+                    use_bias=True, use_spectral_norm=True, weight_scale=1.0, cached=True,):
         super().__init__()
-        all_dims = [input_dim] + list(layer_dims) + [num_classes]
-        self.use_spectral_norm = use_spectral_norm
-        self.use_bias = use_bias
         self.activation = activation
-        self.layer_type = layer_type
-        self.leaky_relu_slope = leaky_relu_slope
-        self.upper_lipschitz_bound = upper_lipschitz_bound
-        self.num_heads = num_heads
-        self.teleportation_probability = teleportation_probability
-        self.diffusion_iterations = diffusion_iterations
 
-        if self.layer_type == 'gcn':
-            make_layer = lambda in_dim, out_dim: GCNConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm, 
-                upper_lipschitz_bound=self.upper_lipschitz_bound)
-        elif self.layer_type == 'gat':
-            make_layer = lambda in_dim, out_dim: GATConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm, 
-                upper_lipschitz_bound=self.upper_lipschitz_bound, num_heads = self.num_heads)
-        elif self.layer_type == 'sage':
-            make_layer = lambda in_dim, out_dim: SAGEConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm, 
-                upper_lipschitz_bound=self.upper_lipschitz_bound,)
-        elif self.layer_type == 'appnp': # A bit hacky, since technically this isn't a layer.
-            # A MLP is used to preprocess the features.
-            make_layer = lambda in_dim, out_dim: LinearWithSpectralNormaliatzion(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm,
-                upper_lipschitz_bound=self.upper_lipschitz_bound)
-            self.appnp = torch_geometric.nn.APPNP(self.diffusion_iterations, self.teleportation_probability, cached=True)
-        elif self.layer_type == 'mlp':
-            make_layer = lambda in_dim, out_dim: LinearWithSpectralNormaliatzion(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm,
-                upper_lipschitz_bound=self.upper_lipschitz_bound)
-        elif self.layer_type == 'gin':
-            make_layer = lambda in_dim, out_dim: GINConv(in_dim, out_dim, use_bias=self.use_bias, use_spectral_norm=self.use_spectral_norm,
-                upper_lipschitz_bound=self.upper_lipschitz_bound,)
-        else:
-            raise RuntimeError(f'Unsupported layer type {self.layer_type}')
-        self.layers = torch.nn.ModuleList([
-            make_layer(in_dim, out_dim) for in_dim, out_dim in zip(all_dims[:-1], all_dims[1:])
-        ])
+        self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, torch_geometric.nn.GCNConv,
+                                                cached=cached, bias=use_bias)
+        if use_spectral_norm:
+            for layer in self.convs:
+                layer.lin = spectral_norm(layer.lin, name='weight', rescaling=weight_scale)
 
-    def forward(self, x, edge_index):
-        """ Forward pass through the network. 
-        
-        Parameters:
-        -----------
-        x : torch.Tensor, shape [N, input_dim]
-            Attribute matrix for vertices.
-        edge_index : torch.Tensor, shape [2, E]
-            Edge indices for the graph.
-        
-        Returns:
-        --------
-        embeddings : list
-            Embeddings after each layer in the network.
-            Note that embeddings[-1] are the model logits.
-        """
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
         embeddings = []
-        for num, layer in enumerate(self.layers):
+        for num, layer in enumerate(self.convs):
             x = layer(x, edge_index)
-            if num < len(self.layers) - 1:
-                if self.activation == 'leaky_relu':
-                    x = F.leaky_relu(x, negative_slope=self.leaky_relu_slope)
-                elif self.activation == 'relu':
-                    x = F.relu(x)
-                else:
-                    raise RuntimeError(f'Unsupported activation type {self.activation}')
-            embeddings.append(x)
-        if self.layer_type == 'appnp':
-            x = self.appnp(x, edge_index)
+            if num < len(self.convs) - 1:
+                x = self.activation(x)
             embeddings.append(x)
         return embeddings
 
-if __name__ == '__main__':
-    model = GNN('gcn', 10, [16, 16], 3, use_spectral_norm=True)
-    x_test = torch.rand([4, 10])
-    edge_index = torch.tensor([[0, 1, 2, 3, 1, 2, 3], [1, 2, 3, 0, 0, 0, 1]])
-    print(model(x_test, edge_index))
+class GAT(nn.Module):
+    """ Graph Attention Network """
+
+    def __init__(self, input_dim, num_classes, hidden_dims, num_heads, activation=F.leaky_relu, 
+                    use_bias=True, use_spectral_norm=True, weight_scale=1.0,):
+        super().__init__()
+        self.activation = activation
+
+        self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, torch_geometric.nn.GATConv, num_heads,
+                                                bias=use_bias, concat=False)
+        if use_spectral_norm:
+            for layer in self.convs:
+                layer.lin_src = spectral_norm(layer.lin_src, name='weight', rescaling=weight_scale)
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        embeddings = []
+        for num, layer in enumerate(self.convs):
+            x = layer(x, edge_index)
+            if num < len(self.convs) - 1:
+                x = self.activation(x)
+            embeddings.append(x)
+        return embeddings
+
+class GraphSAGE(nn.Module):
+    """ GraphSAGE network. """
+
+    def __init__(self, input_dim, num_classes, hidden_dims, activation=F.leaky_relu, 
+                    use_bias=True, use_spectral_norm=True, weight_scale=1.0, normalize=False):
+        super().__init__()
+        self.activation = activation
+
+        self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, torch_geometric.nn.SAGEConv,
+                                                bias=use_bias, normalize=normalize)
+        if use_spectral_norm:
+            for layer in self.convs:
+                layer.lin_l = spectral_norm(layer.lin_l, name='weight', rescaling=weight_scale)
+                layer.lin_r = spectral_norm(layer.lin_r, name='weight', rescaling=weight_scale)
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        embeddings = []
+        for num, layer in enumerate(self.convs):
+            x = layer(x, edge_index)
+            if num < len(self.convs) - 1:
+                x = self.activation(x)
+            embeddings.append(x)
+        return embeddings
+
+class GIN(nn.Module):
+    """ GIN network. """
+
+    def __init__(self, input_dim, num_classes, hidden_dims, activation=F.leaky_relu, 
+                    use_bias=True, use_spectral_norm=True, weight_scale=1.0):
+        super().__init__()
+        self.activation = activation
+
+        # Helper to build a GIN layer with spectral norm applied to its feature transformation module (single linear layer)
+        def GINConv_with_spectral_norm(in_dim, out_dim, bias=True, use_spectral_norm=True, weight_scale=1.0):
+            linear = LinearWithSpectralNormaliatzion(in_dim, out_dim, use_bias=bias, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale)
+            return torch_geometric.nn.GINConv(linear)
+
+        self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, GINConv_with_spectral_norm,
+                                                bias=use_bias, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale)
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        embeddings = []
+        for num, layer in enumerate(self.convs):
+            x = layer(x, edge_index)
+            if num < len(self.convs) - 1:
+                x = self.activation(x)
+            embeddings.append(x)
+        return embeddings
+
+
+class MLP(nn.Module):
+    """ MLP on features. """
+
+    def __init__(self, input_dim, num_classes, hidden_dims, activation=F.leaky_relu, 
+                    use_bias=True, use_spectral_norm=True, weight_scale=1.0):
+        super().__init__()
+        self.activation = activation
+
+        self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, LinearWithSpectralNormaliatzion,
+                                                use_bias=use_bias, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale)
+
+    def forward(self, data):
+        x = data.x
+        embeddings = []
+        for num, layer in enumerate(self.convs):
+            x = layer(x)
+            if num < len(self.convs) - 1:
+                x = self.activation(x)
+            embeddings.append(x)
+        return embeddings
+
+class APPNP(nn.Module):
+    """ Approximate Page Rank diffusion after MLP feature transformation. """
+
+    def __init__(self, input_dim, num_classes, hidden_dims, activation=F.leaky_relu, 
+                    use_bias=True, use_spectral_norm=True, weight_scale=1.0, 
+                    diffusion_iterations=2, teleportation_probability=0.1, cached=True):
+        super().__init__()
+        self.activation = activation
+
+        self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, LinearWithSpectralNormaliatzion,
+                                                use_bias=use_bias, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale,)
+        self.appnp = torch_geometric.nn.APPNP(diffusion_iterations, teleportation_probability, cached=cached)
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        embeddings = []
+        for num, layer in enumerate(self.convs):
+            x = layer(x)
+            if num < len(self.convs) - 1:
+                x = self.activation(x)
+            embeddings.append(x)
+
+        # Diffusion
+        x = self.appnp(x, edge_index)
+        embeddings.append(x)
+
+        return embeddings
+
+def make_activation_by_configuration(configuration):
+    """ Makes the activation function form a configuration dict. """
+    if configuration['activation'] == 'leaky_relu':
+        return nn.LeakyReLU()
+    elif configuration['activation'] == 'relu':
+        return nn.ReLU()
+    else:
+        raise RuntimeError(f'Unsupported activation function {configuration["activation"]}')
+
+def make_model_by_configuration(configuration, input_dim, output_dim):
+    """ Makes a gnn model function form a configuration dict. """
+    if configuration['model_type'] == 'gcn':
+        return GCN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
+            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
+            cached=True)
+    elif configuration['model_type'] == 'gat':
+        return GAT(input_dim, output_dim, configuration['hidden_sizes'], configuration['num_heads'], make_activation_by_configuration(configuration), 
+            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
+    elif configuration['model_type'] == 'sage':
+        return GraphSAGE(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
+            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
+            normalize=configuration['normalize'])
+    elif configuration['model_type'] == 'gin':
+        return GIN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
+            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
+    elif configuration['model_type'] == 'mlp':
+        return MLP(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
+            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
+    elif configuration['model_type'] == 'appnp':
+        return APPNP(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
+            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
+            diffusion_iterations=configuration['diffusion_iterations'], teleportation_probability=configuration['teleportation_probability'],)
+    else:
+        raise RuntimeError(f'Unsupported model type {configuration["model_type"]}')
+        

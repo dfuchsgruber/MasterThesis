@@ -5,6 +5,7 @@ from collections import defaultdict
 from warnings import warn
 from torch_geometric.data import Dataset, Data
 import gust.datasets
+import pytorch_lightning as pl
 
 class GustDataset(Dataset):
     """ Dataset derived from the gust library. """
@@ -45,7 +46,7 @@ class GustDataset(Dataset):
             label_to_idx = {label : idx for idx, label in enumerate(sparse_graph.class_names)}
         else:
             label_to_idx = {f'class_{idx}' : idx for idx in set(y)}
-        data = Data(x=torch.tensor(x), y=torch.tensor(y), edge_index=torch.tensor(edge_index))
+        data = Data(x=torch.tensor(x), y=torch.tensor(y), edge_index=torch.tensor(edge_index, dtype=torch.int64))
         data.vertex_to_idx = vertex_to_idx
         data.label_to_idx = label_to_idx
         self.data = data
@@ -55,8 +56,9 @@ class GustDataset(Dataset):
         assert idx == 0, f'Gust {self.name} dataset has only one graph'
         return self.data
 
-    def __len__(self, idx):
+    def __len__(self):
         return 1
+
 
 if __name__ == '__main__':
     cora = GustDataset('cora_ml')[0]

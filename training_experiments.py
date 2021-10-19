@@ -5,12 +5,14 @@ import seml
 from collections import defaultdict
 import os.path as osp
 import os
+import json
 
 from model.train import train_model_semi_supervised_node_classification
 from model.gnn import GNN
 from data.gust_dataset import GustDataset
 from data.util import data_get_num_attributes, data_get_num_classes, stratified_split_with_fixed_test_set_portion
 from seed import model_seeds
+import mlflow
 
 ex = Experiment()
 seml.setup_logger(ex)
@@ -28,12 +30,11 @@ def config():
 
 class ExperimentWrapper:
 
-    def __init__(self, init_all=True, output_dir=None):
+    def __init__(self, init_all=True, collection_name=None, run_id=None):
         if init_all:
             self.init_all()
-        self.output_dir = output_dir
-        if self.output_dir is not None:
-            os.makedirs(self.output_dir, exist_ok=True)
+        self.collection_name = collection_name
+        self.run_id = run_id
 
     # With the prefix option we can "filter" the configuration for the sub-dictionary under "data".
     @ex.capture(prefix="data")
@@ -64,6 +65,10 @@ class ExperimentWrapper:
         self.optimization_config = {
             'learning_rate' : learning_rate
         }
+    
+    @ex.capture(prefix="logging")
+    def init_logging(self, mlflow_tracking_uri):
+        self.mlflow_tracking_uri = mlflow_tracking_uri
 
     def init_all(self):
         """
@@ -73,36 +78,45 @@ class ExperimentWrapper:
         self.init_model()
         self.init_optimizer()
 
+    def _mlflow_start_logging(self):
+        mlflow.set_tracking_uri(self.mlflow_tracking_uri)
+        mlflow.set_experiment(self.collection_name)
+
     @ex.capture(prefix="training")
     def train(self, early_stopping_patience, num_epochs):
 
-        result = defaultdict(list)
-        for split_idx in range(self.data_mask_split.shape[1]):
-            mask_train, mask_val = self.data_mask_split[0, split_idx], self.data_mask_split[1, split_idx]
-            for reinitialization, seed in enumerate(self.model_seeds):
-                torch.manual_seed(seed)
+        # Setup mlflow logging
+        with mlflow.start_run(run_name=self.run_id) as run:
+            result = defaultdict(list)
+            for split_idx in range(self.data_mask_split.shape[1]):
+                mask_train, mask_val = self.data_mask_split[0, split_idx], self.data_mask_split[1, split_idx]
+                for reinitialization, seed in enumerate(self.model_seeds):
+                    torch.manual_seed(seed)
 
-                model = GNN(self.model_config['type'], data_get_num_attributes(self.data), self.model_config['hidden_sizes'], 
-                            data_get_num_classes(self.data), use_spectral_norm=self.model_config['use_spectral_norm'],
-                            upper_lipschitz_bound=self.model_config['weight_scale'], num_heads=self.model_config['num_heads'], 
-                            diffusion_iterations=self.model_config['diffusion_iterations'], teleportation_probability=self.model_config['teleportation_probability'],
-                            use_bias=self.model_config['use_bias'], activation=self.model_config['activation'], leaky_relu_slope=self.model_config['leaky_relu_slope'],)
-                
-                if torch.cuda.is_available():
-                    model.cuda()
+                    model = GNN(self.model_config['type'], data_get_num_attributes(self.data), self.model_config['hidden_sizes'], 
+                                data_get_num_classes(self.data), use_spectral_norm=self.model_config['use_spectral_norm'],
+                                upper_lipschitz_bound=self.model_config['weight_scale'], num_heads=self.model_config['num_heads'], 
+                                diffusion_iterations=self.model_config['diffusion_iterations'], teleportation_probability=self.model_config['teleportation_probability'],
+                                use_bias=self.model_config['use_bias'], activation=self.model_config['activation'], leaky_relu_slope=self.model_config['leaky_relu_slope'],)
+                    
+                    if torch.cuda.is_available():
+                        model.cuda()
 
-                train_history, val_history, best_model_state_dict, best_epoch = train_model_semi_supervised_node_classification(model, self.data, 
-                    mask_train, mask_val, epochs=num_epochs, early_stopping_patience=early_stopping_patience,  
-                    early_stopping_metrics={'val_loss' : 'min'}, learning_rate=self.optimization_config['learning_rate'])
+                    train_history, val_history, best_model_state_dict, best_epoch = train_model_semi_supervised_node_classification(model, self.data, 
+                        mask_train, mask_val, epochs=num_epochs, early_stopping_patience=early_stopping_patience,  
+                        early_stopping_metrics={'val_loss' : 'min'}, learning_rate=self.optimization_config['learning_rate'])
 
-                for metric, history in val_history.items():
-                    # print(f'Val {metric} of best model {history[best_epoch]}')
-                    result[metric].append(history[best_epoch])
+                    for metric, history in val_history.items():
+                        # print(f'Val {metric} of best model {history[best_epoch]}')
+                        result[metric].append(history[best_epoch])
 
-                torch.save(best_model_state_dict, osp.join(self.output_dir, f'split_{split_idx}_reinitialization_{reinitialization}_model_epoch_{best_epoch}_state_dict.pt'))
-                result['best_epoch'].append(best_epoch)
+                    # torch.save(best_model_state_dict, osp.join(self.output_dir, f'split_{split_idx}_reinitialization_{reinitialization}_model_epoch_{best_epoch}_state_dict.pt'))
+                    result['best_epoch'].append(best_epoch)
 
-        return dict(result)
+            with open(osp.join(self.output_dir, 'results.json'), 'w+') as f:
+                json.dump({metric : values for metric, values in result.items()}, f)
+
+            return {f'{metric}_mean' : np.array(values).mean() for metric, values in result.items()}
 
 
 # We can call this command, e.g., from a Jupyter notebook with init_all=False to get an "empty" experiment wrapper,
@@ -121,5 +135,5 @@ def train(_config, experiment=None,):
     run_id = _config['overwrite']
     db_collection = _config['db_collection']
     if experiment is None:
-        experiment = ExperimentWrapper(output_dir=osp.join('..', 'artifacts', f'collection_{db_collection}_run_{run_id}'))
+        experiment = ExperimentWrapper(db_collection, run_id)
     return experiment.train()

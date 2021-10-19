@@ -1,7 +1,24 @@
 import numpy as np
 import scipy.sparse as sp
+from torch_geometric.data import Dataset
+import torch
 
 from seed import data_split_seeds
+
+class SplitDataset(Dataset):
+    """ Dataset wrapper after splitting. """
+
+    def __init__(self, data, mask):
+        self.data = data
+        self.mask = torch.tensor(mask)
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        data = self.data[idx]
+        data.mask = self.mask
+        return data
 
 def stratified_split_with_fixed_test_set_portion(ys, num_splits, portion_train=0.05, portion_val=0.15, portion_test_fixed=0.2, portion_test_not_fixed=0.6):
     """ Splits the dataset using a stratified strategy into training, validation and testing data.

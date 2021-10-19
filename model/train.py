@@ -76,7 +76,8 @@ class EarlyStopping:
         return self._should_stop
 
 def train_model_semi_supervised_node_classification(model, data, mask_train_idx, mask_val_idx, epochs=5, 
-        early_stopping_patience=10, early_stopping_metrics={'val_loss' : 'min', }, learning_rate=1e-3,):
+        early_stopping_patience=10, early_stopping_metrics={'val_loss' : 'min', }, learning_rate=1e-3,
+        log_metrics=lambda d: None):
     """ Trains the model for semi-supervised node classification on a graph.
     
     Parameters:
@@ -97,6 +98,8 @@ def train_model_semi_supervised_node_classification(model, data, mask_train_idx,
         Mapping from metrics to minitor to either 'max' (higher metric is better) or 'min' (lower metric is better).
     learning_rate : float
         Learning rate of the ADAM optimizer.
+    log_metrics : function
+        A function that is invoked whenever a metric is logged.
 
     Returns:
     --------
@@ -118,7 +121,7 @@ def train_model_semi_supervised_node_classification(model, data, mask_train_idx,
     criterion = nn.CrossEntropyLoss()
     monitor = EarlyStopping(early_stopping_patience, early_stopping_metrics)
 
-    metrics_train, metrics_val = defaultdict(list), defaultdict(list)
+    metrics = defaultdict(list)
     model.train()
     for epoch in range(epochs):
         optimizer.zero_grad()
@@ -130,6 +133,8 @@ def train_model_semi_supervised_node_classification(model, data, mask_train_idx,
 
         train_loss = loss.item()
         train_accuracy = accuracy(y_pred[mask_train_idx], y[mask_train_idx])
+        metrics = {'train.loss' : train_loss, 'train.accuracy' : train_accuracy}
+
         metrics_train['loss'].append(train_loss)
         metrics_train['accuracy'].append(train_accuracy)
 
