@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 from metrics import accuracy
 
 def _make_convolutions(input_dim, num_classes, hidden_dims, convolution_class, *args, **kwargs):
+    """ Makes convolutions from a class and a set of input, hidden and output dimensions. """
     all_dims = [input_dim] + list(hidden_dims) + [num_classes]
     convs = []
     return nn.ModuleList([
@@ -125,7 +126,6 @@ class GIN(nn.Module):
             embeddings.append(x)
         return embeddings
 
-
 class MLP(nn.Module):
     """ MLP on features. """
 
@@ -185,7 +185,22 @@ def make_activation_by_configuration(configuration):
         raise RuntimeError(f'Unsupported activation function {configuration["activation"]}')
 
 def make_model_by_configuration(configuration, input_dim, output_dim):
-    """ Makes a gnn model function form a configuration dict. """
+    """ Makes a gnn model function form a configuration dict. 
+    
+    Parameters:
+    -----------
+    configuration : dict
+        Configuration of the model to make.
+    input_dim : int
+        Dimensionality of feature space the model works on.
+    output_dim : int
+        Output dimensionality (e.g. number of classes) the model produces.
+    
+    Returns:
+    --------
+    model : torch.nn.Module
+        A torch model that takes a torch_geometric.data.Batch as an input and outputs a list that correpsond to embeddings in all layers.
+    """
     if configuration['model_type'] == 'gcn':
         return GCN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
             use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],

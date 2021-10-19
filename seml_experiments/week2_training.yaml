@@ -54,9 +54,9 @@
 
 
 seml:
-  executable: training_experiments.py
-  name: week2_training
-  output_dir: nfs/students/fuchsgru/seml_output/week2_training
+  executable: training_semi_supervised_node_classification.py
+  name: week2_test_training
+  output_dir: /nfs/students/fuchsgru/seml_output/week2_training
   project_root_dir: ..
 
 slurm:
@@ -71,8 +71,12 @@ slurm:
 ###### BEGIN PARAMETER CONFIGURATION ######
 
 fixed:
-  training.early_stopping_patience: 100
-  training.num_epochs: 10000
+  training.early_stopping.patience: 100
+  training.early_stopping.mode: min
+  training.early_stopping.monitor: val_loss
+  training.early_stopping.min_delta: 1e-3
+  training.max_epochs: 10000
+  training.gpus: 1
   data.num_dataset_splits : 10
   data.train_portion : 0.05
   data.val_portion : 0.15
@@ -83,10 +87,9 @@ fixed:
   model.use_bias: true
   model.activation: leaky_relu
   model.leaky_relu_slope: 0.01
-  logging.mlflow_tracking_uri: /nfs/students/fuchsgru/mlflow 
 
 grid:
-  optimization.learning_rate:
+  training.learning_rate:
     type: loguniform
     min: 1e-3
     max: 1e-2
@@ -108,7 +111,11 @@ grid:
       type: choice
       options:
         - true
-      #  - false
+        # - false
+
+gcn:
+  fixed:
+    model.model_type: gcn
 gat:
   fixed:
     model.model_type: gat
@@ -116,10 +123,8 @@ gat:
     model.num_heads:
       type: choice
       options:
+        - 2
         - 8
-gcn:
-  fixed:
-    model.model_type: gcn
 gin:
   fixed:
     model.model_type: gin
