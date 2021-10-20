@@ -126,6 +126,7 @@ cora_ml-sage:
     model.model_type: sage
     training.learning_rate: 0.003
     model.hidden_sizes: [64]
+    model.normalize: True
 
 
 cora_ml-mlp:
@@ -177,6 +178,7 @@ citeseer-sage:
     model.model_type: sage
     training.learning_rate: 0.010
     model.hidden_sizes: [64]
+    model.normalize: True
 
 
 citeseer-mlp:
@@ -228,6 +230,7 @@ pubmed-sage:
     model.model_type: sage
     training.learning_rate: 0.010
     model.hidden_sizes: [64]
+    model.normalize: True
 
 
 pubmed-mlp:

@@ -62,7 +62,7 @@ class ExperimentWrapper:
 
     @ex.capture(prefix="model")
     def init_model(self, model_type: str, hidden_sizes: list, weight_scale: float, num_initializations: int, use_spectral_norm: bool, num_heads=-1, 
-        diffusion_iterations=5, teleportation_probability=0.1, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01):
+        diffusion_iterations=5, teleportation_probability=0.1, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01, normalize=True):
         self.model_config = {
             'hidden_sizes' : hidden_sizes,
             'weight_scale' : weight_scale,
@@ -74,6 +74,7 @@ class ExperimentWrapper:
             'use_bias' : use_bias,
             'activation' : activation,
             'leaky_relu_slope' : leaky_relu_slope,
+            'normalize' : normalize,
         }
         self.model_seeds = model_seeds(num_initializations, model_name=model_type)
 
