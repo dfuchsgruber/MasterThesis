@@ -46,7 +46,7 @@ class GustDataset(Dataset):
             label_to_idx = {label : idx for idx, label in enumerate(sparse_graph.class_names)}
         else:
             label_to_idx = {f'class_{idx}' : idx for idx in set(y)}
-        data = Data(x=torch.tensor(x), y=torch.tensor(y), edge_index=torch.tensor(edge_index, dtype=torch.int64))
+        data = Data(x=torch.tensor(x), y=torch.tensor(y, dtype=torch.int64), edge_index=torch.tensor(edge_index, dtype=torch.int64))
         data.vertex_to_idx = vertex_to_idx
         data.label_to_idx = label_to_idx
         self.data = data
