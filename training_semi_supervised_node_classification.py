@@ -116,20 +116,6 @@ class ExperimentWrapper:
                     'split_idx' : split_idx,
                     }
                 )
-                # logger = WandbLogger(project=self.collection_name, name=f'{self.run_id}-{split_idx}-{reinitialization}')
-                # logger.experiment.config.update({
-                #     'model' : self.model_config,
-                #     'data' : self.data_config,
-                #     'training' : {
-                #         'max_epochs' : max_epochs,
-                #         'learning_rate' : learning_rate,
-                #         'early_stopping' : early_stopping,
-                #         'gpus' : gpus,
-                #     },
-                #     'seed' : seed,
-                #     'initialization_idx' : reinitialization,
-                #     'split_idx' : split_idx,
-                # }, allow_val_change=True)
 
                 with suppress_stdout(), warnings.catch_warnings():
                     warnings.filterwarnings("ignore")

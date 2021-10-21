@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import os, sys
+import torch
 
 @contextmanager
 def suppress_stdout():
