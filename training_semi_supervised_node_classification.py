@@ -20,6 +20,7 @@ from seed import model_seeds
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from evaluation.pipeline import Pipeline
 
 os.environ['WANDB_START_METHOD'] = 'thread'
 
@@ -82,6 +83,16 @@ class ExperimentWrapper:
         """ Sequentially run the sub-initializers of the experiment. """
         self.init_dataset()
         self.init_model()
+        self.init_evaluation()
+
+    @ex.capture(prefix='evaluation')
+    def init_evaluation(self, pipeline: list, perturbations = {}):
+        self.evaluation_config = {
+            'pipeline' : pipeline,
+        }
+        if len(perturbations) > 0:
+            self.evaluation_config['perturbations'] = perturbations
+
 
     @ex.capture(prefix="training")
     def train(self, max_epochs, learning_rate, early_stopping, gpus):
@@ -105,6 +116,7 @@ class ExperimentWrapper:
                 logger.log_hyperparams({
                     'model' : self.model_config,
                     'data' : self.data_config,
+                    'evaluation' : self.evaluation_config,
                     'training' : {
                         'max_epochs' : max_epochs,
                         'learning_rate' : learning_rate,
@@ -143,6 +155,9 @@ class ExperimentWrapper:
                     for val_metric in val_metrics:
                         for metric, value in val_metric.items():
                             result[metric].append(value)
+
+                pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus)
+                pipeline(model, data_loader_train, data_loader_val, logger)
 
         with open(osp.join(artifact_dir, 'metrics.json'), 'w+') as f:
             json.dump({metric : values for metric, values in result.items()}, f)

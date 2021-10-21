@@ -46,7 +46,7 @@ def logit_space_bounds(model, dataset):
     max : torch.tensor, shape [num_classes]
         Maximal values in logit space
     """
-    logits = model(dataset[0])[-1][dataset[0].mask]
+    logits = model(dataset)[-1][dataset.mask]
     mins, maxs = logits.min(dim=0)[0], logits.max(dim=0)[0]
     for idx in range(1, len(dataset)):
         logits = model(dataset[idx])[-1][dataset[idx].mask]
@@ -64,7 +64,7 @@ def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50),
     model : torch.nn.Module
         The model to check
     dataset : torch_geometric.data.Dataset
-        The dataset to investigate. Currently, only dataset[0] is used.
+        The dataset to investigate. Currently, only dataset is used.
     perturbations : iterable
         Different magnitudes of noise to check.
     num_perturbations_per_sample : int
@@ -75,21 +75,23 @@ def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50),
     Returns:
     --------
     perturbations : dict
-        Mapping from input_perturbations -> `len(dataset[0]) * num_perturbations_per_sample` output perturbations.
+        Mapping from input_perturbations -> `num_nodes * num_perturbations_per_sample` output perturbations.
     """
     if seed is not None:
         torch.manual_seed(seed)
-    logits = model(dataset[0])[-1]
+    logits = model(dataset)[-1]
+    logits = logits[dataset.mask]
     result = {}
     for eps in perturbations:
         results_eps = []
         for _ in range(num_perturbations_per_sample):
-            noise = torch.randn(list(dataset[0].x.size()))
+            noise = torch.randn(list(dataset.x[dataset.mask].size()), device=dataset.x.device)
             noise = noise / noise.norm(dim=-1, keepdim=True) * eps
-            x_perturbed = dataset[0].x + noise
-            data = Data(x=x_perturbed, edge_index=dataset[0].edge_index)
-            logits_perturbed = model(data)[-1]
-            results_eps.append((logits - logits_perturbed).norm(dim=1))
+            x_perturbed = dataset.x
+            x_perturbed[dataset.mask] += noise
+            data = Data(x=x_perturbed, edge_index=dataset.edge_index)
+            logits_perturbed = model(data)[-1][dataset.mask]
+            results_eps.append((logits - logits_perturbed).norm(dim=1).detach().cpu())
             
         result[eps] = torch.cat(results_eps)
     return result

@@ -97,6 +97,8 @@ class GMMFeatureSpaceDensity(torch.nn.Module):
         density : torch.Tensor, shape [N]
             Density of the GMM at each feature point.
         """
+        if not self._fitted:
+            raise RuntimeError(f'GMM density was not fitted to any data!')
         density = torch.zeros(features.size(0))
         for label in self.coefs:
             density += self.coefs[label] * torch.exp(MultivariateNormal(self.means[label], scale_tril=self.trils[label]).log_prob(features))
