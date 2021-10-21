@@ -1,22 +1,26 @@
 import numpy as np
 import scipy.sparse as sp
-from torch_geometric.data import Dataset
+from torch_geometric.data import Dataset, Data
 import torch
+from data.gust_dataset import GustDataset
 
 from seed import data_split_seeds
 
 class SplitDataset(Dataset):
     """ Dataset wrapper after splitting. """
 
-    def __init__(self, data, mask):
-        self.data = data
+    def __init__(self, base_dataset, mask, copy_data=True):
+        self.copy_data = copy_data
+        self.base_dataset = base_dataset
         self.mask = torch.tensor(mask)
     
     def __len__(self):
-        return len(self.data)
+        return len(self.base_dataset)
     
     def __getitem__(self, idx):
-        data = self.data[idx]
+        data = self.base_dataset[idx]
+        if self.copy_data:
+            data = data.clone()
         data.mask = self.mask
         return data
 
@@ -53,7 +57,6 @@ def stratified_split_with_fixed_test_set_portion(ys, num_splits, portion_train=0
     mask = np.zeros((3, num_splits, ys.shape[0]), bool)
     mask[:, :, mask_non_fixed] = stratified_split(ys[mask_non_fixed], seeds[1:], sizes=np.array([portion_train, portion_val, portion_test_not_fixed]) / norm)
     return mask, mask_fixed
-
 
 def stratified_split(ys, seeds, sizes=[0.05, 0.15, 0.8]):
     """ Performs several splits of a dataset into index sets using a stratified strategy.
@@ -266,6 +269,37 @@ def graph_select_idxs(mask, x, edge_index, y, vertex_to_idx):
     idx_mapping = {idx_old : idx for idx, idx_old in enumerate(np.arange(N, dtype=int)[mask])}
     vertex_to_idx = {v : idx_mapping[idx] for v, idx in vertex_to_idx.items() if idx in idx_mapping}
     return x, edge_index, y, vertex_to_idx
+
+def _load_gust_data_from_configuration(config):
+    """ Helper to load and split gust datasets. """
+    data = GustDataset(config['dataset'])
+    mask, mask_test_fixed = stratified_split_with_fixed_test_set_portion(data[0].y.numpy(),  config['num_dataset_splits'],
+                                                           portion_train=config['train_portion'], 
+                                                           portion_val=config['val_portion'], 
+                                                           portion_test_fixed=config['test_portion_fixed'], 
+                                                           portion_test_not_fixed=config['test_portion'],
+                                                           )
+    return [tuple(SplitDataset(data, mask[type_idx, split_idx]) for type_idx in range(mask.shape[0])) for split_idx in range(mask.shape[1])], SplitDataset(data, mask_test_fixed)
+
+def load_data_from_configuration(config):
+    """ Loads datasets from a configuration and splits it according to the global split.
+    
+    Parameters:
+    -----------
+    config : dict
+        The configuration from which to load data from.
+    
+    Returns:
+    --------
+    data_list : list
+        A list of different data splits. Each element is 3-tuple of data_train, data_val, data_test.
+    data_test_fixed : torch_geometric.data.Dataset
+        Fixed test dataset that is consistent among all splits.
+    """
+    if config['dataset'].lower() in ('cora_ml', 'citeseer', 'pubmed'):
+        return _load_gust_data_from_configuration(config)
+    else:
+        raise RuntimeError(f'Unsupported dataset type {config["dataset"]}')
 
 if __name__ == '__main__':
     ys = np.array([0] * 100 + [1] * 150 + [2] * 250)
