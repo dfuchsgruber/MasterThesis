@@ -83,6 +83,7 @@ class GMMFeatureSpaceDensity(torch.nn.Module):
             self.coefs[name] = nn.Parameter((labels == label).sum() / labels.size()[0], requires_grad=False)
             self.means[name] = nn.Parameter(features[labels == label].mean(dim=0), requires_grad=False)
             self.trils[name] = nn.Parameter(torch.linalg.cholesky(cov(features[labels == label])), requires_grad=False)
+        self._fitted = True
     
     def forward(self, features):
         """ Gets the density at all feature points.
@@ -97,6 +98,9 @@ class GMMFeatureSpaceDensity(torch.nn.Module):
         density : torch.Tensor, shape [N]
             Density of the GMM at each feature point.
         """
+        # print(features.device)
+        # for name in self.coefs:
+        #     print(self.coefs[name].device, self.means[name].device, self.trils[name].device)
         if not self._fitted:
             raise RuntimeError(f'GMM density was not fitted to any data!')
         density = torch.zeros(features.size(0))

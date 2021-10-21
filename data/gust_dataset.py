@@ -29,7 +29,7 @@ class GustDataset(Dataset):
         """
         if transform is None:
             transform = IdentityTransform() # This way we can compose the transformations later on...
-        super().__init__(transform)
+        super().__init__(transform=transform)
         self.name = name
         self.make_undirected = make_undirected
         self.make_unweighted = make_unweighted
@@ -63,7 +63,7 @@ class GustDataset(Dataset):
     
     def __getitem__(self, idx):
         assert idx == 0, f'Gust {self.name} dataset has only one graph'
-        return self.data.clone() # Since tensors might be accessed and changed
+        return self.transform(self.data.clone()) # Since tensors might be accessed and changed
 
     def __len__(self):
         return 1

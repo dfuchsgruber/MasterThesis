@@ -20,6 +20,7 @@ class EvaluateEmpircalLowerLipschitzBounds:
         self.seed = None
         self.gpus = gpus
 
+    @torch.no_grad()
     def __call__(self, *args, **kwargs):
         assert len(kwargs['data_loader_val']) == 1, f'Empirical local lipschitz evaluation is currently only supported for semi-supervised tasks.'
         for dataset in kwargs['data_loader_val']:
@@ -29,18 +30,17 @@ class EvaluateEmpircalLowerLipschitzBounds:
             dataset = dataset.to('cuda') # A bit hacky, but short...7
             kwargs['model'] = kwargs['model'].to('cuda')
 
-
         perturbations = evaluation.lipschitz.local_perturbations(kwargs['model'], dataset,
             perturbations=np.linspace(self.min_perturbation, self.max_perturbation, self.num_perturbations),
             num_perturbations_per_sample=self.num_perturbations_per_sample, seed=self.seed)
         pipeline_log(f'Created {self.num_perturbations_per_sample} perturbations in linspace({self.min_perturbation:.2f}, {self.max_perturbation:.2f}, {self.num_perturbations}) for validation samples.')
         smean, smedian, smax, smin = evaluation.lipschitz.local_lipschitz_bounds(perturbations)
-        kwargs['logger'].log_metrics = {
+        kwargs['logger'].log_metrics({
             'slope_mean_perturbation' : smean,
             'slope_median_perturbation' : smedian,
             'slope_max_perturbation' : smax,
             'slope_min_perturbation' : smin,
-        }
+        })
         # Plot the perturbations and log it
         fig, _ , _, _ = plot.perturbations.local_perturbations_plot(perturbations)
         if isinstance(kwargs['logger'], TensorBoardLogger):
@@ -62,16 +62,14 @@ class FitLogitDensity:
             raise RuntimeError(f'Unsupported logit space density {density_type}')
         self.gpus = gpus
 
+    @torch.no_grad()
     def __call__(self, *args, **kwargs):
         assert len(kwargs['data_loader_train']) == 1 and len(kwargs['data_loader_val_all_classes']) == 1, f'Logit Space Density is currently only supported for semi-supervised tasks.'
         for data_train in kwargs['data_loader_train']:
             break # We just want the single dataset
-        for data_val in kwargs['data_loader_val_all_classes']:
-            break # We just want the single dataset
     
         if self.gpus > 0:
             data_train = data_train.to('cuda')
-            data_val = data_val.to('cuda')
             kwargs['model'] = kwargs['model'].to('cuda')
 
         logits = kwargs['model'](data_train)[-1][data_train.mask]
@@ -81,6 +79,70 @@ class FitLogitDensity:
         kwargs['logit_density'] = self.density
         pipeline_log(f'Fitted density of type {self.density_type} to training data logits.')
         return args, kwargs
+
+class EvaluateLogitDensity:
+    """ 
+    Pipeline member that evaluates the logit density at each sample in the validation set.
+    It also logs histograms and statistics.
+    """
+
+    name = 'EvaluateLogitDensity'
+
+    def __init__(self, gpus=0):
+        self.gpus = gpus
+    
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+        for data_val in kwargs['data_loader_val_all_classes']:
+            break # We just want the single dataset
+
+        if self.gpus > 0:
+            data_val = data_val.to('cuda')
+            kwargs['model'] = kwargs['model'].to('cuda')
+
+        logits = kwargs['model'](data_val)[-1][data_val.mask].cpu()
+        density = kwargs['logit_density'].cpu()(logits)
+        
+        # Log histograms and metrics label-wise
+        y = data_val.y[data_val.mask]
+        for label in torch.unique(y):
+            density_label = density[y == label]
+            if isinstance(kwargs['logger'], TensorBoardLogger):
+                kwargs['logger'].experiment.add_histogram(f'logit_density', density_label, global_step=label)
+            kwargs['logger'].log_metrics({
+                f'mean_logit_density' : density_label.mean(),
+                f'std_logit_density' : density_label.std(),
+                f'min_logit_density' : density_label.min(),
+                f'max_logit_density' : density_label.max(),
+                f'median_logit_density' : density_label.median(),
+            }, step=label)
+        pipeline_log(f'Evaluated logit density for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
+        return args, kwargs
+
+class LogLogits:
+    """ Pipeline member that logs the logits of the validation data. """
+
+    name = 'LogLogits'
+
+    def __init__(self, gpus=0):
+        self.gpus = gpus
+    
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+        for data_val in kwargs['data_loader_val_all_classes']:
+            break # We just want the single dataset
+
+        if self.gpus > 0:
+            data_val = data_val.to('cuda')
+            kwargs['model'] = kwargs['model'].to('cuda')
+
+        logits = kwargs['model'](data_val)[-1][data_val.mask].cpu()
+        if isinstance(kwargs['logger'], TensorBoardLogger):
+            kwargs['logger'].experiment.add_embedding(logits, tag='val_logits')
+        pipeline_log(f'Logged logits (size {logits.size()}) of entire validation dataset.')
+    
+        return args, kwargs
+
 
 # class SelectClassLabels:
 #     """ Pipeline element that selects only a set of class labels for a given dataset. """
@@ -127,6 +189,15 @@ class Pipeline:
                     density_type='gmm',
                     gpus = gpus,
                 ))
+            elif name.lower() == EvaluateLogitDensity.name.lower():
+                self.members.append(EvaluateLogitDensity(
+                    gpus=gpus,
+                ))
+            elif name.lower() == LogLogits.name.lower():
+                self.members.append(LogLogits(
+                    gpus=gpus,
+                ))
+
             # elif name.lower() == 'selectclasslabelstrain':
             #     self.members.append(SelectClassLabels(
             #         select_labels=config['select_class_labels_train'],

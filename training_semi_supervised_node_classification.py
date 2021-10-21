@@ -88,16 +88,14 @@ class ExperimentWrapper:
         self.init_evaluation()
 
     @ex.capture(prefix='evaluation')
-    def init_evaluation(self, pipeline: list, perturbations = {}, select_class_labels_train=[], select_class_labels_val=[]):
+    def init_evaluation(self, pipeline=[], perturbations={}, select_class_labels_train='all', select_class_labels_val='all'):
         self.evaluation_config = {
             'pipeline' : pipeline,
+            'select_class_labels_train' : select_class_labels_train,
+            'select_class_labels_val' : select_class_labels_val,
         }
         if len(perturbations) > 0:
             self.evaluation_config['perturbations'] = perturbations
-        if len(select_class_labels_train) > 0:
-            self.evaluation_config['select_class_labels_train'] = select_class_labels_train
-        if len(select_class_labels_val) > 0:
-            self.evaluation_config['select_class_labels_val'] = select_class_labels_val
 
     @ex.capture(prefix="training")
     def train(self, max_epochs, learning_rate, early_stopping, gpus):
@@ -115,6 +113,8 @@ class ExperimentWrapper:
                 data_loader_train = DataLoader(data_train, batch_size=1, shuffle=False)
                 data_loader_val = DataLoader(data_val, batch_size=1, shuffle=False)
                 data_loader_val_all_classes = DataLoader(data_val_all_classes, batch_size=1, shuffle=False)
+
+                # print(data_train[0].mask.sum(), data_val[0].mask.sum(), data_val_all_classes[0].mask.sum())
 
                 backbone = make_model_by_configuration(self.model_config, data_get_num_attributes(data_train[0]), data_get_num_classes(data_train[0]))
                 model = SemiSupervisedNodeClassification(backbone, learning_rate=learning_rate)

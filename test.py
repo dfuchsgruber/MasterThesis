@@ -23,10 +23,10 @@ from training_semi_supervised_node_classification import ExperimentWrapper
 
 
 ex = ExperimentWrapper(init_all=False, collection_name='tests', run_id='1')
-ex.init_dataset(dataset='cora_ml', num_dataset_splits=1, train_portion=0.5, val_portion=0.15, test_portion=0.6, test_portion_fixed=0.2,
-                    train_labels=[0, 1], val_labels=[2, 3, 4, 5, 6])
+ex.init_dataset(dataset='cora_ml', num_dataset_splits=1, train_portion=0.05, val_portion=0.15, test_portion=0.6, test_portion_fixed=0.2,
+                    train_labels=[2, 3], val_labels='all')
 ex.init_model(model_type='gcn', hidden_sizes=[64], num_initializations=1, weight_scale=5.0, use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01)
-ex.init_evaluation(pipeline=['EvaluateEmpircalLowerLipschitzBounds', 'FitLogitDensityGMM'], 
+ex.init_evaluation(pipeline=['EvaluateEmpircalLowerLipschitzBounds', 'FitLogitDensityGMM', 'EvaluateLogitDensity', 'LogLogits'], 
     perturbations = {
         'num' : 2,
         'min' : 0.1,

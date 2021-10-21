@@ -8,28 +8,6 @@ from data.gust_dataset import GustDataset
 
 from seed import data_split_seeds
 
-# class SplitDataset(Dataset):
-#     """ Dataset wrapper after splitting. """
-
-#     def __init__(self, base_dataset, mask, copy_data=True):
-#         self.copy_data = copy_data
-#         self.base_dataset = base_dataset
-#         self.mask = torch.tensor(mask)
-    
-#     def __len__(self):
-#         return len(self.base_dataset)
-    
-#     def __getitem__(self, idx):
-#         data = self.base_dataset[idx]
-#         if self.copy_data:
-#             data = data.clone()
-#         data.mask = self.mask
-#         return data
-
-
-
-
-
 def stratified_split_with_fixed_test_set_portion(ys, num_splits, portion_train=0.05, portion_val=0.15, portion_test_fixed=0.2, portion_test_not_fixed=0.6):
     """ Splits the dataset using a stratified strategy into training, validation and testing data.
     A certain portion of the testing data will be fixed and shared among all splits.
@@ -57,6 +35,7 @@ def stratified_split_with_fixed_test_set_portion(ys, num_splits, portion_train=0
         Mask for test data that is fixed among all splits.
     """
     seeds = data_split_seeds(num_splits + 1) # The first seed is used to fix the shared testing data
+    assert np.allclose(portion_train + portion_val + portion_test_not_fixed + portion_test_fixed, 1.0), f'Dataset splits dont add to 1.0'
     norm = portion_train + portion_val + portion_test_not_fixed
     mask_non_fixed, mask_fixed = stratified_split(ys, seeds[0:1], [norm, 1 - norm])[:, 0, :]
 
@@ -285,7 +264,6 @@ def _load_gust_data_from_configuration(config):
                                                            portion_test_fixed=config['test_portion_fixed'], 
                                                            portion_test_not_fixed=config['test_portion'],
                                                            )
-
     return [
         [GustDataset(config['dataset'], transform=MaskTransform(mask[type_idx, split_idx])) for type_idx in (0, 1, 1, 2)] for split_idx in range(mask.shape[1])
         ], GustDataset(config['dataset'], transform=MaskTransform(mask_test_fixed))
@@ -309,6 +287,7 @@ def load_data_from_configuration(config):
         data_list, dataset_fixed = _load_gust_data_from_configuration(config)
     else:
         raise RuntimeError(f'Unsupported dataset type {config["dataset"]}')
+
     if config.get('train_labels', 'all') != 'all':
         # Select only certain labels from training data
         print(f'Reducing train labels to {config["train_labels"]}')
