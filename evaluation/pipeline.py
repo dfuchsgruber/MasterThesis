@@ -138,7 +138,7 @@ class LogLogits:
 
         logits = kwargs['model'](data_val)[-1][data_val.mask].cpu()
         if isinstance(kwargs['logger'], TensorBoardLogger):
-            kwargs['logger'].experiment.add_embedding(logits, tag='val_logits')
+            kwargs['logger'].experiment.add_embedding(logits, tag='val_logits', metadata=data_val.y[data_val.mask].cpu().numpy())
         pipeline_log(f'Logged logits (size {logits.size()}) of entire validation dataset.')
     
         return args, kwargs

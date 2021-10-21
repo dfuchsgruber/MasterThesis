@@ -91,7 +91,10 @@ fixed:
   model.leaky_relu_slope: 0.01
 
   evaluation.pipeline: [EvaluateEmpircalLowerLipschitzBounds, FitLogitDensityGMM, EvaluateLogitDensity, LogLogits]
-
+  evaluation.perturbations.num: 20
+  evaluation.perturbations.min: 0.1
+  evaluation.perturbations.max: 10.0
+  evaluation.perturbations.num_per_sample: 5
 
 grid:
   model.use_spectral_norm:
@@ -103,7 +106,7 @@ grid:
 cora_ml-gcn:
   fixed:
     data.dataset: cora_ml
-    data.train_labels: [0, 1, 2, 3, 5]
+    data.train_labels: [0, 1, 2, 3, 4, 5]
     data.val_labels: all
     model.model_type: gcn
     model.hidden_sizes: [64]

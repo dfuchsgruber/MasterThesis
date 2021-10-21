@@ -88,11 +88,9 @@ class ExperimentWrapper:
         self.init_evaluation()
 
     @ex.capture(prefix='evaluation')
-    def init_evaluation(self, pipeline=[], perturbations={}, select_class_labels_train='all', select_class_labels_val='all'):
+    def init_evaluation(self, pipeline=[], perturbations={}):
         self.evaluation_config = {
             'pipeline' : pipeline,
-            'select_class_labels_train' : select_class_labels_train,
-            'select_class_labels_val' : select_class_labels_val,
         }
         if len(perturbations) > 0:
             self.evaluation_config['perturbations'] = perturbations
@@ -167,6 +165,7 @@ class ExperimentWrapper:
                             result[metric].append(value)
 
                 # Run evaluation pipeline
+                print(f'Executing pipeline {self.evaluation_config["pipeline"]}')
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus)
                 pipeline(
                     model=model, 
