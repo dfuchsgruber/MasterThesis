@@ -1,56 +1,34 @@
 import numpy as np
 import scipy.sparse as sp
 from torch_geometric.data import Dataset, Data
+from torch_geometric.transforms import BaseTransform, Compose
+from data.transform import MaskTransform, MaskLabelsTransform
 import torch
 from data.gust_dataset import GustDataset
 
 from seed import data_split_seeds
 
-class SplitDataset(Dataset):
-    """ Dataset wrapper after splitting. """
+# class SplitDataset(Dataset):
+#     """ Dataset wrapper after splitting. """
 
-    def __init__(self, base_dataset, mask, copy_data=True):
-        self.copy_data = copy_data
-        self.base_dataset = base_dataset
-        self.mask = torch.tensor(mask)
+#     def __init__(self, base_dataset, mask, copy_data=True):
+#         self.copy_data = copy_data
+#         self.base_dataset = base_dataset
+#         self.mask = torch.tensor(mask)
     
-    def __len__(self):
-        return len(self.base_dataset)
+#     def __len__(self):
+#         return len(self.base_dataset)
     
-    def __getitem__(self, idx):
-        data = self.base_dataset[idx]
-        if self.copy_data:
-            data = data.clone()
-        data.mask = self.mask
-        return data
+#     def __getitem__(self, idx):
+#         data = self.base_dataset[idx]
+#         if self.copy_data:
+#             data = data.clone()
+#         data.mask = self.mask
+#         return data
 
-class LabelMaskDataset(Dataset):
-    """ Dataset wrapper that only selects certain class labels in its mask. """
 
-    # TODO: If we remove say labels (1, 2), then the remaining labels will be (0, 3, 4, ...)
-    # This is a problem as we still would create logits for classes 1 and 2
-    # Compressing the labels will create inconsistencies in validation and testing data
-    # For now it is advised to assing labels (0, ... k) to training data only
-    # Possible solution: Some Dataset Wrapper that remaps labels to (0, ..., k)
-    def __init__(self, base_dataset, select_labels, copy_data=True):
-        self.copy_data = copy_data
-        self.base_dataset = base_dataset
-        self.select_labels = select_labels
 
-    def __len__(self):
-        return len(self.base_dataset)
 
-    def __getitem__(self, idx):
-        data = self.base_dataset[idx]
-        if self.copy_data:
-            data = data.clone()
-        # Assemble a new mask
-        mask = torch.zeros_like(data.mask, dtype=torch.bool)
-        for label in self.select_labels:
-            mask[data.y == label] = True
-        mask &= data.mask # Also respect the mask that the data already has
-        data.mask = mask
-        return data
 
 def stratified_split_with_fixed_test_set_portion(ys, num_splits, portion_train=0.05, portion_val=0.15, portion_test_fixed=0.2, portion_test_not_fixed=0.6):
     """ Splits the dataset using a stratified strategy into training, validation and testing data.
@@ -300,15 +278,17 @@ def graph_select_idxs(mask, x, edge_index, y, vertex_to_idx):
 
 def _load_gust_data_from_configuration(config):
     """ Helper to load and split gust datasets. """
-    data = GustDataset(config['dataset'])
-    mask, mask_test_fixed = stratified_split_with_fixed_test_set_portion(data[0].y.numpy(),  config['num_dataset_splits'],
+    base_data = GustDataset(config['dataset'])[0]
+    mask, mask_test_fixed = stratified_split_with_fixed_test_set_portion(base_data.y.numpy(),  config['num_dataset_splits'],
                                                            portion_train=config['train_portion'], 
                                                            portion_val=config['val_portion'], 
                                                            portion_test_fixed=config['test_portion_fixed'], 
                                                            portion_test_not_fixed=config['test_portion'],
                                                            )
 
-    return [[SplitDataset(data, mask[type_idx, split_idx]) for type_idx in (0, 1, 1, 2)] for split_idx in range(mask.shape[1])], SplitDataset(data, mask_test_fixed)
+    return [
+        [GustDataset(config['dataset'], transform=MaskTransform(mask[type_idx, split_idx])) for type_idx in (0, 1, 1, 2)] for split_idx in range(mask.shape[1])
+        ], GustDataset(config['dataset'], transform=MaskTransform(mask_test_fixed))
 
 def load_data_from_configuration(config):
     """ Loads datasets from a configuration and splits it according to the global split.
@@ -333,13 +313,13 @@ def load_data_from_configuration(config):
         # Select only certain labels from training data
         print(f'Reducing train labels to {config["train_labels"]}')
         for datasets in data_list:
-            datasets[0] = LabelMaskDataset(datasets[0], config['train_labels'])
-            datasets[1] = LabelMaskDataset(datasets[1], config['train_labels'])
+            datasets[0].transform = Compose([datasets[0].transform, MaskLabelsTransform(config['train_labels'])])
+            datasets[1].transform = Compose([datasets[1].transform, MaskLabelsTransform(config['train_labels'])])
     if config.get('val_labels', 'all') != 'all':
         # Select only certain labels from validation data
         print(f'Reducing val labels to {config["val_labels"]}')
         for datasets in data_list:
-            datasets[2] = LabelMaskDataset(datasets[2], config['val_labels'])
+            datasets[2].transform = Compose([datasets[2].transform, MaskLabelsTransform(config['val_labels'])])
     return data_list, dataset_fixed
 
 if __name__ == '__main__':

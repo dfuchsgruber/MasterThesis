@@ -9,7 +9,7 @@ from model.train import train_model_semi_supervised_node_classification
 from model.gnn import make_model_by_configuration
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
 from data.gust_dataset import GustDataset
-from data.util import data_get_num_attributes, data_get_num_classes, stratified_split_with_fixed_test_set_portion, SplitDataset
+from data.util import data_get_num_attributes, data_get_num_classes
 from seed import model_seeds
 from torch_geometric.loader import DataLoader
 import torch.nn.functional as F

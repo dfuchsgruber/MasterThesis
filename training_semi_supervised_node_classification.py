@@ -168,7 +168,13 @@ class ExperimentWrapper:
 
                 # Run evaluation pipeline
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus)
-                pipeline(model, data_loader_train, data_loader_val_all_classes, logger, data_loader_val_test_classes=data_loader_val)
+                pipeline(
+                    model=model, 
+                    data_loader_train=data_loader_train,
+                    data_loader_val=data_loader_val,
+                    data_loader_val_all_classes=data_loader_val_all_classes, 
+                    logger=logger,
+                    )
 
         with open(osp.join(artifact_dir, 'metrics.json'), 'w+') as f:
             json.dump({metric : values for metric, values in result.items()}, f)
