@@ -15,7 +15,7 @@ from model.train import train_model_semi_supervised_node_classification
 from model.gnn import make_model_by_configuration
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
 from data.gust_dataset import GustDataset
-from data.util import SplitDataset, data_get_num_attributes, data_get_num_classes, stratified_split_with_fixed_test_set_portion
+from data.util import data_get_num_attributes, data_get_num_classes, load_data_from_configuration
 from seed import model_seeds
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
@@ -48,18 +48,20 @@ class ExperimentWrapper:
 
     # With the prefix option we can "filter" the configuration for the sub-dictionary under "data".
     @ex.capture(prefix="data")
-    def init_dataset(self, dataset, num_dataset_splits, train_portion, val_portion, test_portion, test_portion_fixed):
-        self.data = GustDataset(dataset)
+    def init_dataset(self, dataset, num_dataset_splits, train_portion, val_portion, test_portion, test_portion_fixed,
+                        train_labels='all', val_labels='all'):
         self.data_config = {
             'dataset' : dataset,
             'num_dataset_splits' : num_dataset_splits,
             'train_portion' : train_portion,
             'val_portion' : val_portion,
             'test_portion' : test_portion,
-            'test_portion_fix' : test_portion_fixed,
+            'test_portion_fixed' : test_portion_fixed,
+            'train_labels' : train_labels,
+            'val_labels' : val_labels,
         }
-        self.data_mask_split, self.data_mask_test_fixed = stratified_split_with_fixed_test_set_portion(self.data[0].y.numpy(), num_dataset_splits, 
-            portion_train=train_portion, portion_val=val_portion, portion_test_fixed=test_portion_fixed, portion_test_not_fixed=test_portion)
+        # self.data_mask_split, self.data_mask_test_fixed = stratified_split_with_fixed_test_set_portion(self.data[0].y.numpy(), num_dataset_splits, 
+        #     portion_train=train_portion, portion_val=val_portion, portion_test_fixed=test_portion_fixed, portion_test_not_fixed=test_portion)
 
     @ex.capture(prefix="model")
     def init_model(self, model_type: str, hidden_sizes: list, weight_scale: float, num_initializations: int, use_spectral_norm: bool, num_heads=-1, 
@@ -86,31 +88,38 @@ class ExperimentWrapper:
         self.init_evaluation()
 
     @ex.capture(prefix='evaluation')
-    def init_evaluation(self, pipeline: list, perturbations = {}):
+    def init_evaluation(self, pipeline: list, perturbations = {}, select_class_labels_train=[], select_class_labels_val=[]):
         self.evaluation_config = {
             'pipeline' : pipeline,
         }
         if len(perturbations) > 0:
             self.evaluation_config['perturbations'] = perturbations
-
+        if len(select_class_labels_train) > 0:
+            self.evaluation_config['select_class_labels_train'] = select_class_labels_train
+        if len(select_class_labels_val) > 0:
+            self.evaluation_config['select_class_labels_val'] = select_class_labels_val
 
     @ex.capture(prefix="training")
     def train(self, max_epochs, learning_rate, early_stopping, gpus):
 
-        result = defaultdict(list)
-        for split_idx in range(self.data_mask_split.shape[1]):
-            mask_train, mask_val = self.data_mask_split[0, split_idx], self.data_mask_split[1, split_idx]
-            for reinitialization, seed in enumerate(self.model_seeds):
+        # Data loading
+        data_list, dataset_fixed = load_data_from_configuration(self.data_config)
 
+        # Iterating over all dataset splits
+        result = defaultdict(list)
+        for split_idx, (data_train, data_val, data_val_all_classes, data_test) in enumerate(data_list):
+
+            # Re-initializing the model multiple times to average over results
+            for reinitialization, seed in enumerate(self.model_seeds):
                 pl.seed_everything(seed)
-                data_loader_train = DataLoader(SplitDataset(self.data, mask_train), batch_size=1, shuffle=False)
-                data_loader_val = DataLoader(SplitDataset(self.data, mask_val), batch_size=1, shuffle=False)
-                
-                backbone = make_model_by_configuration(self.model_config, data_get_num_attributes(self.data[0]), data_get_num_classes(self.data[0]))
+                data_loader_train = DataLoader(data_train, batch_size=1, shuffle=False)
+                data_loader_val = DataLoader(data_val, batch_size=1, shuffle=False)
+                data_loader_val_all_classes = DataLoader(data_val_all_classes, batch_size=1, shuffle=False)
+
+                backbone = make_model_by_configuration(self.model_config, data_get_num_attributes(data_train[0]), data_get_num_classes(data_train[0]))
                 model = SemiSupervisedNodeClassification(backbone, learning_rate=learning_rate)
 
                 # Setup logging and checkpointing
-                
                 artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), str(self.run_id), f'{split_idx}-{reinitialization}')
                 logger = TensorBoardLogger(osp.join('/nfs/students/fuchsgru/tensorboard', str(self.collection_name), str(self.run_id)), name=f'{split_idx}-{reinitialization}')
                 logger.log_hyperparams({
@@ -129,6 +138,7 @@ class ExperimentWrapper:
                     }
                 )
 
+                # Model training
                 with suppress_stdout(), warnings.catch_warnings():
                     warnings.filterwarnings("ignore")
                     trainer = pl.Trainer(max_epochs=max_epochs, deterministic=True, callbacks=[
@@ -156,8 +166,9 @@ class ExperimentWrapper:
                         for metric, value in val_metric.items():
                             result[metric].append(value)
 
+                # Run evaluation pipeline
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus)
-                pipeline(model, data_loader_train, data_loader_val, logger)
+                pipeline(model, data_loader_train, data_loader_val_all_classes, logger, data_loader_val_test_classes=data_loader_val)
 
         with open(osp.join(artifact_dir, 'metrics.json'), 'w+') as f:
             json.dump({metric : values for metric, values in result.items()}, f)

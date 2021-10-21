@@ -25,7 +25,7 @@ def local_lipschitz_bounds(perturbations):
     ys = torch.stack(list(perturbations.values()))
     means, meds, maxs, mins = ys.mean(dim=-1), ys.median(dim=-1)[0].numpy(), ys.max(axis=-1)[0].numpy(), ys.min(axis=-1)[0].numpy()
 
-    return (means / xs).mean(), (meds / xs).mean(), (maxs / xs).mean(), (mins / xs).mean()
+    return (means / xs).mean(), (meds / xs).mean(), (maxs / xs).max(), (mins / xs).min()
 
 
 @torch.no_grad()

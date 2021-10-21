@@ -4,6 +4,9 @@ import evaluation.lipschitz
 import plot.perturbations
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from model.density import GMMFeatureSpaceDensity
+from torch_geometric.data import Dataset, Data
+from torch_geometric.loader import DataLoader
+from data.util import LabelMaskDataset
 
 class EvaluateEmpircalLowerLipschitzBounds:
     """ Pipeline element for evaluation of Lipschitz bounds. """
@@ -31,7 +34,7 @@ class EvaluateEmpircalLowerLipschitzBounds:
         perturbations = evaluation.lipschitz.local_perturbations(model, dataset,
             perturbations=np.linspace(self.min_perturbation, self.max_perturbation, self.num_perturbations),
             num_perturbations_per_sample=self.num_perturbations_per_sample, seed=self.seed)
-        print(f'Evaluation Pipeline - Created {self.num_perturbations_per_sample} perturbations in linspace({self.min_perturbation:.2f}, {self.max_perturbation:.2f}, {self.num_perturbations}) for validation samples.')
+        pipeline_log(f'Created {self.num_perturbations_per_sample} perturbations in linspace({self.min_perturbation:.2f}, {self.max_perturbation:.2f}, {self.num_perturbations}) for validation samples.')
         smean, smedian, smax, smin = evaluation.lipschitz.local_lipschitz_bounds(perturbations)
         logger.log_metrics = {
             'slope_mean_perturbation' : smean,
@@ -43,7 +46,7 @@ class EvaluateEmpircalLowerLipschitzBounds:
         fig, _ , _, _ = plot.perturbations.local_perturbations_plot(perturbations)
         if isinstance(logger, TensorBoardLogger):
             logger.experiment.add_figure('val_perturbations', fig)
-        print(f'Evaluation Pipeline - Logged input vs. output perturbation plot.')
+        pipeline_log(f'Logged input vs. output perturbation plot.')
         
         return (model, data_loader_train, data_loader_val, logger), kwargs
 
@@ -74,8 +77,35 @@ class FitLogitDensity:
 
         logits = model(data_train)[-1][data_train.mask]
         self.density.fit(logits, data_train.y[data_train.mask])
+        if 'logit_density' in kwargs:
+            pipeline_log('Density was already fit to logits, overwriting...')
         kwargs['logit_density'] = self.density
-        print(f'Evaluation Pipeline - Fitted density of type {self.density_type} to training data logits.')
+        pipeline_log(f'Fitted density of type {self.density_type} to training data logits.')
+        return (model, data_loader_train, data_loader_val, logger), kwargs
+
+class SelectClassLabels:
+    """ Pipeline element that selects only a set of class labels for a given dataset. """
+
+    name = 'SelectClassLabels'
+
+    def __init__(self, select_labels=(0,), dataset='train'):
+        self.select_labels = select_labels
+        self.mode = dataset
+    
+    def __call__(self, model, data_loader_train, data_loader_val, logger, **kwargs):
+        if self.mode == 'train':
+            dataset = data_loader_train.dataset
+            assert len(dataset) == 1, f'Select class labels is only supported for semi-supervised node classification.'
+            data_loader_train = DataLoader(LabelMaskDataset(dataset, select_labels=self.select_labels), batch_size=1, shuffle=False)
+        elif self.mode == 'val':
+            dataset = data_loader_val.dataset
+            assert len(dataset) == 1, f'Select class labels is only supported for semi-supervised node classification.'
+            data_loader_val = DataLoader(LabelMaskDataset(dataset, select_labels=self.select_labels), batch_size=1, shuffle=False)
+
+        num_train_unique = len(torch.unique(data_loader_train.dataset[0].y[data_loader_train.dataset[0].mask]))
+        num_val_unique = len(torch.unique(data_loader_val.dataset[0].y[data_loader_val.dataset[0].mask]))
+
+        data_loader_val(f'Selected class labels: Unique in train {num_train_unique}, unique in val {num_val_unique}.')
         return (model, data_loader_train, data_loader_val, logger), kwargs
 
 class Pipeline:
@@ -98,6 +128,17 @@ class Pipeline:
                     density_type='gmm',
                     gpus = gpus,
                 ))
+            elif name.lower() == 'selectclasslabelstrain':
+                self.members.append(SelectClassLabels(
+                    select_labels=config['select_class_labels_train'],
+                    dataset='train',
+                ))
+            elif name.lower() == 'selectclasslabelsval':
+                self.members.append(SelectClassLabels(
+                    select_labels=config['select_class_labels_val'],
+                    dataset='val',
+                ))
+
             else:
                 raise RuntimeError(f'Unrecognized evaluation pipeline member {name}')
 
@@ -105,3 +146,6 @@ class Pipeline:
         for member in self.members:
             args, kwargs = member(*args, **kwargs)
         return args, kwargs
+
+def pipeline_log(string):
+    print(f'EVALUATION PIPELINE - {string}')
