@@ -1,0 +1,50 @@
+import numpy as np
+import torch
+import os.path as osp
+from collections import defaultdict
+from warnings import warn
+from torch_geometric.data import Dataset, Data
+import gust.datasets
+from torch_geometric.transforms import Compose
+import pytorch_lightning as pl
+
+class SingleGraphDataset(Dataset):
+    """ Dataset that only consists of a single graph with vertex masks. 
+    Can be used for semi-supervised node classification. 
+    
+    Parameters:
+    -----------
+    x : ndarray, shape [N, D]
+        Attribute matrix.
+    edge_index : ndarray, shape [2, E]
+        Edge endpoints.
+    y : ndarray, shape [N]
+        Labels.
+    vertex_to_idx : dict
+        Mapping from vertex name to index.
+    label_to_idx : dict
+        Mapping from label name to index.
+    mask : ndarray, shape [N]
+        Vertices masked by this dataset.
+    transform : torch_geometric.transform.BaseTransform or None
+        Transformation to apply to the dataset. If `None` is given, the identity transformation is used.
+    """
+
+    def __init__(self, x, edge_index, y, vertex_to_idx, label_to_idx, mask, transform=None):
+
+        if transform is None:
+            transform = Compose([])
+        super().__init__(transform=transform)
+
+        self._data = Data(x=torch.tensor(x).float(), edge_index=torch.tensor(edge_index).long(),
+            y=torch.tensor(y).long(), mask=torch.tensor(mask).bool())
+        self._data.vertex_to_idx = vertex_to_idx
+        self._data.label_to_idx = label_to_idx
+    
+    def __len__(self):
+        return 1
+    
+    def __getitem__(self, idx):
+        assert idx == 0, f'ŚingleGraphDataset only has a single graph! (Trying to index with {idx}...)'
+        return self.transform(self._data.clone()) # This way we can apply in-place transforms
+    

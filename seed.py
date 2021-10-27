@@ -4,8 +4,8 @@ import numpy as np
 import zlib
 
 _SEED_UPPER_BOUND = 0x100000000 # Upper bound for seeds
-
 DATA_SPLIT_SEED = 1337 # Seed that affects data splitting
+MODEL_INIT_SEED = 1337 # Seed that affects model initialization
 
 def data_split_seeds(num):
     """ Returns `num` seed for data splitting.
@@ -22,8 +22,6 @@ def data_split_seeds(num):
     """
     rng = np.random.RandomState(DATA_SPLIT_SEED)
     return rng.randint(0, _SEED_UPPER_BOUND, num)
-
-MODEL_INIT_SEED = 1337 # Seed that affects model initialization
 
 def model_seeds(num, model_name=None):
     """ Returns `num` seed for model initialization.

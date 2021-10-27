@@ -55,9 +55,9 @@
 
 seml:
   executable: training_experiments.py
-  name: week1_training_lipschitz_normed_models
-  output_dir: ../seml_outputs/week1_training_lipschitz_normed_models
-  project_root_dir: ..
+  name: week1_no_model_logging
+  output_dir: ../seml_outputs/week1_no_model_logging
+  project_root_dir: ../..
 
 slurm:
   experiments_per_job: 1

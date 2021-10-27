@@ -15,7 +15,8 @@ from model.train import train_model_semi_supervised_node_classification
 from model.gnn import make_model_by_configuration
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
 from data.gust_dataset import GustDataset
-from data.util import data_get_num_attributes, data_get_num_classes, load_data_from_configuration
+from data.util import data_get_num_attributes, data_get_num_classes
+from data.construct import load_data_from_configuration
 from seed import model_seeds
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
@@ -49,7 +50,10 @@ class ExperimentWrapper:
     # With the prefix option we can "filter" the configuration for the sub-dictionary under "data".
     @ex.capture(prefix="data")
     def init_dataset(self, dataset, num_dataset_splits, train_portion, val_portion, test_portion, test_portion_fixed,
-                        train_labels='all', val_labels='all'):
+                        train_labels='all', train_labels_remove_other=False, train_labels_compress=True,
+                        val_labels='all', val_labels_remove_other=False, val_labels_compress=True,
+                        split_type='stratified',
+                        ):
         self.data_config = {
             'dataset' : dataset,
             'num_dataset_splits' : num_dataset_splits,
@@ -58,7 +62,12 @@ class ExperimentWrapper:
             'test_portion' : test_portion,
             'test_portion_fixed' : test_portion_fixed,
             'train_labels' : train_labels,
+            'train_labels_remove_other' : train_labels_remove_other,
+            'train_labels_compress' : train_labels_compress,
             'val_labels' : val_labels,
+            'val_labels_remove_other' : val_labels_remove_other,
+            'val_labels_compress' : val_labels_compress,
+            'split_type' : split_type,
         }
         # self.data_mask_split, self.data_mask_test_fixed = stratified_split_with_fixed_test_set_portion(self.data[0].y.numpy(), num_dataset_splits, 
         #     portion_train=train_portion, portion_val=val_portion, portion_test_fixed=test_portion_fixed, portion_test_not_fixed=test_portion)
@@ -119,8 +128,9 @@ class ExperimentWrapper:
 
                 # Setup logging and checkpointing
                 artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), str(self.run_id), f'{split_idx}-{reinitialization}')
+                os.makedirs(artifact_dir, exist_ok=True)
                 logger = TensorBoardLogger(osp.join('/nfs/students/fuchsgru/tensorboard', str(self.collection_name), str(self.run_id)), name=f'{split_idx}-{reinitialization}')
-                logger.log_hyperparams({
+                config = {
                     'model' : self.model_config,
                     'data' : self.data_config,
                     'evaluation' : self.evaluation_config,
@@ -134,7 +144,7 @@ class ExperimentWrapper:
                     'initialization_idx' : reinitialization,
                     'split_idx' : split_idx,
                     }
-                )
+                logger.log_hyperparams(config)
 
                 # Model training
                 with suppress_stdout(), warnings.catch_warnings():
@@ -160,9 +170,15 @@ class ExperimentWrapper:
                                         )
                     trainer.fit(model, data_loader_train, data_loader_val)
                     val_metrics = trainer.validate(None, data_loader_val, ckpt_path='best')
+
+                    with open(osp.join(artifact_dir, 'metrics.json'), 'w+') as f:
+                        json.dump(val_metrics, f)
+
                     for val_metric in val_metrics:
                         for metric, value in val_metric.items():
                             result[metric].append(value)
+
+                print(val_metrics)
 
                 # Run evaluation pipeline
                 print(f'Executing pipeline {self.evaluation_config["pipeline"]}')
@@ -173,8 +189,11 @@ class ExperimentWrapper:
                     data_loader_val=data_loader_val,
                     data_loader_val_all_classes=data_loader_val_all_classes, 
                     logger=logger,
-                    )
+                    config=config,
+                    artifact_directory=artifact_dir,
+                )
 
+        artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), str(self.run_id))
         with open(osp.join(artifact_dir, 'metrics.json'), 'w+') as f:
             json.dump({metric : values for metric, values in result.items()}, f)
 

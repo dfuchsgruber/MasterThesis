@@ -2,10 +2,44 @@ import numpy as np
 import torch
 import evaluation.lipschitz
 import plot.perturbations
+from plot.density import plot_2d_log_density, plot_log_density_histograms
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from model.density import GMMFeatureSpaceDensity
 from torch_geometric.data import Dataset, Data
 from torch_geometric.loader import DataLoader
+from sklearn.decomposition import PCA
+import os.path as osp
+
+def split_labels_into_id_and_ood(y, id_labels, ood_labels=None, id_label=0, ood_label=1):
+    """ Creates new labels that correspond to in-distribution and out-ouf-distribution.
+    
+    Paramters:
+    ----------
+    y : torch.tensor, shape [N]
+        Original class labels.
+    id_labels : iterable
+        All in-distribution labels.
+    ood_labels : iterable
+        All out-of-distribution labels or None. If None, it will be set to all labels in y that are not id.
+    id_label : int
+        The new label of id points.
+    ood_label : int
+        The new label of ood points.
+
+    Returns:
+    --------
+    y_new : torch.tensor, shape [N]
+        Labels corresponding to id and ood data.
+    """
+    if ood_labels is None:
+        ood_labels = set(torch.unique(y).tolist()) - set(id_labels)
+
+    y_new = torch.zeros_like(y)
+    for label in id_labels:
+        y_new[y == label] = id_label
+    for label in ood_labels:
+        y_new[y == label] = ood_label
+    return y_new
 
 class EvaluateEmpircalLowerLipschitzBounds:
     """ Pipeline element for evaluation of Lipschitz bounds. """
@@ -67,13 +101,27 @@ class FitLogitDensity:
         assert len(kwargs['data_loader_train']) == 1 and len(kwargs['data_loader_val_all_classes']) == 1, f'Logit Space Density is currently only supported for semi-supervised tasks.'
         for data_train in kwargs['data_loader_train']:
             break # We just want the single dataset
+        for data_val in kwargs['data_loader_val_all_classes']:
+            break
     
         if self.gpus > 0:
             data_train = data_train.to('cuda')
+            data_val = data_val.to('cuda')
             kwargs['model'] = kwargs['model'].to('cuda')
 
-        logits = kwargs['model'](data_train)[-1][data_train.mask]
-        self.density.fit(logits, data_train.y[data_train.mask])
+        logits = kwargs['model'](data_train)[-1][data_train.mask].cpu()
+        logits_val = kwargs['model'](data_val)[-1][data_val.mask].cpu()
+
+        torch.save({
+            'logits' : logits,
+            'labels' : data_train.y[data_train.mask].cpu(),
+        }, osp.join(kwargs['artifact_directory'], 'logits_train.pt'))
+        torch.save({
+            'logits' : logits_val,
+            'labels' : data_val.y[data_val.mask].cpu(),
+        }, osp.join(kwargs['artifact_directory'], 'logits_val_all_classes.pt'))
+
+        self.density.fit(logits, data_train.y[data_train.mask].cpu())
         if 'logit_density' in kwargs:
             pipeline_log('Density was already fit to logits, overwriting...')
         kwargs['logit_density'] = self.density
@@ -100,23 +148,70 @@ class EvaluateLogitDensity:
             data_val = data_val.to('cuda')
             kwargs['model'] = kwargs['model'].to('cuda')
 
-        logits = kwargs['model'](data_val)[-1][data_val.mask].cpu()
-        density = kwargs['logit_density'].cpu()(logits)
+        logits = kwargs['model'](data_val)[-1][data_val.mask]
+        density = kwargs['logit_density'](logits.cpu()).cpu()
         
         # Log histograms and metrics label-wise
         y = data_val.y[data_val.mask]
         for label in torch.unique(y):
-            density_label = density[y == label]
+            log_density_label = torch.log(density[y == label])
             if isinstance(kwargs['logger'], TensorBoardLogger):
-                kwargs['logger'].experiment.add_histogram(f'logit_density', density_label, global_step=label)
+                kwargs['logger'].experiment.add_histogram(f'logit_log_density', log_density_label, global_step=label)
             kwargs['logger'].log_metrics({
-                f'mean_logit_density' : density_label.mean(),
-                f'std_logit_density' : density_label.std(),
-                f'min_logit_density' : density_label.min(),
-                f'max_logit_density' : density_label.max(),
-                f'median_logit_density' : density_label.median(),
+                f'mean_logit_log_density' : log_density_label.mean(),
+                f'std_logit_log_density' : log_density_label.std(),
+                f'min_logit_log_density' : log_density_label.min(),
+                f'max_logit_log_density' : log_density_label.max(),
+                f'median_logit_log_density' : log_density_label.median(),
             }, step=label)
+        fig, ax = plot_log_density_histograms(torch.log(density.cpu()), y.cpu(), overlapping=False)
+        fig.savefig(osp.join(kwargs['artifact_directory'], 'logit_log_density_histograms_all_classes.pdf'))
         pipeline_log(f'Evaluated logit density for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
+
+        # Split into in-distribution and out-of-distribution
+        labels_id_ood = split_labels_into_id_and_ood(y.cpu(), set(kwargs['config']['data']['train_labels']), id_label=0, ood_label=1)
+        fig, ax = plot_log_density_histograms(torch.log(density.cpu()), labels_id_ood.cpu(), label_names={0 : 'id', 1 : 'ood'})
+        fig.savefig(osp.join(kwargs['artifact_directory'], 'logit_log_density_histograms_id_vs_ood.pdf'))
+
+        if logits.size()[1] == 2: # Plot logit densities in case of 2-d logit space
+            fig, ax = plot_2d_log_density(logits.cpu(), labels_id_ood.cpu(), kwargs['logit_density'], label_names={0 : 'id', 1 : 'ood'})
+            # if isinstance(kwargs['logger'], TensorBoardLogger):
+            #     kwargs['logger'].experiment.add_figure('logit_density', fig)
+            #     pipeline_log(f'Logged density plot for logit space.')
+            fig.savefig(osp.join(kwargs['artifact_directory'], 'logit_log_density_contour.pdf'))
+
+        return args, kwargs
+
+class FitLogitSpacePCA:
+    """ Fits PCA to the logit space using training and validation data. """
+
+    name = 'FitLogitSpacePCA'
+
+    def __init__(self, gpus=0):
+        self.gpus = gpus
+
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+        for data_train in kwargs['data_loader_train']:
+            break # We just want the single dataset
+        for data_val in kwargs['data_loader_val_all_classes']:
+            break # We just want the single dataset
+
+        if self.gpus > 0:
+            data_train = data_train.to('cuda')
+            data_val = data_val.to('cuda')
+            kwargs['model'] = kwargs['model'].to('cuda')
+
+        logits_train = kwargs['model'](data_train)[-1][data_train.mask].cpu().numpy()
+        logits_val = kwargs['model'](data_val)[-1][data_val.mask].cpu().numpy()
+        logits = np.concatenate([logits_train, logits_val], axis=0)
+
+        n_components = 2
+        pca = PCA(n_components=n_components)
+        pca.fit(logits)
+        pipeline_log(f'Fit logit space PCA with {n_components} components. Explained variance ratio {pca.explained_variance_ratio_}')
+        kwargs['logit_space_pca'] = pca
+
         return args, kwargs
 
 class LogLogits:
@@ -143,37 +238,12 @@ class LogLogits:
     
         return args, kwargs
 
-
-# class SelectClassLabels:
-#     """ Pipeline element that selects only a set of class labels for a given dataset. """
-
-#     name = 'SelectClassLabels'
-
-#     def __init__(self, select_labels=(0,), dataset='train'):
-#         self.select_labels = select_labels
-#         self.mode = dataset
-    
-#     def __call__(self, model, data_loader_train, data_loader_val, logger, **kwargs):
-#         if self.mode == 'train':
-#             dataset = data_loader_train.dataset
-#             assert len(dataset) == 1, f'Select class labels is only supported for semi-supervised node classification.'
-#             data_loader_train = DataLoader(LabelMaskDataset(dataset, select_labels=self.select_labels), batch_size=1, shuffle=False)
-#         elif self.mode == 'val':
-#             dataset = data_loader_val.dataset
-#             assert len(dataset) == 1, f'Select class labels is only supported for semi-supervised node classification.'
-#             data_loader_val = DataLoader(LabelMaskDataset(dataset, select_labels=self.select_labels), batch_size=1, shuffle=False)
-
-#         num_train_unique = len(torch.unique(data_loader_train.dataset[0].y[data_loader_train.dataset[0].mask]))
-#         num_val_unique = len(torch.unique(data_loader_val.dataset[0].y[data_loader_val.dataset[0].mask]))
-
-#         data_loader_val(f'Selected class labels: Unique in train {num_train_unique}, unique in val {num_val_unique}.')
-#         return (model, data_loader_train, data_loader_val, logger), kwargs
-
 class Pipeline:
     """ Pipeline for stuff to do after a model has been trained. """
 
-    def __init__(self, members: list, config: dict, gpus=0):
+    def __init__(self, members: list, config: dict, gpus=0, ignore_exceptions=False):
         self.members = []
+        self.ignore_exceptions = ignore_exceptions
         for name in members:
             if name.lower() == EvaluateEmpircalLowerLipschitzBounds.name.lower():
                 self.members.append(EvaluateEmpircalLowerLipschitzBounds(
@@ -197,24 +267,21 @@ class Pipeline:
                 self.members.append(LogLogits(
                     gpus=gpus,
                 ))
-
-            # elif name.lower() == 'selectclasslabelstrain':
-            #     self.members.append(SelectClassLabels(
-            #         select_labels=config['select_class_labels_train'],
-            #         dataset='train',
-            #     ))
-            # elif name.lower() == 'selectclasslabelsval':
-            #     self.members.append(SelectClassLabels(
-            #         select_labels=config['select_class_labels_val'],
-            #         dataset='val',
-            #     ))
-
+            elif name.lower() == FitLogitSpacePCA.name.lower():
+                self.members.append(FitLogitSpacePCA(
+                    gpus=gpus,
+                ))
             else:
                 raise RuntimeError(f'Unrecognized evaluation pipeline member {name}')
 
     def __call__(self, *args, **kwargs):
         for member in self.members:
-            args, kwargs = member(*args, **kwargs)
+            try:
+                args, kwargs = member(*args, **kwargs)
+            except Exception as e:
+                pipeline_log(f'{member.name} FAILED. Reason: "{e}"')
+                if not self.ignore_exceptions:
+                    raise e
         return args, kwargs
 
 def pipeline_log(string):

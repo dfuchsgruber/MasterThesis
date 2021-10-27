@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions.multivariate_normal import MultivariateNormal
+import scipy.stats
 
 def cov(x, rowvar=False, bias=False, ddof=None, aweights=None):
     """Estimates covariance matrix like numpy.cov
@@ -76,15 +77,23 @@ class GMMFeatureSpaceDensity(torch.nn.Module):
         self.components = {}
         self.coefs = nn.ParameterDict()
         self.means = nn.ParameterDict()
-        self.trils = nn.ParameterDict()
+        self.covs = nn.ParameterDict()
+
+        #self.trils = nn.ParameterDict()
         for label in torch.unique(labels):
+            if (labels == label).sum() < features.size()[1]:
+                raise RuntimeError(f'Not enough samples of class {label} ({(labels == label).sum()}) to estimate {features.size()[1]}-dimensional feature space covariance.')
+
             name = f'class_{label.item()}'
             # Save location and lower triangular covariance matrix to allow this module to have its state as state dict
             self.coefs[name] = nn.Parameter((labels == label).sum() / labels.size()[0], requires_grad=False)
             self.means[name] = nn.Parameter(features[labels == label].mean(dim=0), requires_grad=False)
-            self.trils[name] = nn.Parameter(torch.linalg.cholesky(cov(features[labels == label])), requires_grad=False)
+            # self.trils[name] = nn.Parameter(torch.linalg.cholesky(cov(features[labels == label])), requires_grad=False)
+            self.covs[name] = nn.Parameter(cov(features[labels == label]), requires_grad=False)
+
         self._fitted = True
     
+    @torch.no_grad()
     def forward(self, features):
         """ Gets the density at all feature points.
         
@@ -103,10 +112,11 @@ class GMMFeatureSpaceDensity(torch.nn.Module):
         #     print(self.coefs[name].device, self.means[name].device, self.trils[name].device)
         if not self._fitted:
             raise RuntimeError(f'GMM density was not fitted to any data!')
-        density = torch.zeros(features.size(0))
+        density = np.zeros(features.size(0))
+        features = features.cpu().numpy()
         for label in self.coefs:
-            density += self.coefs[label] * torch.exp(MultivariateNormal(self.means[label], scale_tril=self.trils[label]).log_prob(features))
-        return density
+            density += self.coefs[label].item() * scipy.stats.multivariate_normal.pdf(features, self.means[label].cpu().numpy(), self.covs[label].cpu().numpy(), allow_singular=True)
+        return torch.tensor(density)
 
 if __name__ == '__main__':
     x = torch.tensor([

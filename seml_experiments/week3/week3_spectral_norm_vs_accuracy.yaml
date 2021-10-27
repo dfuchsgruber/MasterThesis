@@ -55,9 +55,9 @@
 
 seml:
   executable: training_semi_supervised_node_classification.py
-  name: week2_test_training
-  output_dir: /nfs/students/fuchsgru/seml_output/week2_training
-  project_root_dir: ..
+  name: week3_spectral_norm_vs_accuracy
+  output_dir: /nfs/students/fuchsgru/seml_output/week3_spectral_norm_vs_accuracy
+  project_root_dir: ../..
 
 slurm:
   experiments_per_job: 1
@@ -75,78 +75,68 @@ fixed:
   training.early_stopping.mode: min
   training.early_stopping.monitor: val_loss
   training.early_stopping.min_delta: 1e-3
-  training.max_epochs: 500
+  training.max_epochs: 1000
   training.gpus: 1
+
   data.num_dataset_splits : 10
   data.train_portion : 0.05
   data.val_portion : 0.15
   data.test_portion : 0.6
   data.test_portion_fixed : 0.2
-  model.weight_scale : 5
+  data.train_labels: all
+  data.val_labels: all
+
   model.num_initializations : 10
   model.use_bias: true
   model.activation: leaky_relu
   model.leaky_relu_slope: 0.01
+  model.use_spectral_norm: true
+  model.hidden_sizes: [64]
+
+  evaluation.pipeline: []
+  evaluation.perturbations.num: 20
+  evaluation.perturbations.min: 0.1
+  evaluation.perturbations.max: 10.0
+  evaluation.perturbations.num_per_sample: 5
+
+  training.learning_rate: 0.003
 
 grid:
-  training.learning_rate:
-    type: loguniform
-    min: 1e-3
-    max: 1e-2
-    num: 3
-  data.dataset:
-    type: choice
-    options:
-      - cora_ml
-      - citeseer
-      - pubmed
-  model.hidden_sizes:
-    type: choice
-    options:
-      - [16]
-      - [32]
-      - [64]
-      - [64, 64]
-  model.use_spectral_norm:
+  model.weight_scale:
       type: choice
       options:
-        - true
-        # - false
-
-gcn:
-  fixed:
-    model.model_type: gcn
-gat:
-  fixed:
-    model.model_type: gat
-  grid:
-    model.num_heads:
-      type: choice
-      options:
-        - 2
-        - 8
-gin:
-  fixed:
-    model.model_type: gin
-sage:
-  fixed:
-    model.model_type: sage
-mlp:
-  fixed:
-    model.model_type: mlp
-appnp:
-  fixed:
-    model.model_type: appnp
-  grid:
-    model.teleportation_probability:
-      type: choice
-      options:
-        - 0.1
         - 0.5
-    model.diffusion_iterations:
-      type: choice
-      options:
+        - 0.75
+        - 1
+        - 1.25
+        - 1.5
+        - 1.75
         - 2
-        - 10
+        - 2.25
+        - 2.5
+        - 2.75
+        - 3.0
+        - 3.25
+        - 3.5
+        - 3.75
+        - 4
+        - 4.25
+        - 4.5
+        - 4.75
+        - 5.0
 
-  
+cora_ml-gcn:
+  fixed:
+    data.dataset: cora_ml
+    model.model_type: gcn
+
+pubmed-gcn:
+  fixed:
+    data.dataset: pubmed
+    model.model_type: gcn
+
+citeseer-gcn:
+  fixed:
+    data.dataset: citeseer
+    model.model_type: gcn
+

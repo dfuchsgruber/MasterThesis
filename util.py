@@ -3,12 +3,18 @@ import os, sys
 import torch
 
 @contextmanager
-def suppress_stdout():
+def suppress_stdout(supress=True):
     """ From: https://stackoverflow.com/a/25061573 """
-    with open(os.devnull, "w") as devnull:
-        old_stdout = sys.stdout
-        sys.stdout = devnull
-        try:  
+    if supress:
+        with open(os.devnull, "w") as devnull:
+            old_stdout = sys.stdout
+            sys.stdout = devnull
+            try:  
+                yield
+            finally:
+                sys.stdout = old_stdout
+    else:
+        try:
             yield
         finally:
-            sys.stdout = old_stdout
+            pass

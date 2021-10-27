@@ -55,9 +55,9 @@
 
 seml:
   executable: training_semi_supervised_node_classification.py
-  name: week2_single_model
-  output_dir: /nfs/students/fuchsgru/seml_output/week2_single_model
-  project_root_dir: ..
+  name: week3_spectral_norm_vs_accuracy_less_inits
+  output_dir: /nfs/students/fuchsgru/seml_output/week3_spectral_norm_vs_accuracy_less_inits
+  project_root_dir: ../..
 
 slurm:
   experiments_per_job: 1
@@ -77,175 +77,68 @@ fixed:
   training.early_stopping.min_delta: 1e-3
   training.max_epochs: 1000
   training.gpus: 1
-  data.num_dataset_splits : 1
+
+  data.num_dataset_splits : 5
   data.train_portion : 0.05
   data.val_portion : 0.15
   data.test_portion : 0.6
   data.test_portion_fixed : 0.2
-  model.weight_scale : 5
-  model.num_initializations : 1
+  data.train_labels: all
+  data.val_labels: all
+
+  model.num_initializations : 5
   model.use_bias: true
   model.activation: leaky_relu
   model.leaky_relu_slope: 0.01
+  model.use_spectral_norm: true
+  model.hidden_sizes: [64]
+
+  evaluation.pipeline: []
+  evaluation.perturbations.num: 20
+  evaluation.perturbations.min: 0.1
+  evaluation.perturbations.max: 10.0
+  evaluation.perturbations.num_per_sample: 5
+
+  training.learning_rate: 0.003
 
 grid:
-  model.use_spectral_norm:
+  model.weight_scale:
       type: choice
       options:
-        - true
-        - false
-
-cora_ml-gat:
-  fixed:
-    data.dataset: cora_ml
-    model.model_type: gat
-    training.learning_rate: 0.003
-    model.hidden_sizes: [64, 64]
-    model.num_heads: 8
-
+        - 0.5
+        - 0.75
+        - 1
+        - 1.25
+        - 1.5
+        - 1.75
+        - 2
+        - 2.25
+        - 2.5
+        - 2.75
+        - 3.0
+        - 3.25
+        - 3.5
+        - 3.75
+        - 4
+        - 4.25
+        - 4.5
+        - 4.75
+        - 5.0
+        - 5.25
+        - 5.5
 
 cora_ml-gcn:
   fixed:
     data.dataset: cora_ml
     model.model_type: gcn
-    training.learning_rate: 0.003
-    model.hidden_sizes: [64]
-
-
-cora_ml-gin:
-  fixed:
-    data.dataset: cora_ml
-    model.model_type: gin
-    training.learning_rate: 0.003
-    model.hidden_sizes: [64]
-
-
-cora_ml-sage:
-  fixed:
-    data.dataset: cora_ml
-    model.model_type: sage
-    training.learning_rate: 0.003
-    model.hidden_sizes: [64]
-    model.normalize: True
-
-
-cora_ml-mlp:
-  fixed:
-    data.dataset: cora_ml
-    model.model_type: mlp
-    training.learning_rate: 0.001
-    model.hidden_sizes: [32]
-
-
-cora_ml-appnp:
-  fixed:
-    data.dataset: cora_ml
-    model.model_type: appnp
-    training.learning_rate: 0.003
-    model.hidden_sizes: [64, 64]
-    model.teleportation_probability: 0.1
-    model.diffusion_iterations: 10
-
-
-citeseer-gat:
-  fixed:
-    data.dataset: citeseer
-    model.model_type: gat
-    training.learning_rate: 0.001
-    model.hidden_sizes: [64, 64]
-    model.num_heads: 8
-
-
-citeseer-gcn:
-  fixed:
-    data.dataset: citeseer
-    model.model_type: gcn
-    training.learning_rate: 0.010
-    model.hidden_sizes: [64]
-
-
-citeseer-gin:
-  fixed:
-    data.dataset: citeseer
-    model.model_type: gin
-    training.learning_rate: 0.010
-    model.hidden_sizes: [64]
-
-
-citeseer-sage:
-  fixed:
-    data.dataset: citeseer
-    model.model_type: sage
-    training.learning_rate: 0.010
-    model.hidden_sizes: [64]
-    model.normalize: True
-
-
-citeseer-mlp:
-  fixed:
-    data.dataset: citeseer
-    model.model_type: mlp
-    training.learning_rate: 0.010
-    model.hidden_sizes: [64]
-
-
-citeseer-appnp:
-  fixed:
-    data.dataset: citeseer
-    model.model_type: appnp
-    training.learning_rate: 0.003
-    model.hidden_sizes: [32]
-    model.teleportation_probability: 0.1
-    model.diffusion_iterations: 10
-
-
-pubmed-gat:
-  fixed:
-    data.dataset: pubmed
-    model.model_type: gat
-    training.learning_rate: 0.010
-    model.hidden_sizes: [64, 64]
-    model.num_heads: 8
-
 
 pubmed-gcn:
   fixed:
     data.dataset: pubmed
     model.model_type: gcn
-    training.learning_rate: 0.003
-    model.hidden_sizes: [64, 64]
 
-
-pubmed-gin:
+citeseer-gcn:
   fixed:
-    data.dataset: pubmed
-    model.model_type: gin
-    training.learning_rate: 0.003
-    model.hidden_sizes: [64]
+    data.dataset: citeseer
+    model.model_type: gcn
 
-
-pubmed-sage:
-  fixed:
-    data.dataset: pubmed
-    model.model_type: sage
-    training.learning_rate: 0.010
-    model.hidden_sizes: [64]
-    model.normalize: True
-
-
-pubmed-mlp:
-  fixed:
-    data.dataset: pubmed
-    model.model_type: mlp
-    training.learning_rate: 0.003
-    model.hidden_sizes: [64, 64]
-
-
-pubmed-appnp:
-  fixed:
-    data.dataset: pubmed
-    model.model_type: appnp
-    training.learning_rate: 0.003
-    model.hidden_sizes: [64, 64]
-    model.teleportation_probability: 0.1
-    model.diffusion_iterations: 2
