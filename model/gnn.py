@@ -7,13 +7,52 @@ from model.spectral_norm import spectral_norm
 import pytorch_lightning as pl
 from metrics import accuracy
 
-def _make_convolutions(input_dim, num_classes, hidden_dims, convolution_class, *args, **kwargs):
+class ResidualBlock(nn.Module):
+    """ Wrapper for any convolution that implements a residual connection. 
+    
+    Parameters:
+    -----------
+    input_dim : int
+        Input dimensionality of the residual block
+    output_dim : int
+        Output dimensionality of the residual block
+    conv : nn.Module
+        The convolution to apply in the block
+    use_spectral_norm : bool
+        If `True`, spectral norm is applied to a potential input projection.
+    weight_scale : float
+        Bound on the spectral norm of input projection layer.
+    use_bias : bool
+        If a bias should be used for the input projection layer.
+    """
+
+    def __init__(self, input_dim, output_dim, conv, use_spectral_norm=False, weight_scale=1.0, use_bias=True):
+        super().__init__()
+        self.conv = conv
+        if input_dim != output_dim:
+            self.input_projection = LinearWithSpectralNormaliatzion(input_dim, output_dim, use_bias=True,
+                use_spectral_norm=use_spectral_norm, weight_scale=weight_scale)
+        else:
+            self.input_projection = None
+        
+    def forward(self, x, edge_index):
+        h = self.conv(x, edge_index)
+        if self.input_projection:
+            x = self.input_projection(x)
+        return x + h
+
+def _make_convolutions(input_dim, num_classes, hidden_dims, make_conv, *args, residual=False, 
+        use_spectral_norm=False, weight_scale=1.0, **kwargs):
     """ Makes convolutions from a class and a set of input, hidden and output dimensions. """
     all_dims = [input_dim] + list(hidden_dims) + [num_classes]
     convs = []
-    return nn.ModuleList([
-       convolution_class(in_dim, out_dim, *args, **kwargs) for in_dim, out_dim in zip(all_dims[:-1], all_dims[1:])
-    ])
+    for in_dim, out_dim in zip(all_dims[:-1], all_dims[1:]):
+        conv = make_conv(in_dim, out_dim, *args, use_spectral_norm=use_spectral_norm, 
+            weight_scale=weight_scale, **kwargs)
+        if residual:
+            conv = ResidualBlock(in_dim, out_dim, conv, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale)
+        convs.append(conv)
+    return nn.ModuleList(convs)
 
 class LinearWithSpectralNormaliatzion(nn.Module):
     """ Wrapper for a linear layer that applies spectral normalization and rescaling to the weight. """
@@ -31,15 +70,22 @@ class GCN(nn.Module):
     """ Vanilla GCN """
 
     def __init__(self, input_dim, num_classes, hidden_dims, activation=F.leaky_relu, 
-                    use_bias=True, use_spectral_norm=True, weight_scale=1.0, cached=True,):
+                    use_bias=True, use_spectral_norm=True, weight_scale=1.0, cached=True,
+                    residual=False):
         super().__init__()
         self.activation = activation
+        self.residual = residual
 
-        self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, torch_geometric.nn.GCNConv,
-                                                cached=cached, bias=use_bias)
+        self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, self._make_conv_with_spectral_norm,
+                                                cached=cached, bias=use_bias, use_spectral_norm=use_spectral_norm,
+                                                weight_scale=weight_scale, residual=residual)
+
+    @staticmethod
+    def _make_conv_with_spectral_norm(input_dim, output_dim, *args, use_spectral_norm=False, weight_scale=1.0, **kwargs):
+        conv = torch_geometric.nn.GCNConv(input_dim, output_dim, *args, **kwargs)
         if use_spectral_norm:
-            for layer in self.convs:
-                layer.lin = spectral_norm(layer.lin, name='weight', rescaling=weight_scale)
+            conv.lin = spectral_norm(conv.lin, name='weight', rescaling=weight_scale)
+        return conv
 
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
@@ -204,7 +250,7 @@ def make_model_by_configuration(configuration, input_dim, output_dim):
     if configuration['model_type'] == 'gcn':
         return GCN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
             use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
-            cached=True)
+            cached=True, residual=configuration.get('residual', False))
     elif configuration['model_type'] == 'gat':
         return GAT(input_dim, output_dim, configuration['hidden_sizes'], configuration['num_heads'], make_activation_by_configuration(configuration), 
             use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])

@@ -15,7 +15,7 @@ from model.train import train_model_semi_supervised_node_classification
 from model.gnn import make_model_by_configuration
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
 from data.gust_dataset import GustDataset
-from data.util import data_get_num_attributes, data_get_num_classes
+from data.util import data_get_num_attributes, data_get_num_classes, data_get_summary
 from data.construct import load_data_from_configuration
 from seed import model_seeds
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
@@ -74,7 +74,8 @@ class ExperimentWrapper:
 
     @ex.capture(prefix="model")
     def init_model(self, model_type: str, hidden_sizes: list, weight_scale: float, num_initializations: int, use_spectral_norm: bool, num_heads=-1, 
-        diffusion_iterations=5, teleportation_probability=0.1, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01, normalize=True):
+        diffusion_iterations=5, teleportation_probability=0.1, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01, normalize=True,
+        residual=False,):
         self.model_config = {
             'hidden_sizes' : hidden_sizes,
             'weight_scale' : weight_scale,
@@ -87,6 +88,7 @@ class ExperimentWrapper:
             'activation' : activation,
             'leaky_relu_slope' : leaky_relu_slope,
             'normalize' : normalize,
+            'residual' : residual,
         }
         self.model_seeds = model_seeds(num_initializations, model_name=model_type)
 
@@ -97,22 +99,23 @@ class ExperimentWrapper:
         self.init_evaluation()
 
     @ex.capture(prefix='evaluation')
-    def init_evaluation(self, pipeline=[], perturbations={}):
+    def init_evaluation(self, pipeline=[]):
         self.evaluation_config = {
             'pipeline' : pipeline,
         }
-        if len(perturbations) > 0:
-            self.evaluation_config['perturbations'] = perturbations
 
     @ex.capture(prefix="training")
     def train(self, max_epochs, learning_rate, early_stopping, gpus):
-
+                
         # Data loading
         data_list, dataset_fixed = load_data_from_configuration(self.data_config)
 
         # Iterating over all dataset splits
         result = defaultdict(list)
         for split_idx, (data_train, data_val, data_val_all_classes, data_test) in enumerate(data_list):
+            
+            print('# Training data summary #')
+            print(data_get_summary(data_train, prefix='\t'))
 
             # Re-initializing the model multiple times to average over results
             for reinitialization, seed in enumerate(self.model_seeds):
@@ -129,7 +132,8 @@ class ExperimentWrapper:
                 # Setup logging and checkpointing
                 artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), str(self.run_id), f'{split_idx}-{reinitialization}')
                 os.makedirs(artifact_dir, exist_ok=True)
-                logger = TensorBoardLogger(osp.join('/nfs/students/fuchsgru/tensorboard', str(self.collection_name), str(self.run_id)), name=f'{split_idx}-{reinitialization}')
+                # logger = TensorBoardLogger(osp.join('/nfs/students/fuchsgru/tensorboard', str(self.collection_name), str(self.run_id)), name=f'{split_idx}-{reinitialization}')
+                logger = WandbLogger(save_dir=osp.join('/nfs/students/fuchsgru/wandb'), project=str(self.collection_name), name=f'{self.run_id}-{split_idx}-{reinitialization}')
                 config = {
                     'model' : self.model_config,
                     'data' : self.data_config,
@@ -180,9 +184,14 @@ class ExperimentWrapper:
 
                 print(val_metrics)
 
+                print('# Validation data summary #')
+                print(data_get_summary(data_val_all_classes, prefix='\t'))
+
+                # Build evaluation pipeline
+                pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus)
+
                 # Run evaluation pipeline
                 print(f'Executing pipeline {self.evaluation_config["pipeline"]}')
-                pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus)
                 pipeline(
                     model=model, 
                     data_loader_train=data_loader_train,

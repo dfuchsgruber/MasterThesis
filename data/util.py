@@ -7,6 +7,32 @@ from warnings import warn
 
 from seed import data_split_seeds
 
+def data_get_summary(dataset, prefix='\t'):
+    """ Gets the summary string of a dataset. 
+    
+    Parameters:
+    -----------
+    dataset : torch_geometric.data.Dataset
+        The dataset to summarize.
+    prefix : str
+        Prefix for each line.
+    
+    Returns:
+    --------
+    summary : str
+        The summary.
+    """
+    data = dataset[0]
+    summary = []
+    summary.append(f'{prefix}Number of Vertices : {data.x.size()[0]}')
+    summary.append(f'{prefix}Number of Vertices in Mask : {data.x[data.mask].size()[0]}')
+    summary.append(f'{prefix}Number of Labels : {len(torch.unique(data.y))}')
+    summary.append(f'{prefix}Number of Labels in Mask : {len(torch.unique(data.y[data.mask]))}')
+    summary.append(f'{prefix}Number of Edges : {data.edge_index.size()[1]}')
+    summary.append(f'{prefix}Label mapping : {data.label_to_idx}')
+    return '\n'.join(summary)
+
+
 def get_label_mask(labels, select_labels):
     """ Gets a mask that selects only elements in `select_labels`.
     

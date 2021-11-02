@@ -21,37 +21,60 @@ import contextlib, os
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from training_semi_supervised_node_classification import ExperimentWrapper
 
-# data_list, data_test_fixed = load_data_from_configuration({
-#     'dataset' : 'cora_ml',
-#     'num_dataset_splits' : 1,
-#     'train_portion' : 20,
-#     'test_portion' : 0.6,
-#     'val_portion' : 25,
-#     'test_portion_fixed' : 0.2,
-#     'train_labels_remove_other' : True,
-#     'val_labels_remove_other' : False,
-#     'split_type' : 'uniform',
-#     'train_labels' : 'all',
-#     'val_labels' : 'all',
-# })
-
 ex = ExperimentWrapper(init_all=False, collection_name='model_test', run_id='1')
 ex.init_dataset(dataset='cora_ml', num_dataset_splits=1, train_portion=20, val_portion=20, test_portion=0.6, test_portion_fixed=0.2,
-                    train_labels=[0, 1], val_labels='all', train_labels_remove_other=True, val_labels_remove_other=False,
+                    train_labels=[0, 1, 2, 3, 4, 5], val_labels='all', train_labels_remove_other=True, val_labels_remove_other=False,
                     split_type='uniform',
                     )
-ex.init_model(model_type='gcn', hidden_sizes=[64], num_initializations=1, weight_scale=5.0, use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01)
-ex.init_evaluation(pipeline=['FitLogitSpacePCA', 'EvaluateEmpircalLowerLipschitzBounds', 'FitLogitDensityGMM', 'EvaluateLogitDensity', 'LogLogits'], 
-    perturbations = {
-        'num' : 2,
-        'min' : 0.1,
-        'max' : 5.0,
-        'num_per_sample' : 1,
+# ex.init_dataset(dataset='cora_ml', num_dataset_splits=1, train_portion=0.05, val_portion=0.15, test_portion=0.6, test_portion_fixed=0.2,
+#                     train_labels=[0, 1, 2, 3, 4, 5], val_labels='all', train_labels_remove_other=False, val_labels_remove_other=False,
+#                     split_type='stratified',
+#                     )
+ex.init_model(model_type='gcn', hidden_sizes=[64], num_initializations=1, weight_scale=0.8, 
+    use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
+    residual=True)
+ex.init_evaluation(pipeline=[
+    {
+        'type' : 'EvaluateEmpircalLowerLipschitzBounds',
+        'num_perturbations' : 5,
+        'min_perturbation' : 2,
+        'max_perturbation' : 10,
+        'num_perturbations_per_sample' : 1,
         'seed' : 1337,
-        },
-    )
+    },
+    {
+        'type' : 'FitFeatureSpacePCA',
+        'fit_to' : ['train'],
+        'num_components' : 2,
+        'name' : '2d-pca',
+    },
+    {
+        'type' : 'FitFeatureDensity',
+        'density_type' : 'GaussianPerClass',
+        'pca' : True,
+        'pca_number_components' : 2,
+        'pca_per_class' : True,
+        'name' : '2d-pca-density',
+        'diagonal_covariance' : True,
+        'evaluate_on' : ['val'],
+    },
+    {
+        'type' : 'EvaluateFeatureDensity',
+        'evaluate_on' : ['val'],
+    },
+    {
+        'type' : 'LogFeatures',
+        'evaluate_on' : ['train', 'val']
+    },
+    {
+        'type' : 'FitFeatureSpacePCAIDvsOOD',
+        'fit_to' : ['train'],
+        'evaluate_on' : ['val'],
+    }
+]
+)
 
-ex.train(max_epochs=500, learning_rate=0.010, early_stopping={
+ex.train(max_epochs=5, learning_rate=0.001, early_stopping={
     'monitor' : 'val_loss',
     'mode' : 'min',
     'patience' : 50,

@@ -55,8 +55,8 @@
 
 seml:
   executable: training_semi_supervised_node_classification.py
-  name: week3_spectral_norm_vs_accuracy_less_inits
-  output_dir: /nfs/students/fuchsgru/seml_output/week3_spectral_norm_vs_accuracy_less_inits
+  name: week3_spectral_norm_vs_accuracy_less_inits_uniform_split
+  output_dir: /nfs/students/fuchsgru/seml_output/week3_spectral_norm_vs_accuracy_less_inits_uniform_split
   project_root_dir: ../..
 
 slurm:
@@ -79,12 +79,13 @@ fixed:
   training.gpus: 1
 
   data.num_dataset_splits : 5
-  data.train_portion : 0.05
-  data.val_portion : 0.15
+  data.train_portion : 20
+  data.val_portion : 20
   data.test_portion : 0.6
   data.test_portion_fixed : 0.2
   data.train_labels: all
   data.val_labels: all
+  data.split_type: uniform
 
   model.num_initializations : 5
   model.use_bias: true
@@ -105,6 +106,8 @@ grid:
   model.weight_scale:
       type: choice
       options:
+        - 0.1
+        - 0.25
         - 0.5
         - 0.75
         - 1
@@ -126,13 +129,6 @@ grid:
         - 5.0
         - 5.25
         - 5.5
-        - 6.0
-        - 7.0
-        - 8.0
-        - 9.0
-        - 10.0
-        - 15.0
-        - 20.0
 
 cora_ml-gcn:
   fixed:

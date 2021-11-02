@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import torch_geometric.transforms as T
-from data.util import graph_select_labels
+from data.util import graph_select_labels, compress_labels
 from torch_geometric.data import Data
 
 class MaskTransform(T.BaseTransform):
