@@ -42,5 +42,6 @@ def local_perturbations_plot(perturbations):
     axs.legend()
     axs.set_xlabel('Input perturbation')
     axs.set_ylabel('Output perturbation')
+    axs.set_ylim(0, np.array(yupper).max())
     
     return fig, axs, slope_ys, slope_yupper

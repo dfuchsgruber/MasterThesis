@@ -7,7 +7,7 @@ from plot.density import plot_2d_log_density, plot_log_density_histograms
 from plot.features import plot_2d_features
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from model.density import FeatureSpaceDensityGaussianPerClass
-from evaluation.logging import log_figure, log_histogram, log_embedding
+from evaluation.logging import log_figure, log_histogram, log_embedding, log_metrics
 from torch_geometric.data import Dataset, Data
 from torch_geometric.loader import DataLoader
 from sklearn.decomposition import PCA
@@ -79,15 +79,15 @@ class EvaluateEmpircalLowerLipschitzBounds(PipelineMember):
                 num_perturbations_per_sample=self.num_perturbations_per_sample, seed=self.seed)
             pipeline_log(f'Created {self.num_perturbations_per_sample} perturbations in linspace({self.min_perturbation:.2f}, {self.max_perturbation:.2f}, {self.num_perturbations}) for validation samples.')
             smean, smedian, smax, smin = evaluation.lipschitz.local_lipschitz_bounds(perturbations)
-            kwargs['logger'].log_metrics({
+            log_metrics(kwargs['logs'], {
                 f'{name}_slope_mean_perturbation' : smean,
                 f'{name}_slope_median_perturbation' : smedian,
                 f'{name}_slope_max_perturbation' : smax,
                 f'{name}_slope_min_perturbation' : smin,
-            })
+            }, 'empirical_lipschitz')
             # Plot the perturbations and log it
             fig, _ , _, _ = plot.perturbations.local_perturbations_plot(perturbations)
-            log_figure(kwargs['logger'], fig, f'{name}_perturbations', save_artifact=kwargs['artifact_directory'])
+            log_figure(kwargs['logs'], fig, f'{name}_perturbations', 'empirical_lipschitz', save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Logged input vs. output perturbation plot for dataset {name}.')
         
         return args, kwargs
@@ -160,22 +160,22 @@ class EvaluateFeatureDensity(PipelineMember):
         y = labels.cpu()
         for label in torch.unique(y):
             log_density_label = torch.log(density[y == label] + 1e-20)
-            log_histogram(kwargs['logger'], log_density_label.cpu().numpy(), 'feature_log_density', global_step=label, label_suffix=str(label.item()))
-            kwargs['logger'].log_metrics({
+            log_histogram(kwargs['logs'], log_density_label.cpu().numpy(), 'feature_log_density', global_step=label, label_suffix=str(label.item()))
+            log_metrics(kwargs['logs'], {
                 f'{self.prefix}mean_feature_log_density' : log_density_label.mean(),
                 f'{self.prefix}std_feature_log_density' : log_density_label.std(),
                 f'{self.prefix}min_feature_log_density' : log_density_label.min(),
                 f'{self.prefix}max_feature_log_density' : log_density_label.max(),
                 f'{self.prefix}median_feature_log_density' : log_density_label.median(),
-            }, step=label)
+            }, 'feature_density', step=label)
         fig, ax = plot_log_density_histograms(torch.log(density.cpu() + 1e-20), y.cpu(), overlapping=False)
-        log_figure(kwargs['logger'], fig, f'feature_log_density_histograms_all_classes_{self.suffix}', save_artifact=kwargs['artifact_directory'])
+        log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_all_classes{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Evaluated feature density for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
 
         # Split into in-distribution and out-of-distribution
         labels_id_ood = split_labels_into_id_and_ood(y.cpu(), set(kwargs['config']['data']['train_labels']), id_label=_ID_LABEL, ood_label=_OOD_LABEL)
         fig, ax = plot_log_density_histograms(torch.log(density.cpu()), labels_id_ood.cpu(), label_names={_ID_LABEL : 'id', _OOD_LABEL : 'ood'})
-        log_figure(kwargs['logger'], fig, f'feature_log_density_histograms_id_vs_ood_{self.suffix}', save_artifact=kwargs['artifact_directory'])
+        log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_id_vs_ood{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
 
         pipeline_log(f'Saved feature density histogram to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_id_vs_ood_{self.suffix}.pdf')))
 
@@ -207,19 +207,19 @@ class FitFeatureSpacePCAIDvsOOD(PipelineMember):
         pca = PCA(n_components=2)
         transformed = pca.fit_transform(features.cpu().numpy())
         fig, ax = plot_2d_features(torch.tensor(transformed), labels)
-        log_figure(kwargs['logger'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_data_fit', save_artifact=kwargs['artifact_directory'])
+        log_figure(kwargs['logs'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_data_fit', 'feature_space_pca_id_vs_ood', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Logged 2d pca fitted to {self.fit_to}')
 
         features, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
         features, labels = torch.cat(features, dim=0), torch.cat(labels)
         transformed = pca.transform(features.cpu().numpy())
         fig, ax = plot_2d_features(torch.tensor(transformed), labels)
-        log_figure(kwargs['logger'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_by_label', save_artifact=kwargs['artifact_directory'])
+        log_figure(kwargs['logs'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_by_label', 'feature_space_pca_id_vs_ood', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Logged 2d pca fitted to {self.fit_to}, evaluated on {self.evaluate_on} by label')
 
         labels_id_ood = split_labels_into_id_and_ood(labels.cpu(), set(kwargs['config']['data']['train_labels']), id_label=_ID_LABEL, ood_label=_OOD_LABEL)
         fig, ax = plot_2d_features(torch.tensor(transformed), labels_id_ood)
-        log_figure(kwargs['logger'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_by_id_vs_ood', save_artifact=kwargs['artifact_directory'])
+        log_figure(kwargs['logs'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_by_id_vs_ood', 'feature_space_pca_id_vs_ood', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Logged 2d pca fitted to {self.fit_to}, evaluated on {self.evaluate_on} by in-distribution vs out-of-distribution')
 
         return args, kwargs
@@ -253,9 +253,9 @@ class FitFeatureSpacePCA(PipelineMember):
 
         if self.num_components == 2:
             fig, ax = plot_2d_features(torch.tensor(projected), labels)
-            log_figure(kwargs['logger'], fig, f'pca_{self.suffix}_visualization', save_artifact=kwargs['artifact_directory'])
+            log_figure(kwargs['logs'], fig, f'pca_{self.suffix}_visualization', 'pca', save_artifact=kwargs['artifact_directory'])
 
-        log_embedding(kwargs['logger'], projected, f'pca_{self.suffix}', labels.cpu().numpy(), save_artifact=kwargs['artifact_directory'])
+        log_embedding(kwargs['logs'], projected, f'pca_{self.suffix}', labels.cpu().numpy(), save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Fit feature space PCA with {self.num_components} components. Explained variance ratio {pca.explained_variance_ratio_}')
         kwargs['feature_space_pca'] = pca
 
@@ -282,7 +282,7 @@ class LogFeatures(PipelineMember):
 
         features_all, labels_all = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
         for name, features, labels in zip(self.evaluate_on, features_all, labels_all):
-            log_embedding(kwargs['logger'], features.cpu().numpy(), f'{name}_features', labels.cpu().numpy(), save_artifact=kwargs['artifact_directory'])
+            log_embedding(kwargs['logs'], features.cpu().numpy(), f'{name}_features', labels.cpu().numpy(), save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Logged features (size {features.size()}) of dataset {name}')
             
         return args, kwargs

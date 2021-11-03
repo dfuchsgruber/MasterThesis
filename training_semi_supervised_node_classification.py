@@ -22,6 +22,10 @@ from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from evaluation.pipeline import Pipeline
+from evaluation.logging import finish as finish_logging, build_table
+
+NAME_SPLIT, NAME_INIT = 'split', 'init'
+SPLIT_INIT_GROUP = 'split_and_init'
 
 os.environ['WANDB_START_METHOD'] = 'thread'
 
@@ -97,6 +101,7 @@ class ExperimentWrapper:
         self.init_dataset()
         self.init_model()
         self.init_evaluation()
+        self.init_run()
 
     @ex.capture(prefix='evaluation')
     def init_evaluation(self, pipeline=[]):
@@ -104,11 +109,46 @@ class ExperimentWrapper:
             'pipeline' : pipeline,
         }
 
+    @ex.capture(prefix='run')
+    def init_run(self, name='', args=[]):
+        self.run_name_format = name
+        self.run_name_format_args = args
+
+    def _format_run_name(self, config):
+        parsed_args = []
+        for arg in self.run_name_format_args:
+            path = arg.split('.')
+            arg = config
+            for x in path:
+                arg = arg[x]
+            if isinstance(arg, list):
+                arg = ','.join(map(str, arg))
+            parsed_args.append(str(arg))
+        return self.run_name_format.format(*parsed_args)
+
     @ex.capture(prefix="training")
     def train(self, max_epochs, learning_rate, early_stopping, gpus):
                 
         # Data loading
         data_list, dataset_fixed = load_data_from_configuration(self.data_config)
+
+        # Setup config and name of the run(s)
+        config = {
+            'model' : self.model_config,
+            'data' : self.data_config,
+            'evaluation' : self.evaluation_config,
+            'training' : {
+                'max_epochs' : max_epochs,
+                'learning_rate' : learning_rate,
+                'early_stopping' : early_stopping,
+                'gpus' : gpus,
+                }
+            }
+        run_name = self._format_run_name(config)
+        # One global logger for all splits and initializations
+        logger = WandbLogger(save_dir=osp.join('/nfs/students/fuchsgru/wandb'), project=str(self.collection_name), name=f'{run_name}')
+        logger.log_hyperparams(config)
+        all_logs = [] # Logs from each run
 
         # Iterating over all dataset splits
         result = defaultdict(list)
@@ -129,26 +169,8 @@ class ExperimentWrapper:
                 backbone = make_model_by_configuration(self.model_config, data_get_num_attributes(data_train[0]), data_get_num_classes(data_train[0]))
                 model = SemiSupervisedNodeClassification(backbone, learning_rate=learning_rate)
 
-                # Setup logging and checkpointing
-                artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), str(self.run_id), f'{split_idx}-{reinitialization}')
+                artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), f'{run_name}', f'{split_idx}-{reinitialization}')
                 os.makedirs(artifact_dir, exist_ok=True)
-                # logger = TensorBoardLogger(osp.join('/nfs/students/fuchsgru/tensorboard', str(self.collection_name), str(self.run_id)), name=f'{split_idx}-{reinitialization}')
-                logger = WandbLogger(save_dir=osp.join('/nfs/students/fuchsgru/wandb'), project=str(self.collection_name), name=f'{self.run_id}-{split_idx}-{reinitialization}')
-                config = {
-                    'model' : self.model_config,
-                    'data' : self.data_config,
-                    'evaluation' : self.evaluation_config,
-                    'training' : {
-                        'max_epochs' : max_epochs,
-                        'learning_rate' : learning_rate,
-                        'early_stopping' : early_stopping,
-                        'gpus' : gpus,
-                    },
-                    'seed' : seed,
-                    'initialization_idx' : reinitialization,
-                    'split_idx' : split_idx,
-                    }
-                logger.log_hyperparams(config)
 
                 # Model training
                 with suppress_stdout(), warnings.catch_warnings():
@@ -182,8 +204,6 @@ class ExperimentWrapper:
                         for metric, value in val_metric.items():
                             result[metric].append(value)
 
-                print(val_metrics)
-
                 print('# Validation data summary #')
                 print(data_get_summary(data_val_all_classes, prefix='\t'))
 
@@ -192,6 +212,10 @@ class ExperimentWrapper:
 
                 # Run evaluation pipeline
                 print(f'Executing pipeline {self.evaluation_config["pipeline"]}')
+                logs = defaultdict(dict)
+                logs[SPLIT_INIT_GROUP] = {
+                    NAME_SPLIT : split_idx, NAME_INIT : reinitialization # Stuff that this run wants to log
+                } 
                 pipeline(
                     model=model, 
                     data_loader_train=data_loader_train,
@@ -200,7 +224,13 @@ class ExperimentWrapper:
                     logger=logger,
                     config=config,
                     artifact_directory=artifact_dir,
+                    split_idx = split_idx,
+                    initialization_idx = reinitialization,
+                    logs=logs
                 )
+                all_logs.append(logs)
+
+        build_table(logger, all_logs)
 
         artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), str(self.run_id))
         with open(osp.join(artifact_dir, 'metrics.json'), 'w+') as f:

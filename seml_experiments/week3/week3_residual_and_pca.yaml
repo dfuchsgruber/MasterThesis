@@ -55,7 +55,7 @@
 
 seml:
   executable: training_semi_supervised_node_classification.py
-  name: week3_residual_and_pca
+  name: week3_residual_and_pca2
   output_dir: /nfs/students/fuchsgru/seml_output/week3_residual_and_pca
   project_root_dir: ../..
 
@@ -71,6 +71,12 @@ slurm:
 ###### BEGIN PARAMETER CONFIGURATION ######
 
 fixed:
+  run.name: weight_scale_{0}_residual_{1}_train_labels_{2}_
+  run.args:
+    - model.weight_scale
+    - model.residual
+    - data.train_labels
+
   training.early_stopping.patience: 100
   training.early_stopping.mode: min
   training.early_stopping.monitor: val_loss
@@ -110,9 +116,9 @@ fixed:
       pca_per_class: false
       diagonal_covariance: false
       pca_number_components: 16
+    - type: EvaluateFeatureDensity
+      evaluate_on: [val]
       name: no-pca
-    - type: EvaluateFeatureDensity
-      evaluate_on: [val]
 
     - type: FitFeatureDensity
       density_type: GaussianPerClass
@@ -121,9 +127,9 @@ fixed:
       pca_per_class: true
       diagonal_covariance: false
       pca_number_components: 16
+    - type: EvaluateFeatureDensity
+      evaluate_on: [val]
       name: 16-pca-per-class
-    - type: EvaluateFeatureDensity
-      evaluate_on: [val]
 
     - type: FitFeatureDensity
       density_type: GaussianPerClass
@@ -132,9 +138,9 @@ fixed:
       pca_per_class: true
       diagonal_covariance: false
       pca_number_components: 8
-      name: 8-pca-per-class
     - type: EvaluateFeatureDensity
       evaluate_on: [val]
+      name: 8-pca-per-class
 
     - type: FitFeatureDensity
       density_type: GaussianPerClass
@@ -143,9 +149,9 @@ fixed:
       pca_per_class: true
       diagonal_covariance: false
       pca_number_components: 4
-      name: 4-pca-per-class
     - type: EvaluateFeatureDensity
       evaluate_on: [val]
+      name: 4-pca-per-class
 
     - type: FitFeatureDensity
       density_type: GaussianPerClass
@@ -154,9 +160,9 @@ fixed:
       pca_per_class: true
       diagonal_covariance: false
       pca_number_components: 2
-      name: 2-pca-per-class
     - type: EvaluateFeatureDensity
       evaluate_on: [val]
+      name: 2-pca-per-class
 
     - type: FitFeatureDensity
       density_type: GaussianPerClass
@@ -165,9 +171,9 @@ fixed:
       pca_per_class: true
       diagonal_covariance: true
       pca_number_components: 16
-      name: 16-pca-per-class-diagonal-covariance
     - type: EvaluateFeatureDensity
       evaluate_on: [val]
+      name: 16-pca-per-class-diagonal-covariance
 
     - type: FitFeatureDensity
       density_type: GaussianPerClass
@@ -176,9 +182,9 @@ fixed:
       pca_per_class: true
       diagonal_covariance: true
       pca_number_components: 8
-      name: 8-pca-per-class-diagonal-covariance
     - type: EvaluateFeatureDensity
       evaluate_on: [val]
+      name: 8-pca-per-class-diagonal-covariance
 
     - type: FitFeatureDensity
       density_type: GaussianPerClass
@@ -187,9 +193,9 @@ fixed:
       pca_per_class: true
       diagonal_covariance: true
       pca_number_components: 4
-      name: 4-pca-per-class-diagonal-covariance
     - type: EvaluateFeatureDensity
       evaluate_on: [val]
+      name: 4-pca-per-class-diagonal-covariance
 
     - type: FitFeatureDensity
       density_type: GaussianPerClass
@@ -198,9 +204,9 @@ fixed:
       pca_per_class: true
       diagonal_covariance: true
       pca_number_components: 2
-      name: 2-pca-per-class-diagonal-covariance
     - type: EvaluateFeatureDensity
       evaluate_on: [val]
+      name: 2-pca-per-class-diagonal-covariance
 
     - type: FitFeatureSpacePCAIDvsOOD
       fit_to: [train]
