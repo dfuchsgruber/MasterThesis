@@ -11,7 +11,7 @@ from collections import defaultdict
 import warnings
 
 from util import suppress_stdout
-from model.train import train_model_semi_supervised_node_classification
+from model.util import module_numel
 from model.gnn import make_model_by_configuration
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
 from data.gust_dataset import GustDataset
@@ -79,7 +79,7 @@ class ExperimentWrapper:
     @ex.capture(prefix="model")
     def init_model(self, model_type: str, hidden_sizes: list, weight_scale: float, num_initializations: int, use_spectral_norm: bool, num_heads=-1, 
         diffusion_iterations=5, teleportation_probability=0.1, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01, normalize=True,
-        residual=False,):
+        residual=False, freeze_residual_projection=False):
         self.model_config = {
             'hidden_sizes' : hidden_sizes,
             'weight_scale' : weight_scale,
@@ -93,6 +93,7 @@ class ExperimentWrapper:
             'leaky_relu_slope' : leaky_relu_slope,
             'normalize' : normalize,
             'residual' : residual,
+            'freeze_residual_projection' : freeze_residual_projection,
         }
         self.model_seeds = model_seeds(num_initializations, model_name=model_type)
 
@@ -122,7 +123,7 @@ class ExperimentWrapper:
             for x in path:
                 arg = arg[x]
             if isinstance(arg, list):
-                arg = ','.join(map(str, arg))
+                arg = '[' + '-'.join(map(str, arg)) + ']'
             parsed_args.append(str(arg))
         return self.run_name_format.format(*parsed_args)
 
@@ -163,11 +164,13 @@ class ExperimentWrapper:
                 data_loader_train = DataLoader(data_train, batch_size=1, shuffle=False)
                 data_loader_val = DataLoader(data_val, batch_size=1, shuffle=False)
                 data_loader_val_all_classes = DataLoader(data_val_all_classes, batch_size=1, shuffle=False)
+                data_loader_test = DataLoader(data_test, batch_size=1, shuffle=False)
 
                 # print(data_train[0].mask.sum(), data_val[0].mask.sum(), data_val_all_classes[0].mask.sum())
 
                 backbone = make_model_by_configuration(self.model_config, data_get_num_attributes(data_train[0]), data_get_num_classes(data_train[0]))
                 model = SemiSupervisedNodeClassification(backbone, learning_rate=learning_rate)
+                print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
 
                 artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), f'{run_name}', f'{split_idx}-{reinitialization}')
                 os.makedirs(artifact_dir, exist_ok=True)
@@ -191,7 +194,6 @@ class ExperimentWrapper:
                                         ],
                                         logger=logger,
                                         progress_bar_refresh_rate=0,
-                                        weights_summary=None,
                                         gpus=gpus,
                                         )
                     trainer.fit(model, data_loader_train, data_loader_val)
@@ -211,32 +213,41 @@ class ExperimentWrapper:
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus)
 
                 # Run evaluation pipeline
-                print(f'Executing pipeline {self.evaluation_config["pipeline"]}')
+                print(f'Executing pipeline', str(pipeline))
                 logs = defaultdict(dict)
+                # Create a group that will just log the split and initaliation idx
                 logs[SPLIT_INIT_GROUP] = {
-                    NAME_SPLIT : split_idx, NAME_INIT : reinitialization # Stuff that this run wants to log
+                    NAME_SPLIT : split_idx, NAME_INIT : reinitialization 
                 } 
+                pipeline_metrics = {} # Metrics logged by the pipeline
                 pipeline(
                     model=model, 
                     data_loader_train=data_loader_train,
                     data_loader_val=data_loader_val,
-                    data_loader_val_all_classes=data_loader_val_all_classes, 
+                    data_loader_val_all_classes=data_loader_val_all_classes,
+                    data_loader_test = data_loader_test, 
                     logger=logger,
                     config=config,
                     artifact_directory=artifact_dir,
                     split_idx = split_idx,
                     initialization_idx = reinitialization,
-                    logs=logs
+                    logs=logs,
+                    metrics=pipeline_metrics, 
                 )
                 all_logs.append(logs)
+                for metric, value in pipeline_metrics.items():
+                    result[metric].append(value)
 
+        # Build wandb table for everything that was logged by the pipeline
         build_table(logger, all_logs)
 
-        artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), str(self.run_id))
-        with open(osp.join(artifact_dir, 'metrics.json'), 'w+') as f:
+        artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), str(run_name))
+        metrics_path = osp.join(artifact_dir, 'metrics.json')
+        with open(metrics_path, 'w+') as f:
             json.dump({metric : values for metric, values in result.items()}, f)
 
-        return {f'{metric}_mean' : np.array(values).mean() for metric, values in result.items()}
+        # To not bloat the MongoDB logs, we just return a path to all metrics
+        return metrics_path
 
 
 # We can call this command, e.g., from a Jupyter notebook with init_all=False to get an "empty" experiment wrapper,

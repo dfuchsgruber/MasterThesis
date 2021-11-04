@@ -5,10 +5,31 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 import scipy.stats
 from warnings import warn
 from sklearn.decomposition import PCA
+from sklearn.mixture import GaussianMixture
 
-def cov(x, rowvar=False, bias=False, ddof=None, aweights=None):
-    """Estimates covariance matrix like numpy.cov
+def cov_and_mean(x, rowvar=False, bias=False, ddof=None, aweights=None):
+    """Estimates covariance matrix like numpy.cov and also returns the weighted mean.
+
+    Parameters:
+    -----------
+    x : torch.Tensor, shape [N, D]
+        The tensor to estimate covariance of.
+    rowvar : bool
+        If given, columns are treated as observations.
+    bias : bool
+        If given, use correction for the empirical covariance.
+    aweights : torch.Tensor, shape [N] or None
+        Weights for each observation.
     
+    Returns:
+    --------
+    cov : torch.Tensor, shape [D, D]
+        Empirical covariance.
+    mean : torch.Tensor, shape [D]
+        Empirical means.
+
+    References:
+    -----------
     From: https://github.com/pytorch/pytorch/issues/19037#issue-430654869
     """
     # ensure at least 2D
@@ -54,7 +75,7 @@ def cov(x, rowvar=False, bias=False, ddof=None, aweights=None):
     c = torch.mm(X_T, xm)
     c = c / fact
 
-    return c.squeeze()
+    return c.squeeze(), avg
 
 class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
     """ Model that estimates features space density fitting a Gaussian per class. """
@@ -85,8 +106,8 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
         -----------
         features : torch.Tensor, shape [N, D]
             Features to transform.
-        labels : torch.Tensor, shape [N]
-            Labels.
+        labels : torch.Tensor, shape [N, num_classes]
+            Soft labels (will be converted to hard labels).
         """
         self.pca_projections = nn.ParameterDict()
         self.pca_means = nn.ParameterDict()
@@ -95,13 +116,13 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
             pca_all = PCA(n_components=self.pca_number_components)
             pca_all.fit(features.cpu().numpy())
 
-        for label in torch.unique(labels):
-            name = f'class_{label.item()}'
+        for label in range(labels.size(1)):
+            name = f'class_{label}'
             # Calculate the pca for this class
             if self.pca:
                 if self.pca_per_class:
                     pca = PCA(n_components=self.pca_number_components)
-                    pca.fit(features[labels == label].cpu().numpy())
+                    pca.fit(features[labels.argmax(1) == label].cpu().numpy())
                     self.pca_projections[name] = nn.parameter.Parameter(torch.tensor(pca.components_.T))
                     self.pca_means[name] = nn.parameter.Parameter(torch.tensor(pca.mean_))
                 else:
@@ -136,8 +157,8 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
         -----------
         features : torch.Tensor, shape [N, D]
             Features matrix.
-        labels : torch.Tensor, shape [N]
-            Class labels.
+        labels : torch.Tensor, shape [N, num_labels]
+            Soft class labels.
         """
         if self._fitted:
             raise RuntimeError(f'GMM density model was already fitted.')
@@ -148,21 +169,20 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
 
         self._fit_pca(features, labels)
 
-        for label in torch.unique(labels):
-            name = f'class_{label.item()}'
+        for label in range(labels.size(1)):
+            name = f'class_{label}'
+            
+            transformed = (features - self.pca_means[name]) @ self.pca_projections[name]
+            cov, mean = cov_and_mean(transformed, aweights=labels[:, label])
+            coef = labels[:, label].sum(0) / labels.size(0)
 
-            # Select all features of this label to fit a density and transform
-            features_label = (features[labels == label] - self.pca_means[name]) @ self.pca_projections[name]
+            self.means[name] = nn.Parameter(mean, requires_grad=False)
+            self.covs[name] = nn.Parameter(cov, requires_grad=False)
+            self.coefs[name] = nn.Parameter(coef, requires_grad=False)
 
-            # Save location and lower triangular covariance matrix to allow this module to have its state as state dict
-            self.coefs[name] = nn.Parameter((labels == label).sum() / labels.size()[0], requires_grad=False)
-            self.means[name] = nn.Parameter(features_label.mean(dim=0), requires_grad=False)
-            self.covs[name] = nn.Parameter(cov(features_label), requires_grad=False)
             if self.diagonal_covariance:
-                self.covs[name] *= torch.eye(features_label.size()[1])
-
-            if (labels == label).sum() < features_label.size()[1]:
-                warn(f'Not enough samples of class {label} ({(labels == label).sum()}) to estimate {features_label.size()[1]}-dimensional feature space covariance.')
+                print(self.covs[name].size())
+                self.covs[name] *= torch.eye(transformed.size(1))
 
             self._make_covariance_psd(self.covs[name], eps=1e-8)
             
@@ -179,36 +199,94 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
         
         Returns:
         --------
-        density : torch.Tensor, shape [N]
-            Density of the GMM at each feature point.
+        log_density : torch.Tensor, shape [N]
+            Log density of the GMM at each feature point.
         """
-        # print(features.device)
-        # for name in self.coefs:
-        #     print(self.coefs[name].device, self.means[name].device, self.trils[name].device)
         if not self._fitted:
             raise RuntimeError(f'GMM density was not fitted to any data!')
-        density = np.zeros(features.size(0))
+        
+        log_densities = [] # Per component, weighted with component
         for label in self.coefs:
-            features_label = (features - self.pca_means[label]) @ self.pca_projections[label]
-            density_label = self.coefs[label].item() * scipy.stats.multivariate_normal.pdf(features_label.cpu().numpy(), self.means[label].cpu().numpy(), self.covs[label].cpu().numpy(), allow_singular=True)
-            density_label[np.isnan(density_label)] = 0.0 # Fix some numerical issues...
-            density += density_label
-        return torch.tensor(density)
+            transformed = (features - self.pca_means[label]) @ self.pca_projections[label]
+            log_densities.append(MultivariateNormal(self.means[label], covariance_matrix=self.covs[label]).log_prob(transformed))
+        log_densities = torch.stack(log_densities) # shape n_classes, N
+        return torch.logsumexp(log_densities, 0) # Shape N
 
-if __name__ == '__main__':
-    x = torch.tensor([
-        [1.2, 3.3],
-        [0.8, 1.5],
-        [-50, -51],
-        [-49, -50],
-        [-49, -51],
-        [1.1, 0.8],
-        [1.0, 1.0],
-        [1.1, 1.1],
-    ])
-    y = torch.tensor([
-        0, 0, 1, 1, 1, 0, 2, 2
-    ], dtype=torch.int64)
-    density = FeatureSpaceDensityGaussianPerClass()
-    density.fit(x, y)
-    print(density(x))   
+
+class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
+    """ Model that estimates features space density fitting a Gaussian per class. """
+
+    name = 'GaussianMixture'
+
+    def __init__(self, number_components=5, seed=None, **kwargs):
+        super().__init__()
+        self._fitted = False
+        self.number_components = number_components
+        self.seed = seed
+
+    def __str__(self):
+        return '\n'.join([
+            self.name,
+            f'\t Number of components : {self.number_components}',
+            f'\t Seed : {self.seed}',
+        ])
+
+    @torch.no_grad()
+    def fit(self, features, labels):
+        """ Fits the density models to a set of features and labels. 
+        
+        Parameters:
+        -----------
+        features : torch.Tensor, shape [N, D]
+            Features matrix.
+        labels : torch.Tensor, shape [N, num_classes]
+            Soft class labels. Unused for this approach.
+        """
+        if self._fitted:
+            raise RuntimeError(f'{self.name} density model was already fitted.')
+        self.gmm = GaussianMixture(n_components = self.number_components, random_state=self.seed)
+        self.gmm.fit(features.cpu().numpy())
+        self._fitted = True
+    
+    @torch.no_grad()
+    def forward(self, features):
+        """ Gets the density at all feature points.
+        
+        Parameters:
+        -----------
+        features : torch.Tensor, shape [N, D]
+            Features to get the density of.
+        
+        Returns:
+        --------
+        log_density : torch.Tensor, shape [N]
+            Log-density of the GMM at each feature point.
+        """
+        if not self._fitted:
+            raise RuntimeError(f'{self.name} density was not fitted to any data!')
+        log_likelihood = torch.tensor(self.gmm.score_samples(features.cpu().numpy()))
+        return log_likelihood
+
+densities = [
+    FeatureSpaceDensityGaussianPerClass,
+    FeatureSpaceDensityMixtureOfGaussians,
+]
+
+def get_density_model(density_type='unspecified', **kwargs):
+    """ Gets a density model. Keyword arguments are passed to the respective density model.
+    
+    Parameters:
+    -----------
+    density_type : str
+        The name of the density model.
+    
+    Returns:
+    --------
+    density_model : torch.nn.Module
+        The density model.
+    """
+    for density_cls in densities:
+        if density_cls.name.lower() == density_type.lower():
+            return density_cls(**kwargs)
+    else:
+        raise RuntimeError(f'Unknown density model type {density_type.lower()}')

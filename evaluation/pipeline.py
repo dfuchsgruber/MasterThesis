@@ -6,14 +6,15 @@ from evaluation.util import split_labels_into_id_and_ood, get_data_loader, featu
 from plot.density import plot_2d_log_density, plot_log_density_histograms
 from plot.features import plot_2d_features
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
-from model.density import FeatureSpaceDensityGaussianPerClass
+from model.density import get_density_model
 from evaluation.logging import log_figure, log_histogram, log_embedding, log_metrics
 from torch_geometric.data import Dataset, Data
 from torch_geometric.loader import DataLoader
 from sklearn.decomposition import PCA
+from sklearn.metrics import roc_auc_score
 import os.path as osp
 
-_ID_LABEL, _OOD_LABEL = 0, 1
+_ID_LABEL, _OOD_LABEL = 1, 0
 
 class PipelineMember:
     """ Superclass for all pipeline members. """
@@ -41,22 +42,35 @@ class EvaluateEmpircalLowerLipschitzBounds(PipelineMember):
     name = 'EvaluateEmpircalLowerLipschitzBounds'
 
     def __init__(self, num_perturbations_per_sample=5, min_perturbation=0.1, max_perturbation=5.0, num_perturbations = 10, 
-            seed=None, gpus=0, evaluate_on=['val'], **kwargs):
+            seed=None, gpus=0, evaluate_on=['val'], perturbation_type='noise', permute_per_sample=True, **kwargs):
         super().__init__(**kwargs)
         self.num_perturbations_per_sample = num_perturbations_per_sample
         self.min_perturbation = min_perturbation
         self.max_perturbation = max_perturbation
         self.num_perturbations = num_perturbations
-        self.seed = None
+        self.perturbation_type = perturbation_type
+        self.permute_per_sample = permute_per_sample
+        self.seed = seed
         self.gpus = gpus
         self.evaluate_on = evaluate_on
 
     def __str__(self):
+        if self.perturbation_type.lower() == 'noise':
+            stats = [
+                f'\t Min perturbation : {self.min_perturbation}',
+                f'\t Max perturbation : {self.max_perturbation}',
+            ]
+        elif self.perturbation_type.lower() == 'derangement':
+            stats = [
+                f'\t Permutation per Sample : {self.permute_per_sample}',
+            ]
+
+
         return '\n'.join([
             self.name,
+            f'\t Perturbation type : {self.perturbation_type}',
+        ] + stats + [
             f'\t Number perturbations per sample : {self.num_perturbations_per_sample}',
-            f'\t Min perturbation : {self.min_perturbation}',
-            f'\t Max perturbation : {self.max_perturbation}',
             f'\t Number of perturbations : {self.num_perturbations}',
             f'\t Seed : {self.seed}',
             f'\t Evaluate on : {self.evaluate_on}',
@@ -73,21 +87,27 @@ class EvaluateEmpircalLowerLipschitzBounds(PipelineMember):
             if self.gpus > 0:
                 dataset = dataset.to('cuda')
                 kwargs['model'] = kwargs['model'].to('cuda')
+            if self.perturbation_type.lower() == 'noise':
+                perturbations = evaluation.lipschitz.local_perturbations(kwargs['model'], dataset,
+                    perturbations=np.linspace(self.min_perturbation, self.max_perturbation, self.num_perturbations),
+                    num_perturbations_per_sample=self.num_perturbations_per_sample, seed=self.seed)
+                pipeline_log(f'Created {self.num_perturbations_per_sample} perturbations in linspace({self.min_perturbation:.2f}, {self.max_perturbation:.2f}, {self.num_perturbations}) for {name} samples.')
+            elif self.perturbation_type.lower() == 'derangement':
+                perturbations = evaluation.lipschitz.permutation_perturbations(kwargs['model'], dataset,
+                    self.num_perturbations, num_perturbations_per_sample=self.num_perturbations_per_sample, 
+                    seed=self.seed, per_sample=self.permute_per_sample)
+                pipeline_log(f'Created {self.num_perturbations} permutations ({self.num_perturbations_per_sample} each) for {name} samples.')
 
-            perturbations = evaluation.lipschitz.local_perturbations(kwargs['model'], dataset,
-                perturbations=np.linspace(self.min_perturbation, self.max_perturbation, self.num_perturbations),
-                num_perturbations_per_sample=self.num_perturbations_per_sample, seed=self.seed)
-            pipeline_log(f'Created {self.num_perturbations_per_sample} perturbations in linspace({self.min_perturbation:.2f}, {self.max_perturbation:.2f}, {self.num_perturbations}) for validation samples.')
             smean, smedian, smax, smin = evaluation.lipschitz.local_lipschitz_bounds(perturbations)
             log_metrics(kwargs['logs'], {
                 f'{name}_slope_mean_perturbation' : smean,
                 f'{name}_slope_median_perturbation' : smedian,
                 f'{name}_slope_max_perturbation' : smax,
                 f'{name}_slope_min_perturbation' : smin,
-            }, 'empirical_lipschitz')
+            }, f'empirical_lipschitz{self.suffix}')
             # Plot the perturbations and log it
             fig, _ , _, _ = plot.perturbations.local_perturbations_plot(perturbations)
-            log_figure(kwargs['logs'], fig, f'{name}_perturbations', 'empirical_lipschitz', save_artifact=kwargs['artifact_directory'])
+            log_figure(kwargs['logs'], fig, f'{name}_perturbations', f'empirical_lipschitz{self.suffix}', save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Logged input vs. output perturbation plot for dataset {name}.')
         
         return args, kwargs
@@ -97,21 +117,15 @@ class FitFeatureDensity(PipelineMember):
 
     name = 'FitFeatureDensity'
 
-    def __init__(self, density_type=FeatureSpaceDensityGaussianPerClass.name, gpus=0, fit_to=['train'], **kwargs):
+    def __init__(self, density_type='unspecified', gpus=0, fit_to=['train'], **kwargs):
         super().__init__(**kwargs)
-        self.density_type = density_type.lower()
-        if self.density_type == FeatureSpaceDensityGaussianPerClass.name.lower():
-            self.density = FeatureSpaceDensityGaussianPerClass(**kwargs)
-            self.fit_to = fit_to
-        else:
-            raise RuntimeError(f'Unsupported feature space density {self.density_type}')
+        self.density = get_density_model(density_type=density_type, **kwargs)
         self.gpus = gpus
+        self.fit_to = fit_to
 
-    
     def __str__(self):
         return '\n'.join([
             self.name,
-            f'\t ID : {self.id}'
             f'\t Fit to : {self.fit_to}',
             f'\t Density : {self.density}',
         ])
@@ -119,14 +133,15 @@ class FitFeatureDensity(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.fit_to], gpus=self.gpus)
-        features, labels = torch.cat(features, dim=0), torch.cat(labels)
+        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.fit_to], gpus=self.gpus)
+        features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
+        # TODO: for training disregard predictions and override them with ground truth labels
 
-        self.density.fit(features, labels)
+        self.density.fit(features, predictions)
         if 'feature_density' in kwargs:
             pipeline_log('Density was already fit to features, overwriting...')
         kwargs['feature_density'] = self.density
-        pipeline_log(f'Fitted density of type {self.density_type} to training data features.')
+        pipeline_log(f'Fitted density of type {self.density.name} to training data features.')
         return args, kwargs
 
 class EvaluateFeatureDensity(PipelineMember):
@@ -151,15 +166,15 @@ class EvaluateFeatureDensity(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
-        features, labels = torch.cat(features, dim=0), torch.cat(labels)
+        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
+        features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
 
-        density = kwargs['feature_density'](features.cpu()).cpu()
+        log_density = kwargs['feature_density'](features.cpu()).cpu()
         
         # Log histograms and metrics label-wise
         y = labels.cpu()
         for label in torch.unique(y):
-            log_density_label = torch.log(density[y == label] + 1e-20)
+            log_density_label = log_density[y == label] + 1e-20
             log_histogram(kwargs['logs'], log_density_label.cpu().numpy(), 'feature_log_density', global_step=label, label_suffix=str(label.item()))
             log_metrics(kwargs['logs'], {
                 f'{self.prefix}mean_feature_log_density' : log_density_label.mean(),
@@ -168,17 +183,21 @@ class EvaluateFeatureDensity(PipelineMember):
                 f'{self.prefix}max_feature_log_density' : log_density_label.max(),
                 f'{self.prefix}median_feature_log_density' : log_density_label.median(),
             }, 'feature_density', step=label)
-        fig, ax = plot_log_density_histograms(torch.log(density.cpu() + 1e-20), y.cpu(), overlapping=False)
-        log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_all_classes{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
+        fig, ax = plot_log_density_histograms(log_density.cpu(), y.cpu(), overlapping=False)
+        log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_all_classes{self.suffix}', 'feature_class_density_plots', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Evaluated feature density for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
 
         # Split into in-distribution and out-of-distribution
         labels_id_ood = split_labels_into_id_and_ood(y.cpu(), set(kwargs['config']['data']['train_labels']), id_label=_ID_LABEL, ood_label=_OOD_LABEL)
-        fig, ax = plot_log_density_histograms(torch.log(density.cpu()), labels_id_ood.cpu(), label_names={_ID_LABEL : 'id', _OOD_LABEL : 'ood'})
+        fig, ax = plot_log_density_histograms(log_density.cpu(), labels_id_ood.cpu(), label_names={_ID_LABEL : 'id', _OOD_LABEL : 'ood'})
         log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_id_vs_ood{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
-
         pipeline_log(f'Saved feature density histogram to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_id_vs_ood_{self.suffix}.pdf')))
 
+        # Calculate area under the ROC for separating in-distribution (label 1) from out of distribution (label 0)
+        roc_auc = roc_auc_score(labels_id_ood.numpy(), log_density.cpu().numpy())
+        kwargs['metrics'][f'auroc{self.suffix}'] = roc_auc
+        log_metrics(kwargs['logs'], {f'auroc{self.suffix}' : roc_auc}, 'feature_density_plots')
+        
         return args, kwargs
 
 class FitFeatureSpacePCAIDvsOOD(PipelineMember):
@@ -202,16 +221,16 @@ class FitFeatureSpacePCAIDvsOOD(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.fit_to], gpus=self.gpus)
-        features, labels = torch.cat(features, dim=0), torch.cat(labels)
+        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.fit_to], gpus=self.gpus)
+        features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
         pca = PCA(n_components=2)
         transformed = pca.fit_transform(features.cpu().numpy())
         fig, ax = plot_2d_features(torch.tensor(transformed), labels)
         log_figure(kwargs['logs'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_data_fit', 'feature_space_pca_id_vs_ood', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Logged 2d pca fitted to {self.fit_to}')
 
-        features, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
-        features, labels = torch.cat(features, dim=0), torch.cat(labels)
+        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
+        features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
         transformed = pca.transform(features.cpu().numpy())
         fig, ax = plot_2d_features(torch.tensor(transformed), labels)
         log_figure(kwargs['logs'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_by_label', 'feature_space_pca_id_vs_ood', save_artifact=kwargs['artifact_directory'])
@@ -223,7 +242,6 @@ class FitFeatureSpacePCAIDvsOOD(PipelineMember):
         pipeline_log(f'Logged 2d pca fitted to {self.fit_to}, evaluated on {self.evaluate_on} by in-distribution vs out-of-distribution')
 
         return args, kwargs
-
 
 class FitFeatureSpacePCA(PipelineMember):
     """ Fits PCA to the feature space using training and validation data. """
@@ -245,8 +263,8 @@ class FitFeatureSpacePCA(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.fit_to], gpus=self.gpus)
-        features, labels = torch.cat(features, dim=0), torch.cat(labels)
+        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.fit_to], gpus=self.gpus)
+        features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
 
         pca = PCA(n_components=self.num_components)
         projected = pca.fit_transform(features.cpu().numpy())
@@ -280,8 +298,8 @@ class LogFeatures(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features_all, labels_all = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
-        for name, features, labels in zip(self.evaluate_on, features_all, labels_all):
+        features_all, predictions_all, labels_all = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
+        for name, predictions, features, labels in zip(self.evaluate_on, features_all, predictions_all, labels_all):
             log_embedding(kwargs['logs'], features.cpu().numpy(), f'{name}_features', labels.cpu().numpy(), save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Logged features (size {features.size()}) of dataset {name}')
             
@@ -307,12 +325,12 @@ class Pipeline:
                 if member['type'].lower() == _class.name.lower():
                     self.members.append(_class(
                         gpus=gpus,
-                        _idx = idx,
+                        pipeline_idx = idx,
                         **member
                     ))
                     break
             else:
-                raise RuntimeError(f'Unrecognized evaluation pipeline member {name}')
+                raise RuntimeError(f'Unrecognized evaluation pipeline member {member}')
 
     def __call__(self, *args, **kwargs):
         for member in self.members:
@@ -326,11 +344,10 @@ class Pipeline:
 
     def __str__(self):
         return '\n'.join([
-            'Evaluation Pipeline : ',
+            'Evaluation Pipeline',
         ] + [
-            f'\t{member}' for member in self.members
+            f'{member}' for member in self.members
         ])
-
 
 def pipeline_log(string):
     print(f'EVALUATION PIPELINE - {string}')

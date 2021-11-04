@@ -46,3 +46,41 @@ def is_outlier(array, quantile=0.95):
     is_outlier = np.ones_like(array, dtype=bool)
     is_outlier[idxs] = False
     return is_outlier
+
+def random_derangement(N, rng=None):
+    """ Returns a random permutation of [0, 1, ..., N] that has no fixed points (derangement).
+    
+    Parameters:
+    -----------
+    N : int
+        The number of elements to derange.
+    rng : np.random.RandomState or None
+        The random state to use. If None is given, a random RandomState is generated.
+
+    References:
+    -----------
+    Taken from: https://stackoverflow.com/a/52614780
+    """
+    if rng is None:
+        rng = np.random.RandomState(np.random.randint(1 << 32))
+    
+    # Edge cases
+    if N == 0:
+        return np.array([], dtype=int)
+    elif N == 1:
+        return np.array([0], dtype=int)
+
+    original = np.arange(N)
+    new = rng.permutation(N)
+    same = np.where(original == new)[0]
+    _iter = 0
+    while len(same) != 0:
+        if _iter + 1 % 100 == 0:
+            print('iteration', _iter)
+        swap = same[rng.permutation(len(same))]
+        new[same] = new[swap]
+        same = np.where(original == new)[0]
+        if len(same) == 1:
+            swap = rng.randint(0, N)
+            new[[same[0], swap]] = new[[swap, same[0]]]
+    return new

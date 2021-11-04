@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from torch_geometric.data import Data
+from util import random_derangement
 
 def local_lipschitz_bounds(perturbations):
     """ Function that calculates local Lipschitz bounds given some random perturbations. 
@@ -94,4 +95,77 @@ def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50),
             results_eps.append((logits - logits_perturbed).norm(dim=1).detach().cpu())
             
         result[eps] = torch.cat(results_eps)
+    return result
+
+
+def permute_features(x, num_permutations, per_sample=True, rng=None):
+    """ Randomly permutes the features of a 2d tensor. 
+    
+    Parameters:
+    -----------
+    torch.Tensor, shape [N, D]
+        The tensor to permute.
+    num_permutations : int
+        How many elements will be permuted.
+    per_sample : bool
+        If `True`, then the columns to be permuted are re-rolled for each row.
+        If `False`, then the columns to be permuted are globally selected for all rows.
+    rng : np.random.RandomState or None
+        The rng to use.
+    """
+    if rng is None:
+        rng = np.random.RandomState(np.random.randint(1 << 32))
+    per_sample = False
+    if per_sample:
+        idxs = np.array([np.random.choice(x.size(1), size=num_permutations, replace=False) for _ in range(x.size(0))])
+    else:
+        idxs = np.array([np.random.choice(x.size(1), size=num_permutations, replace=False)] * x.size(0))
+    swap = idxs[:, random_derangement(idxs.shape[1], rng=rng)]
+    x_shuffled = x.clone()
+    for row in range(x_shuffled.size(0)):
+        x_shuffled[row][idxs[row]] = x_shuffled[row][swap[row]]
+    return x_shuffled
+    
+
+@torch.no_grad()
+def permutation_perturbations(model, dataset, num_permutations, num_perturbations_per_sample=10, seed=None, per_sample=True):
+    """ Locally perturbs data by permuting certain indices and see how much the logits are perturbed. 
+    
+    Parameters:
+    -----------
+    model : torch.nn.Module
+        The model to check
+    dataset : torch_geometric.data.Dataset
+        The dataset to investigate. Currently, only dataset is used.
+    num_permutations : iterable
+        Different magnitudes of noise to check.
+    num_perturbations_per_sample : int
+        How many random perturbations to use per sample and per noise magnitude.
+    seed : int or None
+        If given, seeds the rng and makes the perturbations deterministic.
+    per_sample : bool
+        If `True`, then the columns to be permuted are re-rolled for each row.
+        If `False`, then the columns to be permuted are globally selected for all rows.
+    
+    Returns:
+    --------
+    perturbations : dict
+        Mapping from input_perturbations -> `num_nodes * num_perturbations_per_sample` output perturbations.
+    """
+    if seed is None:
+        seed = np.random.randint(1 << 32)
+    rng = np.random.RandomState(seed)
+    perturbations = np.sort(np.unique(np.linspace(1, dataset.x.size(1), num_permutations).astype(int))).tolist()
+
+    logits = model(dataset)[-1]
+    logits = logits[dataset.mask]
+    result = {}
+    for num_permutations in perturbations:
+        results_eps = []
+        for _ in range(num_perturbations_per_sample):
+            x_perturbed = permute_features(dataset.x, num_permutations, rng=rng, per_sample=per_sample)
+            data = Data(x=x_perturbed, edge_index=dataset.edge_index)
+            logits_perturbed = model(data)[-1][dataset.mask]
+            results_eps.append((logits - logits_perturbed).norm(dim=1).detach().cpu())
+        result[num_permutations] = torch.cat(results_eps)
     return result

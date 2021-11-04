@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from model.spectral_norm import spectral_norm
 import pytorch_lightning as pl
 from metrics import accuracy
+from scipy.stats import ortho_group
 
 class ResidualBlock(nn.Module):
     """ Wrapper for any convolution that implements a residual connection. 
@@ -26,12 +27,20 @@ class ResidualBlock(nn.Module):
         If a bias should be used for the input projection layer.
     """
 
-    def __init__(self, input_dim, output_dim, conv, use_spectral_norm=False, weight_scale=1.0, use_bias=True):
+    def __init__(self, input_dim, output_dim, conv, use_spectral_norm=False, weight_scale=1.0, use_bias=False,
+        freeze_residual_projection=False, orthogonalize_residual_projection=False):
         super().__init__()
         self.conv = conv
         if input_dim != output_dim:
-            self.input_projection = LinearWithSpectralNormaliatzion(input_dim, output_dim, use_bias=True,
+            self.input_projection = LinearWithSpectralNormaliatzion(input_dim, output_dim, use_bias=use_bias,
                 use_spectral_norm=use_spectral_norm, weight_scale=weight_scale)
+
+            if orthogonalize_residual_projection:
+                raise NotImplementedError('Currently orthogonalization of projection matrices is not yet supported.')
+            
+            if freeze_residual_projection:
+                for param in self.input_projection.parameters():
+                    param.requires_grad = False
         else:
             self.input_projection = None
         
@@ -42,7 +51,7 @@ class ResidualBlock(nn.Module):
         return x + h
 
 def _make_convolutions(input_dim, num_classes, hidden_dims, make_conv, *args, residual=False, 
-        use_spectral_norm=False, weight_scale=1.0, **kwargs):
+        use_spectral_norm=False, weight_scale=1.0, freeze_residual_projection=False, orthogonalize_residual_projection=False, **kwargs):
     """ Makes convolutions from a class and a set of input, hidden and output dimensions. """
     all_dims = [input_dim] + list(hidden_dims) + [num_classes]
     convs = []
@@ -50,7 +59,8 @@ def _make_convolutions(input_dim, num_classes, hidden_dims, make_conv, *args, re
         conv = make_conv(in_dim, out_dim, *args, use_spectral_norm=use_spectral_norm, 
             weight_scale=weight_scale, **kwargs)
         if residual:
-            conv = ResidualBlock(in_dim, out_dim, conv, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale)
+            conv = ResidualBlock(in_dim, out_dim, conv, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale,
+                freeze_residual_projection=freeze_residual_projection, orthogonalize_residual_projection=orthogonalize_residual_projection)
         convs.append(conv)
     return nn.ModuleList(convs)
 
@@ -71,14 +81,16 @@ class GCN(nn.Module):
 
     def __init__(self, input_dim, num_classes, hidden_dims, activation=F.leaky_relu, 
                     use_bias=True, use_spectral_norm=True, weight_scale=1.0, cached=True,
-                    residual=False):
+                    residual=False, freeze_residual_projection=False, orthogonalize_residual_projection=False):
         super().__init__()
         self.activation = activation
         self.residual = residual
 
         self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, self._make_conv_with_spectral_norm,
                                                 cached=cached, bias=use_bias, use_spectral_norm=use_spectral_norm,
-                                                weight_scale=weight_scale, residual=residual)
+                                                weight_scale=weight_scale, 
+                                                residual=residual, freeze_residual_projection=freeze_residual_projection, 
+                                                orthogonalize_residual_projection=orthogonalize_residual_projection)
 
     @staticmethod
     def _make_conv_with_spectral_norm(input_dim, output_dim, *args, use_spectral_norm=False, weight_scale=1.0, **kwargs):
@@ -250,24 +262,25 @@ def make_model_by_configuration(configuration, input_dim, output_dim):
     if configuration['model_type'] == 'gcn':
         return GCN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
             use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
-            cached=True, residual=configuration.get('residual', False))
-    elif configuration['model_type'] == 'gat':
-        return GAT(input_dim, output_dim, configuration['hidden_sizes'], configuration['num_heads'], make_activation_by_configuration(configuration), 
-            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
-    elif configuration['model_type'] == 'sage':
-        return GraphSAGE(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
-            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
-            normalize=configuration['normalize'])
-    elif configuration['model_type'] == 'gin':
-        return GIN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
-            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
-    elif configuration['model_type'] == 'mlp':
-        return MLP(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
-            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
-    elif configuration['model_type'] == 'appnp':
-        return APPNP(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
-            use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
-            diffusion_iterations=configuration['diffusion_iterations'], teleportation_probability=configuration['teleportation_probability'],)
+            cached=True, residual=configuration.get('residual', False),
+            freeze_residual_projection=configuration.get('freeze_residual_projection', False))
+    # elif configuration['model_type'] == 'gat':
+    #     return GAT(input_dim, output_dim, configuration['hidden_sizes'], configuration['num_heads'], make_activation_by_configuration(configuration), 
+    #         use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
+    # elif configuration['model_type'] == 'sage':
+    #     return GraphSAGE(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
+    #         use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
+    #         normalize=configuration['normalize'])
+    # elif configuration['model_type'] == 'gin':
+    #     return GIN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
+    #         use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
+    # elif configuration['model_type'] == 'mlp':
+    #     return MLP(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
+    #         use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
+    # elif configuration['model_type'] == 'appnp':
+    #     return APPNP(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
+    #         use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
+    #         diffusion_iterations=configuration['diffusion_iterations'], teleportation_probability=configuration['teleportation_probability'],)
     else:
         raise RuntimeError(f'Unsupported model type {configuration["model_type"]}')
         

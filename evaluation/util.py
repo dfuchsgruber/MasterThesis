@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import numpy as np
 
 def split_labels_into_id_and_ood(y, id_labels, ood_labels=None, id_label=0, ood_label=1):
@@ -41,10 +42,12 @@ def get_data_loader(name, loaders):
         return loaders['data_loader_val']
     elif name in ('val'):
         return loaders['data_loader_val_all_classes']
+    elif name in ('test'):
+        return loaders['data_loader_test']
     else:
         raise RuntimeError(f'Cant provide dataset {name} to evaluation.')
 
-def feature_extraction(model, data_loaders, gpus=0, layer=-2):
+def feature_extraction(model, data_loaders, gpus=0, layer=-2, softmax=True):
     """ Extracts features of all data loaders. 
     
     model : torch.nn.Module
@@ -55,23 +58,33 @@ def feature_extraction(model, data_loaders, gpus=0, layer=-2):
         If > 0, models are run on the gpu.
     layer : int
         Which layer to use for feature extraction.
+    softmax : bool
+        If True, applies a softmax to the predicted labels.
 
     Returns:
     --------
     features : list
         A list of features for each dataset.
+    predictions : list
+        A list of predictions for each dataset.
     labels : list
         A list of correpsonding labels for each dataset.
     """
     if gpus > 0:
         model = model.to('cuda')
     
-    features, labels = [], []
+    features, predictions, labels = [], [], []
     for loader in data_loaders:
         assert len(loader) == 1, f'Feature extraction is currently only supported for single graphs.'
         for data in loader:
             if gpus > 0:
                 data = data.to('cuda')
-            features.append(model(data)[layer][data.mask].cpu())
+            output = model(data)
+            pred = output[-1].cpu()
+            if softmax:
+                pred = F.softmax(pred, 1)
+            features.append(output[layer][data.mask].cpu())
             labels.append(data.y[data.mask].cpu())
-    return features, labels
+            predictions.append(pred[data.mask])
+            # print(features[-1].size(), predictions[-1].size(), labels[-1].size())
+    return features, predictions, labels

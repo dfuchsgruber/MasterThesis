@@ -4,8 +4,8 @@ import torch
 import numpy as np
 import os.path as osp
 import os
+import json
 
-from model.train import train_model_semi_supervised_node_classification
 from model.gnn import make_model_by_configuration
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
 from data.gust_dataset import GustDataset
@@ -30,40 +30,57 @@ ex.init_dataset(dataset='cora_ml', num_dataset_splits=1, train_portion=20, val_p
 #                     train_labels=[0, 1, 2, 3, 4, 5], val_labels='all', train_labels_remove_other=False, val_labels_remove_other=False,
 #                     split_type='stratified',
 #                     )
-ex.init_model(model_type='gcn', hidden_sizes=[64], num_initializations=2, weight_scale=0.8, 
+ex.init_model(model_type='gcn', hidden_sizes=[64, 64], num_initializations=1, weight_scale=0.8, 
     use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
-    residual=True)
+    residual=True, freeze_residual_projection=True)
 ex.init_run(name='model_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
     'model.model_type', 'model.hidden_sizes', 'model.weight_scale'
 ])
 ex.init_evaluation(pipeline=[
-    {
-        'type' : 'EvaluateEmpircalLowerLipschitzBounds',
-        'num_perturbations' : 5,
-        'min_perturbation' : 2,
-        'max_perturbation' : 10,
-        'num_perturbations_per_sample' : 1,
-        'seed' : 1337,
-    },
-    {
-        'type' : 'FitFeatureSpacePCA',
-        'fit_to' : ['train'],
-        'num_components' : 2,
-        'name' : '2d-pca',
-    },
+    # {
+    #     'type' : 'EvaluateEmpircalLowerLipschitzBounds',
+    #     'num_perturbations' : 5,
+    #     'min_perturbation' : 2,
+    #     'max_perturbation' : 10,
+    #     'num_perturbations_per_sample' : 1,
+    #     'perturbation_type' : 'noise',
+    #     'seed' : 1337,
+    #     'name' : 'noise_perturbations',
+    # },
+    # {
+    #     'type' : 'EvaluateEmpircalLowerLipschitzBounds',
+    #     'num_perturbations' : 10,
+    #     'num_perturbations_per_sample' : 1,
+    #     'permute_per_sample' : True,
+    #     'perturbation_type' : 'derangement',
+    #     'seed' : 1337,
+    #     'name' : 'derangement_perturbations',
+    # },
+    # {
+    #     'type' : 'FitFeatureSpacePCA',
+    #     'fit_to' : ['train'],
+    #     'num_components' : 2,
+    #     'name' : '2d-pca',
+    # },
     {
         'type' : 'FitFeatureDensity',
         'density_type' : 'GaussianPerClass',
         'pca' : True,
         'pca_number_components' : 2,
         'pca_per_class' : True,
-        'name' : '2d-pca-density',
         'diagonal_covariance' : True,
-        'evaluate_on' : ['val'],
+        'fit_to' : ['train', 'val'],
     },
+    # {
+    #     'type' : 'FitFeatureDensity',
+    #     'density_type' : 'GaussianMixture',
+    #     'fit_to' : ['train'],
+    #     'number_components' : 7,
+    # },
     {
         'type' : 'EvaluateFeatureDensity',
         'evaluate_on' : ['val'],
+        'name' : '2d-pca'
     },
     {
         'type' : 'LogFeatures',
@@ -77,9 +94,12 @@ ex.init_evaluation(pipeline=[
 ]
 )
 
-ex.train(max_epochs=5, learning_rate=0.001, early_stopping={
+results_path = (ex.train(max_epochs=5, learning_rate=0.001, early_stopping={
     'monitor' : 'val_loss',
     'mode' : 'min',
     'patience' : 50,
     'min_delta' : 1e-3,
-}, gpus=1)
+}, gpus=1))
+
+with open(results_path) as f:
+    print(json.load(f))
