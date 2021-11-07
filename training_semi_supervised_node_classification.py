@@ -15,8 +15,9 @@ from model.util import module_numel
 from model.gnn import make_model_by_configuration
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
 from data.gust_dataset import GustDataset
-from data.util import data_get_num_attributes, data_get_num_classes, data_get_summary
+from data.util import data_get_num_attributes, data_get_num_classes
 from data.construct import load_data_from_configuration
+import data.constants as data_constants
 from seed import model_seeds
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
@@ -153,22 +154,19 @@ class ExperimentWrapper:
 
         # Iterating over all dataset splits
         result = defaultdict(list)
-        for split_idx, (data_train, data_val, data_val_all_classes, data_test) in enumerate(data_list):
-            
-            print('# Training data summary #')
-            print(data_get_summary(data_train, prefix='\t'))
+        for split_idx, data_dict in enumerate(data_list):
+
+            data_loaders = {
+                name : DataLoader(data, batch_size=1, shuffle=False) for name, data in data_dict.items()
+            }
 
             # Re-initializing the model multiple times to average over results
             for reinitialization, seed in enumerate(self.model_seeds):
                 pl.seed_everything(seed)
-                data_loader_train = DataLoader(data_train, batch_size=1, shuffle=False)
-                data_loader_val = DataLoader(data_val, batch_size=1, shuffle=False)
-                data_loader_val_all_classes = DataLoader(data_val_all_classes, batch_size=1, shuffle=False)
-                data_loader_test = DataLoader(data_test, batch_size=1, shuffle=False)
 
                 # print(data_train[0].mask.sum(), data_val[0].mask.sum(), data_val_all_classes[0].mask.sum())
 
-                backbone = make_model_by_configuration(self.model_config, data_get_num_attributes(data_train[0]), data_get_num_classes(data_train[0]))
+                backbone = make_model_by_configuration(self.model_config, data_get_num_attributes(data_dict[data_constants.TRAIN][0]), data_get_num_classes(data_dict[data_constants.TRAIN][0]))
                 model = SemiSupervisedNodeClassification(backbone, learning_rate=learning_rate)
                 print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
 
@@ -196,8 +194,8 @@ class ExperimentWrapper:
                                         progress_bar_refresh_rate=0,
                                         gpus=gpus,
                                         )
-                    trainer.fit(model, data_loader_train, data_loader_val)
-                    val_metrics = trainer.validate(None, data_loader_val, ckpt_path='best')
+                    trainer.fit(model, data_loaders[data_constants.TRAIN], data_loaders[data_constants.VAL_REDUCED])
+                    val_metrics = trainer.validate(None, data_loaders[data_constants.VAL_REDUCED], ckpt_path='best')
 
                     with open(osp.join(artifact_dir, 'metrics.json'), 'w+') as f:
                         json.dump(val_metrics, f)
@@ -205,9 +203,6 @@ class ExperimentWrapper:
                     for val_metric in val_metrics:
                         for metric, value in val_metric.items():
                             result[metric].append(value)
-
-                print('# Validation data summary #')
-                print(data_get_summary(data_val_all_classes, prefix='\t'))
 
                 # Build evaluation pipeline
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus)
@@ -221,11 +216,8 @@ class ExperimentWrapper:
                 } 
                 pipeline_metrics = {} # Metrics logged by the pipeline
                 pipeline(
-                    model=model, 
-                    data_loader_train=data_loader_train,
-                    data_loader_val=data_loader_val,
-                    data_loader_val_all_classes=data_loader_val_all_classes,
-                    data_loader_test = data_loader_test, 
+                    model=model,
+                    data_loaders = data_loaders,
                     logger=logger,
                     config=config,
                     artifact_directory=artifact_dir,

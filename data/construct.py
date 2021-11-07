@@ -5,6 +5,7 @@ from data.gust_dataset import GustDataset
 from torch_geometric.transforms import BaseTransform, Compose
 from data.transform import MaskTransform, MaskLabelsTransform, RemoveLabelsTransform
 from data.util import stratified_split_with_fixed_test_set_portion, uniform_split_with_fixed_test_set_portion
+import data.constants
 
 def _append_labels_transform(dataset, select_labels, remove_other_labels, compress_labels):
     """ Appends a transformation that only selects certain labels. 
@@ -41,7 +42,15 @@ def _load_gust_data_from_configuration(config):
                                                            portion_test_not_fixed=config['test_portion'],
                                                            )
     return [
-        [GustDataset(config['dataset'], transform=MaskTransform(mask[type_idx, split_idx])) for type_idx in (0, 1, 1, 2)] for split_idx in range(mask.shape[1])
+            {
+                name : GustDataset(config['dataset'], transform = MaskTransform(mask[type_idx, split_idx])) for name, type_idx in {
+                    data.constants.TRAIN : 0,
+                    data.constants.VAL : 1,
+                    data.constants.VAL_REDUCED : 1,
+                    data.constants.TEST : 2,
+                    data.constants.TEST_REDUCED : 2,
+                }.items()
+            } for split_idx in range(mask.shape[1])
         ], GustDataset(config['dataset'], transform=MaskTransform(mask_test_fixed))
 
 def _print_stats(dataset, prefix=''):
@@ -90,8 +99,9 @@ def load_data_from_configuration_stratified_split(config):
         compress_labels = config.get('train_labels_compress', True)
         print(f'Reducing train labels to {config["train_labels"]}.\n\tRemove other vertices: {remove_other_labels}.\n\tCompressing labels: {compress_labels}.')
         for datasets in data_list:
-            _append_labels_transform(datasets[0], config['train_labels'], remove_other_labels, compress_labels)
-            _append_labels_transform(datasets[1], config['train_labels'], remove_other_labels, compress_labels)
+            _append_labels_transform(datasets[data.constants.TRAIN], config['train_labels'], remove_other_labels, compress_labels)
+            _append_labels_transform(datasets[data.constants.VAL_REDUCED], config['train_labels'], remove_other_labels, compress_labels)
+            _append_labels_transform(datasets[data.constants.TEST_REDUCED], config['train_labels'], remove_other_labels, compress_labels)
 
     if config.get('val_labels', 'all') != 'all':
         # Select only certain labels from validation data
@@ -99,7 +109,7 @@ def load_data_from_configuration_stratified_split(config):
         compress_labels = config.get('val_labels_compress', True)
         print(f'Reducing val labels to {config["val_labels"]}.\n\tRemove other vertices: {remove_other_labels}.\n\tCompressing labels: {compress_labels}.')
         for datasets in data_list:
-            _append_labels_transform(datasets[2], config['val_labels'], remove_other_labels, compress_labels)
+            _append_labels_transform(datasets[data.constants.VAL], config['val_labels'], remove_other_labels, compress_labels)
 
     return data_list, dataset_fixed
 

@@ -181,7 +181,6 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
             self.coefs[name] = nn.Parameter(coef, requires_grad=False)
 
             if self.diagonal_covariance:
-                print(self.covs[name].size())
                 self.covs[name] *= torch.eye(transformed.size(1))
 
             self._make_covariance_psd(self.covs[name], eps=1e-8)

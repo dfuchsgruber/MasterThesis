@@ -13,6 +13,8 @@ from torch_geometric.loader import DataLoader
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score
 import os.path as osp
+from data.util import label_binarize, data_get_summary
+from warnings import warn
 
 _ID_LABEL, _OOD_LABEL = 1, 0
 
@@ -80,7 +82,7 @@ class EvaluateEmpircalLowerLipschitzBounds(PipelineMember):
     def __call__(self, *args, **kwargs):
 
         for name in self.evaluate_on:
-            loader = get_data_loader(name, kwargs)
+            loader = get_data_loader(name, kwargs['data_loaders'])
             assert len(loader) == 1, f'Empirical local lipschitz evaluation is currently only supported for semi-supervised tasks.'
             for dataset in loader:
                 break # Just want the single dataset
@@ -117,31 +119,36 @@ class FitFeatureDensity(PipelineMember):
 
     name = 'FitFeatureDensity'
 
-    def __init__(self, density_type='unspecified', gpus=0, fit_to=['train'], **kwargs):
+    def __init__(self, density_type='unspecified', gpus=0, fit_to=['train'], fit_to_ground_truth_labels=[], **kwargs):
         super().__init__(**kwargs)
         self.density = get_density_model(density_type=density_type, **kwargs)
         self.gpus = gpus
         self.fit_to = fit_to
+        self.fit_to_ground_truth_labels = fit_to_ground_truth_labels
 
     def __str__(self):
         return '\n'.join([
             self.name,
             f'\t Fit to : {self.fit_to}',
+            f'\t Ground truth labels for fitting used : {self.fit_to_ground_truth_labels}',
             f'\t Density : {self.density}',
         ])
 
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.fit_to], gpus=self.gpus)
+        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
+        for idx, name in enumerate(self.fit_to):
+            if name.lower() in self.fit_to_ground_truth_labels:
+                # Override predictions with ground truth for training data
+                predictions[idx] = label_binarize(labels[idx], num_classes=predictions[idx].size(1)).float()
         features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
-        # TODO: for training disregard predictions and override them with ground truth labels
 
         self.density.fit(features, predictions)
         if 'feature_density' in kwargs:
             pipeline_log('Density was already fit to features, overwriting...')
         kwargs['feature_density'] = self.density
-        pipeline_log(f'Fitted density of type {self.density.name} to training data features.')
+        pipeline_log(f'Fitted density of type {self.density.name} to {self.fit_to}')
         return args, kwargs
 
 class EvaluateFeatureDensity(PipelineMember):
@@ -166,7 +173,7 @@ class EvaluateFeatureDensity(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
+        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
         features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
 
         log_density = kwargs['feature_density'](features.cpu()).cpu()
@@ -221,7 +228,7 @@ class FitFeatureSpacePCAIDvsOOD(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.fit_to], gpus=self.gpus)
+        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
         features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
         pca = PCA(n_components=2)
         transformed = pca.fit_transform(features.cpu().numpy())
@@ -229,7 +236,7 @@ class FitFeatureSpacePCAIDvsOOD(PipelineMember):
         log_figure(kwargs['logs'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_data_fit', 'feature_space_pca_id_vs_ood', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Logged 2d pca fitted to {self.fit_to}')
 
-        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
+        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
         features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
         transformed = pca.transform(features.cpu().numpy())
         fig, ax = plot_2d_features(torch.tensor(transformed), labels)
@@ -248,33 +255,49 @@ class FitFeatureSpacePCA(PipelineMember):
 
     name = 'FitFeatureSpacePCA'
 
-    def __init__(self, gpus=0, fit_to=['train'], num_components=16, **kwargs):
+    def __init__(self, gpus=0, fit_to=['train'], evaluate_on=[], num_components=16, **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.fit_to = fit_to
+        self.evaluate_on = evaluate_on
         self.num_components = num_components
     def __str__(self):
         return '\n'.join([
             self.name,
             f'\t Fit to : {self.fit_to}',
+            f'\t Evaluate on : {self.evaluate_on}',
             f'\t Number of components : {self.num_components}',
         ])
 
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.fit_to], gpus=self.gpus)
+        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
         features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
 
         pca = PCA(n_components=self.num_components)
         projected = pca.fit_transform(features.cpu().numpy())
 
-        if self.num_components == 2:
-            fig, ax = plot_2d_features(torch.tensor(projected), labels)
-            log_figure(kwargs['logs'], fig, f'pca_{self.suffix}_visualization', 'pca', save_artifact=kwargs['artifact_directory'])
-
         log_embedding(kwargs['logs'], projected, f'pca_{self.suffix}', labels.cpu().numpy(), save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Fit feature space PCA with {self.num_components} components. Explained variance ratio {pca.explained_variance_ratio_}')
+
+        if len(self.evaluate_on) > 0 and self.num_components > 2:
+            warn(f'Attempting to evalute PCA on {self.evaluate_on} but dimension is {self.num_components} != 2. No plots created.')
+
+        if self.num_components == 2:
+            loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
+            features, predictions, labels = feature_extraction(kwargs['model'], loaders, gpus=self.gpus)
+            for idx, data_name in enumerate(self.evaluate_on):
+                # Get the label-to-name mapping
+                for data in loaders[idx]:
+                    idx_to_label = {idx : label for label, idx in data.label_to_idx.items()}
+                    break
+                projected = pca.fit_transform(features[idx].cpu().numpy())
+                fig, ax = plot_2d_features(torch.tensor(projected), labels[idx])
+                log_figure(kwargs['logs'], fig, f'pca_{self.suffix}_{data_name}_gnd', 'pca', save_artifact=kwargs['artifact_directory'])
+                fig, ax = plot_2d_features(torch.tensor(projected), predictions[idx].argmax(dim=1))
+                log_figure(kwargs['logs'], fig, f'pca_{self.suffix}_{data_name}_predicted', 'pca', save_artifact=kwargs['artifact_directory'])
+
         kwargs['feature_space_pca'] = pca
 
         return args, kwargs
@@ -298,11 +321,33 @@ class LogFeatures(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features_all, predictions_all, labels_all = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs) for name in self.evaluate_on], gpus=self.gpus)
+        features_all, predictions_all, labels_all = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
         for name, predictions, features, labels in zip(self.evaluate_on, features_all, predictions_all, labels_all):
             log_embedding(kwargs['logs'], features.cpu().numpy(), f'{name}_features', labels.cpu().numpy(), save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Logged features (size {features.size()}) of dataset {name}')
             
+        return args, kwargs
+
+class PrintDatasetSummary(PipelineMember):
+    """ Pipeline member that prints dataset statistics. """
+
+    name = 'PrintDatasetSummary'
+
+    def __init__(self, gpus=0, evaluate_on=['train', 'val'], **kwargs):
+        self.evaluate_on = evaluate_on
+
+    def __str__(self):
+        return '\n'.join([
+            self.name,
+            f'\t Evaluate on : {self.evaluate_on}',
+        ])
+
+    def __call__(self, *args, **kwargs):
+        for name in self.evaluate_on:
+            loader = get_data_loader(name, kwargs['data_loaders'])
+            print(f'# Data summary : {name}')
+            print(data_get_summary(loader.dataset, prefix='\t'))
+
         return args, kwargs
 
 pipeline_members = [
@@ -312,6 +357,7 @@ pipeline_members = [
     LogFeatures,
     FitFeatureSpacePCA,
     FitFeatureSpacePCAIDvsOOD,
+    PrintDatasetSummary,
 ]
 
 class Pipeline:

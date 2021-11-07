@@ -36,16 +36,10 @@ def split_labels_into_id_and_ood(y, id_labels, ood_labels=None, id_label=0, ood_
 def get_data_loader(name, loaders):
     """ Gets the right dataloader given the name of a dataset. """
     name = name.lower()
-    if name == 'train':
-        return loaders['data_loader_train']
-    elif name in ('val-reduced', 'val_reduced'):
-        return loaders['data_loader_val']
-    elif name in ('val'):
-        return loaders['data_loader_val_all_classes']
-    elif name in ('test'):
-        return loaders['data_loader_test']
-    else:
+    if name not in loaders:
         raise RuntimeError(f'Cant provide dataset {name} to evaluation.')
+    else:
+        return loaders[name]
 
 def feature_extraction(model, data_loaders, gpus=0, layer=-2, softmax=True):
     """ Extracts features of all data loaders. 

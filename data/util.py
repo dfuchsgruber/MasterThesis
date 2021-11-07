@@ -4,6 +4,7 @@ from torch_geometric.data import Dataset, Data
 from data.base import SingleGraphDataset
 import torch
 from warnings import warn
+import data.constants as data_constants
 
 from seed import data_split_seeds
 
@@ -125,7 +126,7 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
     Returns:
     --------
     data_list : list
-        A list of different data splits. Each element is 4-tuple of data_train, data_val, data_val_all_classes, data_test.
+        Different splits. Each split is indexed by `data.constants` constants.
     data_test_fixed : torch_geometric.data.Dataset
         Fixed test dataset that is consistent among all splits.
     """
@@ -180,7 +181,9 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
         # Test idx are the non-used idxs (which are not fixed)
         mask_test = (~(mask_train | mask_val_reduced | mask_val)) & mask_non_fixed
         data_test = SingleGraphDataset(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, mask_test)
-        
+        # Test idx for the reduced graph is the subset of the test graph that is on train labels
+        data_test_reduced = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_test[mask_train_graph])
+
         # Sanity checks
         assert ((mask_train.astype(int) + mask_val_reduced.astype(int)) <= 1).all(), f'Training and reduced Validation data are not disjunct'
         assert ((mask_train.astype(int) + mask_val.astype(int)) <= 1).all(), f'Training and full Validation data are not disjunct'
@@ -192,7 +195,13 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
             assert (dataset[0].y.size() == dataset[0].mask.size())
             assert (dataset[0].edge_index <= dataset[0].x.size()[0]).all()
 
-        data_list.append((data_train, data_val_reduced, data_val, data_test))
+        data_list.append({
+            data_constants.TRAIN : data_train,
+            data_constants.VAL : data_val,
+            data_constants.VAL_REDUCED : data_val_reduced,
+            data_constants.TEST : data_test,
+            data_constants.TEST_REDUCED : data_test_reduced,
+        })
 
     return data_list, SingleGraphDataset(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, mask_fixed)
 
@@ -544,3 +553,27 @@ def graph_select_labels(x, edge_index, y, vertex_to_idx, label_to_idx, select_la
     if _compress_labels:
         y, label_to_idx, _ = compress_labels(y, label_to_idx)
     return x, edge_index, y, vertex_to_idx, label_to_idx, mask
+
+def label_binarize(labels, num_classes=None):
+    """ Transforms labels into a binary indicator matrix. That is, if `labels[i] == k`, 
+    then `binarized[i, j] = 0` for all j != k and `binarized[i, k] = 1`.
+    
+    Parameters:
+    -----------
+    labels : torch.Tensor, shape [N]
+        Labels to binarize.
+    num_classes : int or None
+        Number of classes. If `Ǹone`, it is inferred as `labels.max() + 1`
+
+    Returns:
+    --------
+    binarized : torch.Tensor, shape [N, num_classes]
+        Binary indicator matrix for labels.
+    """
+    if num_classes is None:
+        num_classes = (labels.max() + 1).item()
+    binarized = torch.zeros((labels.size(0), num_classes), device=labels.device).long()
+    for i, label in enumerate(labels):
+        binarized[i, label] = 1
+    return binarized
+
