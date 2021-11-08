@@ -30,39 +30,41 @@ ex.init_dataset(dataset='cora_ml', num_dataset_splits=1, train_portion=20, val_p
 #                     train_labels=[0, 1, 2, 3, 4, 5], val_labels='all', train_labels_remove_other=False, val_labels_remove_other=False,
 #                     split_type='stratified',
 #                     )
-ex.init_model(model_type='gcn', hidden_sizes=[64,4], num_initializations=1, weight_scale=5.0, 
+ex.init_model(model_type='gcn', hidden_sizes=[64,], num_initializations=1, weight_scale=5.0, 
     use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
     residual=False, freeze_residual_projection=False)
 ex.init_run(name='model_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
     'model.model_type', 'model.hidden_sizes', 'model.weight_scale'
 ])
-ex.init_evaluation(pipeline=[
-    # {
-    #     'type' : 'EvaluateEmpircalLowerLipschitzBounds',
-    #     'num_perturbations' : 5,
-    #     'min_perturbation' : 2,
-    #     'max_perturbation' : 10,
-    #     'num_perturbations_per_sample' : 1,
-    #     'perturbation_type' : 'noise',
-    #     'seed' : 1337,
-    #     'name' : 'noise_perturbations',
-    # },
-    # {
-    #     'type' : 'EvaluateEmpircalLowerLipschitzBounds',
-    #     'num_perturbations' : 10,
-    #     'num_perturbations_per_sample' : 1,
-    #     'permute_per_sample' : True,
-    #     'perturbation_type' : 'derangement',
-    #     'seed' : 1337,
-    #     'name' : 'derangement_perturbations',
-    # },
+ex.init_evaluation(
+    print_pipeline=False,
+    pipeline=[
+    {
+        'type' : 'EvaluateEmpircalLowerLipschitzBounds',
+        'num_perturbations' : 5,
+        'min_perturbation' : 2,
+        'max_perturbation' : 10,
+        'num_perturbations_per_sample' : 1,
+        'perturbation_type' : 'noise',
+        'seed' : 1337,
+        'name' : 'noise_perturbations',
+    },
+    {
+        'type' : 'EvaluateEmpircalLowerLipschitzBounds',
+        'num_perturbations' : 10,
+        'num_perturbations_per_sample' : 1,
+        'permute_per_sample' : True,
+        'perturbation_type' : 'derangement',
+        'seed' : 1337,
+        'name' : 'derangement_perturbations',
+    },
     {
         'type' : 'PrintDatasetSummary',
-        'evaluate_on' : ['train', 'val', 'val-reduced', 'test', 'test-reduced']
+        'evaluate_on' : ['train', 'val', 'val-reduced', 'test', 'test']
     },
     {
         'type' : 'FitFeatureSpacePCA',
-        'fit_to' : ['train'],
+        'fit_to' : ['train', 'val-reduced'],
         'evaluate_on' : ['train', 'val'],
         'num_components' : 2,
         'name' : '2d-pca',
@@ -70,33 +72,24 @@ ex.init_evaluation(pipeline=[
     {
         'type' : 'FitFeatureDensity',
         'density_type' : 'GaussianPerClass',
-        'pca' : False,
-        'pca_number_components' : 2,
-        'pca_per_class' : False,
-        'diagonal_covariance' : True,
-        'fit_to' : ['train', 'val-reduced', 'test-reduced'],
-        'fit_to_ground_truth_labels' : ['train']
-    },
-    # {
-    #     'type' : 'FitFeatureDensity',
-    #     'density_type' : 'GaussianMixture',
-    #     'fit_to' : ['train'],
-    #     'number_components' : 7,
-    # },
-    {
-        'type' : 'EvaluateFeatureDensity',
+        'pca' : True,
+        'fit_to' : [],
+        'fit_to_ground_truth_labels' : ['train'],
         'evaluate_on' : ['val'],
-        'name' : 'gaussianperclass'
+        'pipeline_grid' : {
+            'pca_number_components' : [2, 4, 8, 16],
+            'pca_per_class' : [True, False],
+            'diagonal_covariance' : [True, False],
+            'fit_to' : [['train'], ['train', 'val-reduced', 'test-reduced']],
+        },
+        'name' : 'gpc-{0}-{1}-{2}-{3}',
+        'name_args' : [
+            'pca_number_components',
+            'pca_per_class',
+            'diagonal_covariance',
+            'fit_to',
+        ]
     },
-    {
-        'type' : 'LogFeatures',
-        'evaluate_on' : ['train', 'val']
-    },
-    # {
-    #     'type' : 'FitFeatureSpacePCAIDvsOOD',
-    #     'fit_to' : ['train'],
-    #     'evaluate_on' : ['val'],
-    # }
 ]
 )
 

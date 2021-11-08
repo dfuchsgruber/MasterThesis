@@ -170,6 +170,9 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
         self._fit_pca(features, labels)
 
         for label in range(labels.size(1)):
+            if labels[:, label].sum(0) == 0: # No observations of this label, might happen if it was excluded from training
+                continue
+
             name = f'class_{label}'
             
             transformed = (features - self.pca_means[name]) @ self.pca_projections[name]

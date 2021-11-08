@@ -84,3 +84,43 @@ def random_derangement(N, rng=None):
             swap = rng.randint(0, N)
             new[[same[0], swap]] = new[[swap, same[0]]]
     return new
+
+def format_name(name_fmt, args, config, delimiter='.'):
+    """ Formats a name using arguments from a config. That is, if '{i}' appears in
+    `name_fmt`, it is replaced with the `i`-th element in `args`. Each element in `args`
+    is a path in the config dict, where levels are separated by '.'.
+
+    Example:
+    `format_name('name-{0}-{1}', args = ['foo', 'level.sub'], config = {'foo' : 'bar', 'level' : {'sub' : [1, 2]}})`
+    returns
+    `name-bar-[1-2]
+
+    
+    Parameters:
+    -----------
+    name_fmt : str
+        The format string.
+    args : list
+        Paths to each argument for the config string.
+    config : dict
+        A nested configuration dict.
+    delimiter : str
+        The delimiter to access different levels of the config dict with paths defined in `args`.
+
+    Returns:
+    --------
+    formatted : str
+        The formated name.
+    """
+    parsed_args = []
+    for arg in args:
+        path = arg.split(delimiter)
+        arg = config
+        for x in path:
+            arg = arg[x]
+        if isinstance(arg, list):
+            arg = '[' + '-'.join(map(str, arg)) + ']'
+        elif isinstance(arg, bool):
+            arg = str(arg)[0].upper()
+        parsed_args.append(str(arg))
+    return name_fmt.format(*parsed_args)

@@ -9,8 +9,9 @@ import os
 import json
 from collections import defaultdict
 import warnings
+import matplotlib.pyplot as plt
 
-from util import suppress_stdout
+from util import suppress_stdout, format_name
 from model.util import module_numel
 from model.gnn import make_model_by_configuration
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
@@ -106,27 +107,16 @@ class ExperimentWrapper:
         self.init_run()
 
     @ex.capture(prefix='evaluation')
-    def init_evaluation(self, pipeline=[]):
+    def init_evaluation(self, pipeline=[], print_pipeline=False):
         self.evaluation_config = {
             'pipeline' : pipeline,
+            'print_pipeline' : print_pipeline,
         }
 
     @ex.capture(prefix='run')
     def init_run(self, name='', args=[]):
         self.run_name_format = name
         self.run_name_format_args = args
-
-    def _format_run_name(self, config):
-        parsed_args = []
-        for arg in self.run_name_format_args:
-            path = arg.split('.')
-            arg = config
-            for x in path:
-                arg = arg[x]
-            if isinstance(arg, list):
-                arg = '[' + '-'.join(map(str, arg)) + ']'
-            parsed_args.append(str(arg))
-        return self.run_name_format.format(*parsed_args)
 
     @ex.capture(prefix="training")
     def train(self, max_epochs, learning_rate, early_stopping, gpus):
@@ -146,7 +136,7 @@ class ExperimentWrapper:
                 'gpus' : gpus,
                 }
             }
-        run_name = self._format_run_name(config)
+        run_name = format_name(self.run_name_format, self.run_name_format_args, config)
         # One global logger for all splits and initializations
         logger = WandbLogger(save_dir=osp.join('/nfs/students/fuchsgru/wandb'), project=str(self.collection_name), name=f'{run_name}')
         logger.log_hyperparams(config)
@@ -163,8 +153,6 @@ class ExperimentWrapper:
             # Re-initializing the model multiple times to average over results
             for reinitialization, seed in enumerate(self.model_seeds):
                 pl.seed_everything(seed)
-
-                # print(data_train[0].mask.sum(), data_val[0].mask.sum(), data_val_all_classes[0].mask.sum())
 
                 backbone = make_model_by_configuration(self.model_config, data_get_num_attributes(data_dict[data_constants.TRAIN][0]), data_get_num_classes(data_dict[data_constants.TRAIN][0]))
                 model = SemiSupervisedNodeClassification(backbone, learning_rate=learning_rate)
@@ -208,8 +196,11 @@ class ExperimentWrapper:
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus)
 
                 # Run evaluation pipeline
-                print(f'Executing pipeline', str(pipeline))
+                print(f'Executing pipeline...')
+                if self.evaluation_config['print_pipeline']:
+                    print(str(pipeline))
                 logs = defaultdict(dict)
+                
                 # Create a group that will just log the split and initaliation idx
                 logs[SPLIT_INIT_GROUP] = {
                     NAME_SPLIT : split_idx, NAME_INIT : reinitialization 
@@ -229,6 +220,8 @@ class ExperimentWrapper:
                 all_logs.append(logs)
                 for metric, value in pipeline_metrics.items():
                     result[metric].append(value)
+            
+            plt.close('all')
 
         # Build wandb table for everything that was logged by the pipeline
         build_table(logger, all_logs)
