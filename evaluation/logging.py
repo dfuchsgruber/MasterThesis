@@ -43,9 +43,10 @@ def log_figure(logs, fig, label, group, save_artifact=None):
         If a path is given, the figure is saved as pdf to that directory.
     """
     if save_artifact is not None:
-        fig.savefig(osp.join(save_artifact, label + '.pdf'), format='pdf')
-        fig.savefig(osp.join(save_artifact, label + '.png'), format='png')
-        logs[group][label] = wandb.Image(osp.join(save_artifact, label + '.png'))
+        basename = osp.join(save_artifact, group + '-' + label)
+        fig.savefig(basename + '.pdf', format='pdf')
+        fig.savefig(basename + '.png', format='png')
+        logs[group][label] = wandb.Image(basename + '.png')
 
 def log_histogram(logs, values, label, **kwargs):
     """ Logs a Histogram. 

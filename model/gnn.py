@@ -262,7 +262,7 @@ def make_model_by_configuration(configuration, input_dim, output_dim):
     if configuration['model_type'] == 'gcn':
         return GCN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
             use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
-            cached=True, residual=configuration.get('residual', False),
+            cached=configuration.get('cached', False), residual=configuration.get('residual', False),
             freeze_residual_projection=configuration.get('freeze_residual_projection', False))
     # elif configuration['model_type'] == 'gat':
     #     return GAT(input_dim, output_dim, configuration['hidden_sizes'], configuration['num_heads'], make_activation_by_configuration(configuration), 

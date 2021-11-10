@@ -1,0 +1,179 @@
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week5_density_feature_space_grid
+  output_dir: /nfs/students/fuchsgru/seml_output/week5_density_feature_space_grid
+  project_root_dir: ../..
+
+slurm:
+  experiments_per_job: 1
+  sbatch_options:
+    gres: gpu:1       # num GPUs
+    mem: 16G          # memory
+    cpus-per-task: 2  # num cores
+    time: 0-08:00     # max time, D-HH:MM
+
+
+###### BEGIN PARAMETER CONFIGURATION ######
+
+fixed:
+  run.name: gcn_r{1}_f{3}_w{0}_rl{4}_{2}
+  run.args:
+    - model:weight_scale
+    - model:residual
+    - model:hidden_sizes
+    - model:freeze_residual_projection
+    - data:train_labels_remove_other
+
+  training.early_stopping.patience: 100
+  training.early_stopping.mode: min
+  training.early_stopping.monitor: val_loss
+  training.early_stopping.min_delta: 1e-3
+  training.max_epochs: 1000
+  training.gpus: 1
+
+  data.num_dataset_splits : 5
+  data.train_portion : 20
+  data.val_portion : 20
+  data.test_portion : 0.6
+  data.test_portion_fixed : 0.2
+  data.split_type: uniform
+  data.train_labels: [0, 1, 3, 4, 5, 6] # Leave out genetic algorithms
+  data.val_labels: all
+
+  model.num_initializations : 5
+  model.use_bias: true
+  model.activation: leaky_relu
+  model.leaky_relu_slope: 0.01
+  data.dataset: cora_ml
+  model.model_type: gcn
+  model.use_spectral_norm: true
+  
+  evaluation.pipeline:
+    - type: PrintDatasetSummary
+      evaluate_on: ['train', 'val-reduced', 'test-reduced', 'val', 'test']
+
+    - type: EvaluateEmpircalLowerLipschitzBounds
+      num_perturbations: 20
+      min_perturbation: 0.1
+      max_perturbation: 10.0
+      num_perturbations_per_sample: 5
+      seed: 1337
+      perturbation_type: noise
+      name: noise-perturbations
+
+    - type: EvaluateEmpircalLowerLipschitzBounds
+      num_perturbations: 20
+      min_perturbation: 0.1
+      max_perturbation: 10.0
+      num_perturbations_per_sample: 5
+      seed: 1337
+      perturbation_type: derangement
+      name: derangement-perturbations
+
+    - type: FitFeatureSpacePCA
+      fit_to: [train, val]
+      evaluate_on: ['train', 'val-reduced', 'val']
+      num_components: 2
+      name: 2d-pca
+
+    ### GPC densities ###
+
+    - type: FitFeatureDensity
+      density_type: GaussianPerClass
+      dimensionality_reduction:
+        mock: true # Exists, so that a dict is created for that
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val']
+      pipeline_grid:
+        dimensionality_reduction:type: [pca, isomap]
+        dimensionality_reduction:per_class: [true, false]
+        dimensionality_reduction:number_components: [2, 4, 6, 8, 10, 16, 32]
+        diagonal_covariance: [true, false]
+        fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
+      name: gpc-{2}{0}-pc{1}-d{3}-f{4}
+      name_args:
+        - dimensionality_reduction:type
+        - dimensionality_reduction:per_class
+        - dimensionality_reduction:number_components
+        - diagonal_covariance
+        - fit_to
+
+    - type: FitFeatureDensity
+      density_type: GaussianPerClass
+      dimensionality_reduction:
+        type: None
+        per_class: None
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val']
+      pipeline_grid:
+        diagonal_covariance: [true, false]
+        fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
+      name: gpc-no-d{0}-f{1}
+      name_args:
+        - diagonal_covariance
+        - fit_to
+
+    ### MoG Densities ###
+
+    - type: FitFeatureDensity
+      density_type: GaussianMixture
+      dimensionality_reduction:
+        per_class: false
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val']
+      pipeline_grid:
+        dimensionality_reduction:type: [pca, isomap]
+        dimensionality_reduction:number_components: [2, 4, 6, 8, 10, 16, 32]
+        number_components: [2, 3, 4, 5, 6, 7, 10]
+        fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
+      name: mog{0}-{3}{2}-ft{1}
+      name_args:
+        - number_components
+        - fit_to
+        - dimensionality_reduction:type
+        - dimensionality_reduction:number_components
+    
+    - type: FitFeatureDensity
+      density_type: GaussianMixture
+      dimensionality_reduction:
+        per_class: false
+        type: None
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val']
+      pipeline_grid:
+        number_components: [2, 3, 4, 5, 6, 7, 10]
+        fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
+      name: mog{0}-no-ft{1}
+      name_args:
+        - number_components
+        - fit_to
+
+    - type: LogInductiveFeatureShift
+      data_before: 'train'
+      data_after: 'val'
+
+  training.learning_rate: 0.001
+
+grid:
+  data.train_labels_remove_other:
+    type: choice
+    options:
+      - true
+      - false
+
+residual:
+  fixed:
+    model.residual: true
+    model.freeze_residual_projection: false
+    model.hidden_sizes: [64, 32]
+    model.weight_scale: 0.9
+
+no-residual:
+  fixed:
+    model.residual: false
+    model.freeze_residual_projection: false
+    model.hidden_sizes: [64, 64]
+    model.weight_scale: 2.0
+
+
+

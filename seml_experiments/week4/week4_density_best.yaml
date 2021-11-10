@@ -55,8 +55,8 @@
 
 seml:
   executable: training_semi_supervised_node_classification.py
-  name: week4_density_grid
-  output_dir: /nfs/students/fuchsgru/seml_output/week4_density_grid
+  name: week4_density_best
+  output_dir: /nfs/students/fuchsgru/seml_output/week4_density_best
   project_root_dir: ../..
 
 slurm:
@@ -73,11 +73,11 @@ slurm:
 fixed:
   run.name: gcn_r{1}_f{3}_w{0}_rl{4}_{2}
   run.args:
-    - model.weight_scale
-    - model.residual
-    - model.hidden_sizes
-    - model.freeze_residual_projection
-    - data.train_labels_remove_other
+    - model:weight_scale
+    - model:residual
+    - model:hidden_sizes
+    - model:freeze_residual_projection
+    - data:train_labels_remove_other
 
   training.early_stopping.patience: 100
   training.early_stopping.mode: min
@@ -131,44 +131,75 @@ fixed:
       num_components: 2
       name: 2d-pca
 
-    ### Feature densities without PCA ###
+    ### GPC densities ###
 
     - type: FitFeatureDensity
       density_type: GaussianPerClass
-      pca: false
-      diagonal_covariance: true
+      dimensionality_reduction:
+        mock: true # Exists, so that a dict is created for that
       fit_to_ground_truth_labels: ['train']
       evaluate_on: ['val']
       pipeline_grid:
-        - pca_per_class: [true, false]
-        - diagonal_covariance: [true, false]
-        - fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
-      name: gpc-{0}-{1}-{2}
-      name_args: [pca_per_class, diagonal_covariance, fit_to]
+        dimensionality_reduction:type: [pca, isomap]
+        dimensionality_reduction:per_class: [true, false]
+        dimensionality_reduction:number_components: [2, 4, 8, 16, 32]
+        diagonal_covariance: [true, false]
+        fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
+      name: gpc-{2}{0}-pc{1}-d{3}-f{4}
+      name_args:
+        - dimensionality_reduction:type
+        - dimensionality_reduction:per_class
+        - dimensionality_reduction:number_components
+        - diagonal_covariance
+        - fit_to
 
     - type: FitFeatureDensity
       density_type: GaussianPerClass
-      pca: true
-      diagonal_covariance: true
+      dimensionality_reduction:
+        type: None
+        per_class: None
       fit_to_ground_truth_labels: ['train']
       evaluate_on: ['val']
       pipeline_grid:
-        - pca_number_components: [2, 4, 8, 16]
-        - pca_per_class: [true, false]
-        - diagonal_covariance: [true, false]
-        - fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
-      name: gpc-{3}pca-{0}-{1}-{2}
-      name_args: [pca_per_class, diagonal_covariance, fit_to, pca_number_components]
+        diagonal_covariance: [true, false]
+        fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
+      name: gpc-no-d{0}-f{1}
+      name_args:
+        - diagonal_covariance
+        - fit_to
 
     - type: FitFeatureDensity
       density_type: GaussianMixture
+      dimensionality_reduction:
+        per_class: false
       fit_to_ground_truth_labels: ['train']
       evaluate_on: ['val']
       pipeline_grid:
-        - number_components: [2, 3, 4, 5, 6, 7, 10]
-        - fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
-      name: mog{0}-{1}
-      name_args: [number_components, fit_to]
+        dimensionality_reduction:type: [pca, isomap]
+        dimensionality_reduction:number_components: [2, 4, 8, 16, 32]
+        number_components: [2, 3, 4, 5, 6, 7, 10]
+        fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
+      name: mog{0}-{3}{2}-ft{1}
+      name_args:
+        - number_components
+        - fit_to
+        - dimensionality_reduction:type
+        - dimensionality_reduction:number_components
+    
+    - type: FitFeatureDensity
+      density_type: GaussianMixture
+      dimensionality_reduction:
+        per_class: false
+        type: None
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val']
+      pipeline_grid:
+        number_components: [2, 3, 4, 5, 6, 7, 10]
+        fit_to: [['train'], ['train', 'val-reduced', 'test-reduced']]
+      name: mog{0}-no-ft{1}
+      name_args:
+        - number_components
+        - fit_to
 
 
   training.learning_rate: 0.001
@@ -180,37 +211,19 @@ grid:
       - true
       - false
 
-  model.hidden_sizes: 
-      type: choice
-      options:
-        - [64]
-        - [64, 32]
-        - [64, 64]
-  model.weight_scale:
-      type: choice
-      options:
-        - 0.9
-        - 1.0
-        - 1.1
-        - 2.0
-        - 3.0
-        - 4.0
-        - 5.0
-
-residual-frozen-projection:
-  fixed:
-    model.residual: true
-    model.freeze_residual_projection: true
-
 residual:
   fixed:
     model.residual: true
     model.freeze_residual_projection: false
+    model.hidden_sizes: [64, 32]
+    model.weight_scale: 0.9
 
 no-residual:
   fixed:
     model.residual: false
     model.freeze_residual_projection: false
+    model.hidden_sizes: [64, 64]
+    model.weight_scale: 2.0
 
 
 

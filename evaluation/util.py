@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+from util import get_k_hop_neighbourhood
 
 def split_labels_into_id_and_ood(y, id_labels, ood_labels=None, id_label=0, ood_label=1):
     """ Creates new labels that correspond to in-distribution and out-ouf-distribution.
@@ -82,3 +83,38 @@ def feature_extraction(model, data_loaders, gpus=0, layer=-2, softmax=True):
             predictions.append(pred[data.mask])
             # print(features[-1].size(), predictions[-1].size(), labels[-1].size())
     return features, predictions, labels
+
+
+def count_neighbours_with_label(data_loader, labels, k=1, mask=True):
+    """ For each vertex in a dataset, counts the number of neighbours that have a certain label.  
+    
+    Parameters:
+    -----------
+    data_loader : torch_geometric.data.DataLoader
+        The data loader instance. Only supports single graphs.
+    label : int
+        The labels to search for.
+    k : int
+        How many hops to look ahead. This is exact, i.e. if k=2, then direct neighbours will not be considered.
+    mask : bool
+        If True, only vertices within the graph's veretx mask are considered.
+
+    Returns:
+    --------
+    torch.Tensor, shape [N_graph]
+        Counts how many neighbours with a label in `labels` each vertex has in its k-hop neighbourhood.
+    torch.Tensor, shape [N_graph]
+        Counts how many neighbours a vertex has in its k-hop neighbourhood regardless of its label.
+    """
+    assert len(data_loader.dataset) == 1, f'Data loader loads more than 1 sample.'
+    data = data_loader.dataset[0].cpu()
+    label_mask = split_labels_into_id_and_ood(data.y, labels, id_label=1, ood_label=0).bool()
+    neighbours = get_k_hop_neighbourhood(data.edge_index, k, k_min=k)
+    count, total = torch.tensor([
+        label_mask[np.array(neighbours.get(idx, []))].sum() for idx in range(data.x.size(0))
+    ]).long(), torch.tensor([
+        len(neighbours.get(idx, [])) for idx in range(data.x.size(0))
+    ]).long() 
+    if mask:
+        count, total = count[data.mask], total[data.mask]
+    return count, total

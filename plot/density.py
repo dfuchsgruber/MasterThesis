@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 import torch
 import matplotlib.colors as mcolors
 from util import is_outlier
@@ -54,52 +56,3 @@ def plot_2d_log_density(points, labels, density_model, resolution=100, levels=10
         ax.scatter(points[:, 0][labels==label], points[:, 1][labels==label], c=_tableaeu_colors[label], label=name, marker='x', linewidth=1.0)
     ax.legend()
     return fig, ax
-
-def plot_log_density_histograms(log_density, labels, label_names=None, bins=20, overlapping=True):
-    """ Plots an (overlapping) histogram for log-densities for all labels.
-    
-    Parameters:
-    -----------
-    log_density : torch.tensor, shape [N]
-        Log-densities to plot a histogram of.
-    labels : torch.tensor, shape [N]
-        Label for each point.
-    label_names : dict or None
-        Name for each label in the legend. If None is given, it is set to the label's idx.
-    bins : int
-        How many bins to use. Default: 20
-    overlapping : bool
-        If True, the log densities will be placed in one plot that overlaps. If False, subplots for each log density will be built.
-    
-    Returns:
-    --------
-    plt.Figure
-        The plot.
-    plt.axis.Axes
-        The axis of the plot or an array of axis if `overlapping` is set to `False`.
-    """
-    log_density = log_density.cpu().numpy()
-    labels = labels.cpu().numpy()
-
-    if label_names is None:
-        label_names = {label : f'{label}' for label in np.unique(labels)}
-
-    log_density_clean = log_density[~is_outlier(log_density)]
-    try:
-        bins = np.linspace(max(-2000, log_density_clean.min()), min(2000, log_density_clean.max()), bins + 1)
-    except:
-        bins = np.linspace(-2000, 2000, bins + 1)
-    if overlapping:
-        fig, ax = plt.subplots(1, 1)
-        for label in label_names:
-            ax.hist(log_density[labels == label], bins, alpha=0.5, label=label_names[label], density=True)
-        ax.legend()
-        return fig, ax
-    else:
-        fig, axs = plt.subplots(int(np.ceil(len(label_names) / 3)), 3, sharex=True, sharey=True)
-        axs = axs.flatten()
-        for idx, label in enumerate(label_names):
-            axs[idx].hist(log_density[labels == label], bins, alpha=0.5, label=label_names[label], density=True)
-            axs[idx].legend()
-        return fig, axs
-

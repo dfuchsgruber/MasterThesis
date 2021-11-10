@@ -6,6 +6,8 @@ import scipy.stats
 from warnings import warn
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
+from model.dimensionality_reduction import DimensionalityReduction
+import traceback
 
 def cov_and_mean(x, rowvar=False, bias=False, ddof=None, aweights=None):
     """Estimates covariance matrix like numpy.cov and also returns the weighted mean.
@@ -82,55 +84,24 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
 
     name = 'GaussianPerClass'
 
-    def __init__(self, pca=False, pca_number_components=-1, pca_per_class=False, diagonal_covariance=False, **kwargs):
+    def __init__(
+            self, 
+            dimensionality_reduction={'type' : 'pca', 'number_components' : 2, 'per_class' : False}, 
+            diagonal_covariance=False, 
+            **kwargs
+        ):
         super().__init__()
         self._fitted = False
-        self.pca = pca
-        self.pca_number_components = pca_number_components
-        self.pca_per_class = pca_per_class
+        self.dimensionality_reduction = DimensionalityReduction(**dimensionality_reduction)
         self.diagonal_covariance = diagonal_covariance
 
     def __str__(self):
         return '\n'.join([
             self.name,
-            f'\t PCA : {self.pca}',
-            f'\t PCA number components : {self.pca_number_components}',
-            f'\t PCA per class : {self.pca_per_class}',
+            f'\t Dimensionality Reduction : ',
+            str(self.dimensionality_reduction),
             f'\t Diagonal covariance : {self.diagonal_covariance}'
         ])
-
-    def _fit_pca(self, features, labels):
-        """ Fits the pca to the feature space. If pca isnt used, identity projection is applied.
-
-        Parameters:
-        -----------
-        features : torch.Tensor, shape [N, D]
-            Features to transform.
-        labels : torch.Tensor, shape [N, num_classes]
-            Soft labels (will be converted to hard labels).
-        """
-        self.pca_projections = nn.ParameterDict()
-        self.pca_means = nn.ParameterDict()
-
-        if self.pca and not self.pca_per_class:
-            pca_all = PCA(n_components=self.pca_number_components)
-            pca_all.fit(features.cpu().numpy())
-
-        for label in range(labels.size(1)):
-            name = f'class_{label}'
-            # Calculate the pca for this class
-            if self.pca:
-                if self.pca_per_class:
-                    pca = PCA(n_components=self.pca_number_components)
-                    pca.fit(features[labels.argmax(1) == label].cpu().numpy())
-                    self.pca_projections[name] = nn.parameter.Parameter(torch.tensor(pca.components_.T))
-                    self.pca_means[name] = nn.parameter.Parameter(torch.tensor(pca.mean_))
-                else:
-                    self.pca_projections[name] = nn.parameter.Parameter(torch.tensor(pca_all.components_.T))
-                    self.pca_means[name] = nn.parameter.Parameter(torch.tensor(pca_all.mean_))
-            else:
-                self.pca_projections[name] = nn.parameter.Parameter(torch.eye(features.size()[1]))
-                self.pca_means[name] = nn.parameter.Parameter(torch.zeros(features.size()[1]))
 
     def _make_covariance_psd(self, cov, eps=1e-6):
         """ If a covariance matrix is not psd (numerical errors), a small value is added to its diagonal to make it psd.
@@ -163,30 +134,25 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
         if self._fitted:
             raise RuntimeError(f'GMM density model was already fitted.')
         self.components = {}
-        self.coefs = nn.ParameterDict()
-        self.means = nn.ParameterDict()
-        self.covs = nn.ParameterDict()
+        self.coefs = dict()
+        self.means = dict()
+        self.covs = dict()
 
-        self._fit_pca(features, labels)
+        self.dimensionality_reduction.fit(features, labels)
+        transformed_by_class = self.dimensionality_reduction.transform(features)
 
         for label in range(labels.size(1)):
             if labels[:, label].sum(0) == 0: # No observations of this label, might happen if it was excluded from training
                 continue
 
-            name = f'class_{label}'
-            
-            transformed = (features - self.pca_means[name]) @ self.pca_projections[name]
-            cov, mean = cov_and_mean(transformed, aweights=labels[:, label])
-            coef = labels[:, label].sum(0) / labels.size(0)
-
-            self.means[name] = nn.Parameter(mean, requires_grad=False)
-            self.covs[name] = nn.Parameter(cov, requires_grad=False)
-            self.coefs[name] = nn.Parameter(coef, requires_grad=False)
+            transformed = torch.tensor(transformed_by_class[label]).float()
+            self.covs[label], self.means[label] = cov_and_mean(transformed, aweights=labels[:, label])
+            self.coefs[label] = labels[:, label].sum(0) / labels.size(0)
 
             if self.diagonal_covariance:
-                self.covs[name] *= torch.eye(transformed.size(1))
+                self.covs[label] *= torch.eye(transformed.size(1))
 
-            self._make_covariance_psd(self.covs[name], eps=1e-8)
+            self._make_covariance_psd(self.covs[label], eps=1e-8)
             
         self._fitted = True
     
@@ -206,10 +172,12 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
         """
         if not self._fitted:
             raise RuntimeError(f'GMM density was not fitted to any data!')
+
+        transformed_by_class = self.dimensionality_reduction.transform(features)
         
         log_densities = [] # Per component, weighted with component
         for label in self.coefs:
-            transformed = (features - self.pca_means[label]) @ self.pca_projections[label]
+            transformed = torch.tensor(transformed_by_class[label]).float()
             log_densities.append(MultivariateNormal(self.means[label], covariance_matrix=self.covs[label]).log_prob(transformed))
         log_densities = torch.stack(log_densities) # shape n_classes, N
         return torch.logsumexp(log_densities, 0) # Shape N
@@ -220,11 +188,22 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
 
     name = 'GaussianMixture'
 
-    def __init__(self, number_components=5, seed=None, **kwargs):
+    def __init__(
+            self, 
+            number_components=5, 
+            seed=None,
+            dimensionality_reduction={'type' : None, 'number_components' : 2, 'per_class' : False},
+            **kwargs
+        ):
         super().__init__()
         self._fitted = False
         self.number_components = number_components
         self.seed = seed
+        # Dimensionality reduction: If used, assert that it is not per class
+        if dimensionality_reduction['type'] is not None and dimensionality_reduction['per_class']:
+            raise RuntimeError(f'GaussianMixture only supports a non-per-class dimensionality reduction.')
+        self.dimensionality_reduction = DimensionalityReduction(**dimensionality_reduction)
+        
 
     def __str__(self):
         return '\n'.join([
@@ -232,6 +211,12 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
             f'\t Number of components : {self.number_components}',
             f'\t Seed : {self.seed}',
         ])
+
+    def _transform(self, features):
+        transformed_by_class = self.dimensionality_reduction.transform(features)
+        # All transformations should be the same, select any
+        return list(transformed_by_class.values())[0]
+
 
     @torch.no_grad()
     def fit(self, features, labels):
@@ -244,10 +229,13 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
         labels : torch.Tensor, shape [N, num_classes]
             Soft class labels. Unused for this approach.
         """
+
         if self._fitted:
             raise RuntimeError(f'{self.name} density model was already fitted.')
+        self.dimensionality_reduction.fit(features, labels)
+        transformed = self._transform(features)
         self.gmm = GaussianMixture(n_components = self.number_components, random_state=self.seed)
-        self.gmm.fit(features.cpu().numpy())
+        self.gmm.fit(transformed)
         self._fitted = True
     
     @torch.no_grad()
@@ -266,7 +254,8 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
         """
         if not self._fitted:
             raise RuntimeError(f'{self.name} density was not fitted to any data!')
-        log_likelihood = torch.tensor(self.gmm.score_samples(features.cpu().numpy()))
+        transformed = self._transform(features)
+        log_likelihood = torch.tensor(self.gmm.score_samples(transformed))
         return log_likelihood
 
 densities = [

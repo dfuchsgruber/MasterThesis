@@ -3,23 +3,28 @@ import torch
 import evaluation.lipschitz
 import plot.perturbations
 import matplotlib.pyplot as plt
-from evaluation.util import split_labels_into_id_and_ood, get_data_loader, feature_extraction
-from plot.density import plot_2d_log_density, plot_log_density_histograms
+from evaluation.util import split_labels_into_id_and_ood, get_data_loader, feature_extraction, count_neighbours_with_label
+from plot.density import plot_2d_log_density
 from plot.features import plot_2d_features
+from plot.util import plot_histogram, plot_histograms, plot_2d_histogram
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from model.density import get_density_model
 from evaluation.logging import log_figure, log_histogram, log_embedding, log_metrics
+from evaluation.features import inductive_feature_shift
 from torch_geometric.data import Dataset, Data
 from torch_geometric.loader import DataLoader
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score
 import os.path as osp
-from data.util import label_binarize, data_get_summary
+from data.util import label_binarize, data_get_summary, labels_in_dataset
 from warnings import warn
 from itertools import product
-from util import format_name
+from util import format_name, get_k_hop_neighbourhood
+from copy import deepcopy
+import traceback
 
 _ID_LABEL, _OOD_LABEL = 1, 0
+FEATURE_SHIFT_EPS = 1e-10 # Zero feature shift is bad in log space
 
 class PipelineMember:
     """ Superclass for all pipeline members. """
@@ -178,14 +183,33 @@ class FitFeatureDensity(PipelineMember):
                 f'{self.prefix}max_feature_log_density' : log_density_label.max(),
                 f'{self.prefix}median_feature_log_density' : log_density_label.median(),
             }, 'feature_density', step=label)
-        fig, ax = plot_log_density_histograms(log_density.cpu(), y.cpu(), overlapping=False)
+        fig, ax = plot_histograms(log_density.cpu(), y.cpu(), log_scale=False, kind='vertical', x_label='Log-Density', y_label='Class')
         log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_all_classes{self.suffix}', 'feature_class_density_plots', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Evaluated feature density for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
         plt.close(fig)
 
         # Split into in-distribution and out-of-distribution
         labels_id_ood = split_labels_into_id_and_ood(y.cpu(), set(kwargs['config']['data']['train_labels']), id_label=_ID_LABEL, ood_label=_OOD_LABEL)
-        fig, ax = plot_log_density_histograms(log_density.cpu(), labels_id_ood.cpu(), label_names={_ID_LABEL : 'id', _OOD_LABEL : 'ood'})
+        mask_is_id = labels_id_ood == _ID_LABEL
+        
+        num_ood_nbs = []
+        receptive_field_size = len(kwargs['config']['model']['hidden_sizes']) + 1
+        # For id vertices, they might be influenced by ood neighbours, separate into vertices with ood k-hop neighbours and those with none such neighbours
+        for name in self.evaluate_on:
+            num_ood_nbs_name = torch.zeros(mask_is_id.size(0)).long()
+            for k in range(1, receptive_field_size + 1):
+                num_ood_nbs_name += count_neighbours_with_label(get_data_loader(name, kwargs['data_loaders']), set(y[~mask_is_id].tolist()), k=k, mask=True)[0]
+            num_ood_nbs.append(num_ood_nbs_name)
+        
+        has_ood_neighbours = torch.cat(num_ood_nbs) > 0
+        labels_plot = torch.empty_like(mask_is_id).long()
+        labels_plot[~mask_is_id] = 0
+        labels_plot[mask_is_id & ~(has_ood_neighbours)] = 1
+        labels_plot[mask_is_id & has_ood_neighbours] = 2
+        
+        fig, ax = plot_histograms(log_density.cpu(), labels_plot.cpu(), 
+            label_names={0 : 'ood', 1 : f'id, no ood <={receptive_field_size}-hop nbs', 2 : f'id, ood <={receptive_field_size}-hop nbs'},
+            kind='overlapping', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
         log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_id_vs_ood{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Saved feature density histogram to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_id_vs_ood_{self.suffix}.pdf')))
         plt.close(fig)
@@ -347,6 +371,59 @@ class PrintDatasetSummary(PipelineMember):
 
         return args, kwargs
 
+class LogInductiveFeatureShift(PipelineMember):
+    """ Logs the feature shift in vertices of the train-graph when re-introducing new edges of the val-graph. """
+
+    name = 'LogInductiveFeatureShift'
+
+    def __init__(self, gpus=0, data_before='train', data_after='val', **kwargs):
+        super().__init__(**kwargs)
+        self.gpus = gpus
+        self.data_before = data_before
+        self.data_after = data_after
+
+    def __str__(self):
+        return '\n'.join([
+            self.print_name,
+            f'\t Evaluate before : {self.data_before}',
+            f'\t Evaluate train : {self.data_after}',
+        ])
+    
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+        loader_before, loader_after = get_data_loader(self.data_before, kwargs['data_loaders']), get_data_loader(self.data_after, kwargs['data_loaders'])
+        for data_before in loader_before:
+            break
+        for data_after in loader_after:
+            break
+        model = kwargs['model']
+        if self.gpus > 0:
+            model = model.cuda()
+            data_before.cuda(), data_after.cuda()
+        shift, idx_before, idx_after = inductive_feature_shift(model, data_before, data_after)
+
+        # Log the feature shift by "in mask / not in mask"
+        fig, ax = plot_histograms(shift.cpu() + FEATURE_SHIFT_EPS, data_before.mask[idx_before].cpu(), 
+                label_names={True : f'In {self.data_before}', False : f'Not in {self.data_before}'}, log_scale=True, kind='overlapping', x_label='Feature Shift')
+        log_figure(kwargs['logs'], fig, f'feature_shift_by_mask', f'inductive_feature_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
+        plt.close(fig)
+        pipeline_log(f'Logged inductive feature shift for data {self.data_before} -> {self.data_after} by mask.')
+
+        # Log the feature shift by percentage of vertices in k neighbourhood
+        receptive_field_size = len(kwargs['config']['model']['hidden_sizes']) + 1
+        labels_not_in_before = set(data_after.label_to_idx[label].item() for label in labels_in_dataset(data_after, mask=True)) - set(data_before.label_to_idx[label].item() for label in labels_in_dataset(data_before, mask=True))
+        for k in range(1, receptive_field_size + 1):
+            count, total = count_neighbours_with_label(get_data_loader(self.data_after, kwargs['data_loaders']), labels_not_in_before, k=k, mask=False)
+            print(k, count.size(), total.size(), total.sum(), count.sum(), labels_not_in_before)
+            fraction = count.float()
+            fraction[fraction > 0] /= total[fraction > 0].float()
+            fig, ax = plot_2d_histogram(shift.cpu() + FEATURE_SHIFT_EPS, fraction[idx_after], x_label='Log Feature Shift', y_label=f'Fraction of ood vertices in {k} neighbourhood', log_scale_x=True)
+            log_figure(kwargs['logs'], fig, f'feature_shift_by_{k}_nbs', f'inductive_feature_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
+            plt.close(fig)
+            pipeline_log(f'Logged inductive feature shift for data {self.data_before} -> {self.data_after} by {k}-hop neighbourhood.')
+        
+        return args, kwargs
+
 pipeline_members = [
     EvaluateEmpircalLowerLipschitzBounds,
     FitFeatureDensity,
@@ -355,10 +432,11 @@ pipeline_members = [
     FitFeatureSpacePCA,
     FitFeatureSpacePCAIDvsOOD,
     PrintDatasetSummary,
+    LogInductiveFeatureShift,
 ]
 
 
-def pipeline_configs_from_grid(config):
+def pipeline_configs_from_grid(config, delimiter=':'):
     """ Builds a list of pipeline configs from a grid configuration. 
     
     Parameters:
@@ -371,21 +449,27 @@ def pipeline_configs_from_grid(config):
     configs : list
         A list of pipeline member configs from the grid or just the single config, if no grid was specified.
     """
+    config = dict(config).copy() # To avoid errors?
     grid = config.pop('pipeline_grid', None)
     if grid is None:
         if 'name' in config:
             config['name'] = format_name(config['name'], config.get('name_args', []), config)
         return [config]
     else:
+        print(config, type(config), dict(config), type(dict(config)), grid, type(grid))
         parameters = grid # dict of lists
         keys = list(parameters.keys())
         configs = []
         for values in product(*[parameters[k] for k in keys]):
-            subconfig = config.copy()
+            subconfig = deepcopy(config)
             for idx, key in enumerate(keys):
-                subconfig[key] = values[idx]
+                path = key.split(delimiter)
+                target = subconfig
+                for x in path[:-1]:
+                    target = target[x]
+                target[path[-1]] = values[idx]
             if 'name' in subconfig:
-                subconfig['name'] = format_name(subconfig['name'], subconfig.get('name_args', []), subconfig)
+                subconfig['name'] = format_name(subconfig['name'], subconfig.get('name_args', []), subconfig, delimiter=delimiter)
             configs.append(subconfig)
         return configs
 
@@ -417,7 +501,8 @@ class Pipeline:
             try:
                 args, kwargs = member(*args, **kwargs)
             except Exception as e:
-                pipeline_log(f'{member.name} FAILED. Reason: "{e}"')
+                pipeline_log(f'{member.print_name} FAILED. Reason: "{e}"')
+                print(traceback.format_exc())
                 if not self.ignore_exceptions:
                     raise e
         return args, kwargs

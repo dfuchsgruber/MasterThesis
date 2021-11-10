@@ -183,17 +183,19 @@ class ExperimentWrapper:
                                         gpus=gpus,
                                         )
                     trainer.fit(model, data_loaders[data_constants.TRAIN], data_loaders[data_constants.VAL_REDUCED])
-                    val_metrics = trainer.validate(None, data_loaders[data_constants.VAL_REDUCED], ckpt_path='best')
-
-                    with open(osp.join(artifact_dir, 'metrics.json'), 'w+') as f:
-                        json.dump(val_metrics, f)
-
-                    for val_metric in val_metrics:
-                        for metric, value in val_metric.items():
-                            result[metric].append(value)
+                    val_metrics = {
+                        name : trainer.validate(None, data_loaders[name], ckpt_path='best')
+                        for name in (data_constants.VAL_TRAIN_LABELS, data_constants.VAL_REDUCED)
+                    }
+                    for name, metrics in val_metrics.items():
+                        with open(osp.join(artifact_dir, f'metrics-{name}.json'), 'w+') as f:
+                            json.dump(val_metrics, f)
+                        for val_metric in metrics:
+                            for metric, value in val_metric.items():
+                                result[f'{metric}-{name}'].append(value)
 
                 # Build evaluation pipeline
-                pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus)
+                pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus, ignore_exceptions=True)
 
                 # Run evaluation pipeline
                 print(f'Executing pipeline...')

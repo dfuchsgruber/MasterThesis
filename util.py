@@ -2,6 +2,7 @@ from contextlib import contextmanager
 import os, sys
 import torch
 import numpy as np
+import networkx as nx
 
 @contextmanager
 def suppress_stdout(supress=True):
@@ -85,7 +86,7 @@ def random_derangement(N, rng=None):
             new[[same[0], swap]] = new[[swap, same[0]]]
     return new
 
-def format_name(name_fmt, args, config, delimiter='.'):
+def format_name(name_fmt, args, config, delimiter=':'):
     """ Formats a name using arguments from a config. That is, if '{i}' appears in
     `name_fmt`, it is replaced with the `i`-th element in `args`. Each element in `args`
     is a path in the config dict, where levels are separated by '.'.
@@ -124,3 +125,37 @@ def format_name(name_fmt, args, config, delimiter='.'):
             arg = str(arg)[0].upper()
         parsed_args.append(str(arg))
     return name_fmt.format(*parsed_args)
+
+
+def get_k_hop_neighbourhood(edge_list, k_max, k_min = None):
+    """ Gets all vertices in the k-hop neighbourhood of vertices. 
+    
+    Parameters:
+    -----------
+    edge_list : torch.Tensor, shape [2, num_egdes]
+        The graph structure.
+    k_max : int
+        Vertices returned can be at most `k_max` hops away from a source.
+    k_min : int or None
+        Vertices returned have to be at least `k_min``hops away from a source. 
+        If `None`, `k_min` is set equal to `k_max`, which corresponds to the k-hop
+        neighbourhoods exactly.
+    smaller_or_equal : bool
+        If True, the <= k-hop neighbourhood is returned (vertices AT MOST k hops away).
+    
+    Returns:
+    --------
+    k-hop-neighbourhood : dict
+        A mapping from vertex_idx to a tuple of vertex_idxs in the k-hop neighbourhood.
+    """
+    if k_min is None:
+        k_min = k_max
+    G = nx.Graph()
+    G.add_edges_from(edge_list.numpy().T)
+    return {
+        src : tuple(n for n, path in nx.single_source_shortest_path(G, src, cutoff=k_max).items() if len(path) <= k_max + 1 and len(path) >= k_min + 1) 
+        for src in G.nodes
+    }
+
+# edge_list = torch.tensor([[0, 1, 2, 3, 5], [8, 3, 3, 3, 4]]).long()
+# print(get_k_hop_neighbourhood(edge_list, 0))

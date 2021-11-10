@@ -31,6 +31,13 @@ def data_get_summary(dataset, prefix='\t'):
     summary.append(f'{prefix}Number of Labels in Mask : {len(torch.unique(data.y[data.mask]))}')
     summary.append(f'{prefix}Number of Edges : {data.edge_index.size()[1]}')
     summary.append(f'{prefix}Label mapping : {data.label_to_idx}')
+    # Create a hash-like object of all vertex features
+    n, d = data.x.size()
+    vertex_hash = data.x * torch.cos(torch.arange(0, n).repeat(d).view((d, n)).T / 1.5 **(2 * torch.arange(0, d).repeat(n).view((n, d)) / d))
+    summary.append(f'{prefix}Vertex hash in mask: {vertex_hash[data.mask].mean()}')
+    summary.append(f'{prefix}Vertex hash graph: {vertex_hash.mean()}')
+    
+
     return '\n'.join(summary)
 
 
@@ -85,6 +92,36 @@ def sample_uniformly(labels, select_lables, num_samples, mask, rng=None):
     assert sample_mask.sum() == num_samples * len(all_labels)
 
     return sample_mask
+
+def permute_label_to_idx_to_match(label_to_idx_base, label_to_idx_target):
+    """ Reorders a source label mapping to respect the mapping defined in target. 
+    That is, `label_to_idx_base` and `label_to_idx_target` are mappings name -> idx.
+    This function returns a mapping that maps all names in `label_to_idx_base` to the same values
+    as `label_to_idx_target`. The other names are mapped such that the mapping is compressed.
+    
+    Parameters:
+    -----------
+    label_to_idx_base : dict
+        The mapping to reorder.
+    label_to_idx_target : dict
+        The new fixed mappings to apply.
+
+    Returns:
+    --------
+    remapping : dict
+        A mapping from idx_old to idx_new that can be fed into `remap_labels`.
+    """
+    remapping = dict()
+    for label, idx_new in label_to_idx_target.items():
+        if label in label_to_idx_base:
+            remapping[label_to_idx_base[label]] = idx_new
+    # Fill labels with a mapping that isnt fixed by `label_to_idx_target`
+    for label, idx_old in label_to_idx_base.items():
+        if idx_old not in remapping:
+            idx_new = min(set(range(max(remapping.values()) + 2)) - set(remapping.values())) # Get the smallest unused idx
+            remapping[idx_old] = idx_new
+    return remapping
+
 
 def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, num_val=20, portion_test_fixed=0.2, train_labels='all', train_labels_remove_other=False, 
         val_labels='all', val_labels_remove_other=False, compress_train_labels=True, compress_val_labels=True):
@@ -169,24 +206,52 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
     # Sample `train_portion` vertices per class both for training and reduced validation sets
     for split_idx in range(num_splits):
         rng = np.random.RandomState(seeds[split_idx + 1])
+
+        ### ---------- TRAINING ----------- ###
         # Sample train idxs
         mask_train = sample_uniformly(data.y.numpy(), train_labels, num_train, mask_train_graph & mask_non_fixed, rng=rng)
         data_train = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_train[mask_train_graph])
+
+        ### ---------- VALIDATION ----------- ###
         # Sample val reduced idxs, disjunct from train idxs
         mask_val_reduced = sample_uniformly(data.y.numpy(), train_labels, num_val, mask_train_graph & (~mask_train) & mask_non_fixed, rng=rng)
         data_val_reduced = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_val_reduced[mask_train_graph])
-        # Sample val idxs, disjunct from train idxs
-        mask_val = sample_uniformly(data.y.numpy(), val_labels, num_val, mask_val_graph & (~mask_train) & mask_non_fixed, rng=rng)
+        # Sample val idxs: First sample idxs from the val classes not in the training classes
+        mask_val = mask_val_reduced | sample_uniformly(data.y.numpy(), val_labels - train_labels, num_val, mask_val_graph & (~mask_train) & mask_non_fixed, rng=rng)
+        # Remove train labels from the reduced mask that are not in val
+        for label in train_labels - val_labels:
+            mask_val[data.y.numpy() == label] = False
         data_val = SingleGraphDataset(x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, mask_val[mask_val_graph])
+        # Validation idxs w/o non-train labels, but on validation graph (=reduced validation, which is on train graph)
+        mask_val_train_labels = mask_val.copy()
+        for label in val_labels - train_labels:
+            mask_val_train_labels[data.y.numpy() == label] = False
+        # Permute labels so we match training data
+        label_to_idx_val_train_permutation = permute_label_to_idx_to_match(label_to_idx_val, label_to_idx_train)
+        y_val_train_compressed, label_to_idx_val_train_compressed = remap_labels(y_val, label_to_idx_val, label_to_idx_val_train_permutation)
+        data_val_train_labels = SingleGraphDataset(x_val, edge_index_val, y_val_train_compressed, vertex_to_idx_val, label_to_idx_val_train_compressed, 
+                                                        mask_val_train_labels[mask_val_graph])
+
+        ### ------------ TEST ---------------- ###
         # Test idx are the non-used idxs (which are not fixed)
         mask_test = (~(mask_train | mask_val_reduced | mask_val)) & mask_non_fixed
         data_test = SingleGraphDataset(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, mask_test)
-        # Test idx for the reduced graph is the subset of the test graph that is on train labels
-        data_test_reduced = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_test[mask_train_graph])
+        # Test idx for the reduced graph is the subset of the test graph that is on train labels, minus all non-training classes
+        mask_test_reduced = mask_test.copy()
+        for label in all_labels - train_labels:
+            mask_test_reduced[data.y.numpy() == label] = False
+        data_test_reduced = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_test_reduced[mask_train_graph])
+        # Permute labels so we match training data
+        label_to_idx_test_train_permutation = permute_label_to_idx_to_match(data.label_to_idx, label_to_idx_train)
+        y_test_train_compressed, label_to_idx_train_compressed = remap_labels(data.y.numpy(), data.label_to_idx, label_to_idx_test_train_permutation)
+        data_test_train_labels = SingleGraphDataset(data.x.numpy(), data.edge_index.numpy(), y_test_train_compressed, data.vertex_to_idx, label_to_idx_train_compressed, mask_test_reduced)
+
 
         # Sanity checks
         assert ((mask_train.astype(int) + mask_val_reduced.astype(int)) <= 1).all(), f'Training and reduced Validation data are not disjunct'
         assert ((mask_train.astype(int) + mask_val.astype(int)) <= 1).all(), f'Training and full Validation data are not disjunct'
+        assert ((mask_train.astype(int) + mask_test_reduced.astype(int)) <= 1).all(), f'Training and reduced Testing data are not disjunct'
+        assert ((mask_train.astype(int) + mask_test.astype(int)) <= 1).all(), f'Training and full Testing data are not disjunct'
         assert (((mask_train | mask_val | mask_val_reduced).astype(int) + mask_test.astype(int)) <= 1).all(), f'Training & Validation and Testing data are not disjunct'
         assert (((mask_train | mask_val | mask_val_reduced | mask_test).astype(int) + mask_fixed.astype(int)) <= 1).all(), f'Non-fixed and fixed data are not disjunct'
 
@@ -199,8 +264,10 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
             data_constants.TRAIN : data_train,
             data_constants.VAL : data_val,
             data_constants.VAL_REDUCED : data_val_reduced,
+            data_constants.VAL_TRAIN_LABELS : data_val_train_labels,
             data_constants.TEST : data_test,
             data_constants.TEST_REDUCED : data_test_reduced,
+            data_constants.TEST_TRAIN_LABELS : data_test_train_labels,
         })
 
     return data_list, SingleGraphDataset(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, mask_fixed)
@@ -577,3 +644,49 @@ def label_binarize(labels, num_classes=None):
         binarized[i, label] = 1
     return binarized
 
+def vertex_intersection(first, second):
+    """ Finds the vertex intersection of two datasets that represent different subgraphs of the same supergraph.
+    
+    Parameters:
+    -----------
+    first : torch_geometric.data.Data
+        The first graph.
+    second : torch_geometric.data.Data
+        The second graph.
+
+    Returns:
+    --------
+    idxs_first : ndarray, shape [num_intersecting]
+        Idxs of the intersecting vertices in the first graph.
+    idxs_second : ndarray, shape [num_intersecting]
+        Idxs of the intersecting vertices in the second graph.
+    """
+    idxs_first, idxs_second = [], []
+    for vertex, idx_first in first.vertex_to_idx.items():
+        if vertex in second.vertex_to_idx:
+            idxs_first.append(idx_first.item())
+            idxs_second.append(second.vertex_to_idx[vertex].item())
+    return np.array(idxs_first, dtype=int), np.array(idxs_second, dtype=int)
+
+def labels_in_dataset(data, mask=True):
+    """ Returns all labels in a given dataset.
+    
+    Parameters:
+    -----------
+    data : torch_geometric.data.Data
+        The single graph data.
+    mask : bool
+        If True, only vertices within the data's mask will be considered.
+    
+    Returns:
+    --------
+    labels_in_dataset : set
+        All the labels in that dataset, with their real name (str) instead of the idx
+        to make it comparable among different label compressions.
+    """
+    data = data.cpu()
+    idx_to_label = {idx.item() : label for label, idx in data.label_to_idx.items()}
+    if mask:
+        return set(idx_to_label[idx] for idx in torch.unique(data.y[data.mask]).tolist())
+    else:
+        return set(idx_to_label[idx] for idx in torch.unique(data.y).tolist())
