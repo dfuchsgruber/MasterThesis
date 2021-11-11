@@ -42,25 +42,25 @@ ex.init_run(name='model_no_remove_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
 ex.init_evaluation(
     print_pipeline=True,
     pipeline=[
-    # {
-    #     'type' : 'EvaluateEmpircalLowerLipschitzBounds',
-    #     'num_perturbations' : 20,
-    #     'min_perturbation' : 2,
-    #     'max_perturbation' : 10,
-    #     'num_perturbations_per_sample' : 5,
-    #     'perturbation_type' : 'noise',
-    #     'seed' : 1337,
-    #     'name' : 'noise_perturbations',
-    # },
-    # {
-    #     'type' : 'EvaluateEmpircalLowerLipschitzBounds',
-    #     'num_perturbations' : 20,
-    #     'num_perturbations_per_sample' : 5,
-    #     'permute_per_sample' : True,
-    #     'perturbation_type' : 'derangement',
-    #     'seed' : 1337,
-    #     'name' : 'derangement_perturbations',
-    # },
+    {
+        'type' : 'EvaluateEmpircalLowerLipschitzBounds',
+        'num_perturbations' : 2,
+        'num_perturbations_per_sample' : 2,
+        'permute_per_sample' : True,
+        'perturbation_type' : 'derangement',
+        'seed' : 1337,
+        'name' : 'derangement_perturbations',
+    },
+    {
+        'type' : 'EvaluateEmpircalLowerLipschitzBounds',
+        'num_perturbations' : 20,
+        'min_perturbation' : 2,
+        'max_perturbation' : 10,
+        'num_perturbations_per_sample' : 5,
+        'perturbation_type' : 'noise',
+        'seed' : 1337,
+        'name' : 'noise_perturbations',
+    },
     {
         'type' : 'FitFeatureSpacePCA',
         'fit_to' : ['train', 'val-reduced'],
@@ -116,10 +116,10 @@ ex.init_evaluation(
     #         'dimensionality_reduction:per_class',
     #     ]
     # },
-    # {
-    #     'type' : 'PrintDatasetSummary',
-    #     'evaluate_on' : ['train', 'val', 'val-reduced', 'val-train-labels', 'test']
-    # },
+    {
+        'type' : 'PrintDatasetSummary',
+        'evaluate_on' : ['train', 'val', 'val-reduced', 'val-train-labels', 'test']
+    },
     # {
     #     'type' : 'FitFeatureDensity',
     #     'density_type' : 'GaussianPerClass',
@@ -155,31 +155,56 @@ ex.init_evaluation(
         'data_before' : 'train',
         'data_after' : 'val',
     },
+    # {
+    #     'type' : 'FitFeatureDensity',
+    #     'density_type' : 'GaussianPerClass',
+    #     'dimensionality_reduction' : {
+    #         'type' : 'isomap',
+    #         'per_class' : False,
+    #         'number_components' : 16,
+    #     },
+    #     'fit_to' : ['train'],
+    #     'fit_to_ground_truth_labels' : ['train'],
+    #     'evaluate_on' : ['val'],
+    #     'diagonal_covariance' : True,
+    #     'name' : 'gpc-{0}-{3}{1}-{2}-pc{4}',
+    #     'name_args' : [
+    #         'dimensionality_reduction:type',
+    #         'diagonal_covariance',
+    #         'fit_to',
+    #         'dimensionality_reduction:number_components',
+    #         'dimensionality_reduction:per_class',
+    #     ]
+    # },
     {
-        'type' : 'FitFeatureDensity',
-        'density_type' : 'GaussianPerClass',
-        'dimensionality_reduction' : {
-            'type' : 'isomap',
-            'per_class' : False,
-            'number_components' : 16,
-        },
+        'type' : 'FitFeatureDensityGrid',
         'fit_to' : ['train'],
         'fit_to_ground_truth_labels' : ['train'],
         'evaluate_on' : ['val'],
-        'diagonal_covariance' : True,
-        'name' : 'gpc-{0}-{3}{1}-{2}-pc{4}',
-        'name_args' : [
-            'dimensionality_reduction:type',
-            'diagonal_covariance',
-            'fit_to',
-            'dimensionality_reduction:number_components',
-            'dimensionality_reduction:per_class',
-        ]
+        'density_types' : {
+            'GaussianPerClass' : {
+                'diagonal_covariance' : [True, False],
+            },
+            'GaussianMixture' : {
+                'number_components' : [2, 10,],
+            }
+        },
+        'dimensionality_reductions' : {
+            'none' : {},
+            'pca' : {
+                'number_components' : [3, 4],
+            },
+            'isomap' : {
+                'number_components' : [5, 6],
+            }
+        },
+        'log_plots' : False,
     },
-]
+    ],
+    ignore_exceptions=False,
 )
 
-results_path = (ex.train(max_epochs=1000, learning_rate=0.001, early_stopping={
+results_path = (ex.train(max_epochs=1, learning_rate=0.001, early_stopping={
     'monitor' : 'val_loss',
     'mode' : 'min',
     'patience' : 50,

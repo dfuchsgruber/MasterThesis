@@ -10,6 +10,7 @@ from plot.features import plot_2d_features
 from plot.util import plot_histogram, plot_histograms, plot_2d_histogram
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from model.density import get_density_model
+from model.dimensionality_reduction import DimensionalityReduction
 from evaluation.logging import log_figure, log_histogram, log_embedding, log_metrics
 from evaluation.features import inductive_feature_shift
 from torch_geometric.data import Dataset, Data
@@ -132,47 +133,6 @@ class EvaluateEmpircalLowerLipschitzBounds(PipelineMember):
         
         return args, kwargs
 
-
-
-class PipelineFeatureDensity(PipelineMember):
-    """ Superclass for pipeline members that fit a feature density. """
-
-    def __init__(self, gpus=0, fit_to=[data_constants.TRAIN], 
-        fit_to_ground_truth_labels=[data_constants.TRAIN], evaluate_on=[data_constants.TEST], **kwargs):
-        super().__init__(**kwargs)
-        self.gpus = gpus
-        self.fit_to = fit_to
-        self.fit_to_ground_truth_labels = fit_to_ground_truth_labels
-        self.evaluate_on = evaluate_on
-
-    def _get_features_and_labels_to_fit(self, **kwargs):
-        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
-        for idx, name in enumerate(self.fit_to):
-            if name.lower() in self.fit_to_ground_truth_labels: # Override predictions with ground truth for training data
-                predictions[idx] = label_binarize(labels[idx], num_classes=predictions[idx].size(1)).float()
-        return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
-
-    def _get_features_and_labels_to_evaluate(self, **kwargs):
-        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
-        return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
-
-    # def _get_out_of_distribution_labels_to_evaluate(self, **kwargs):
-    #     callbacks = [make_callback_is_ground_truth_in_labels(kwargs['config']['data']['train_labels'], mask=True)]
-    #     for k in range(1, len(kwargs['config']['model']['hidden_sizes']) + 2): # Receptive field is #hidden-layers + 1
-    #         callbacks += [
-    #             make_callback_count_neighbours_with_labels(kwargs['config']['data']['train_labels'], k, mask=True),
-    #             make_callback_count_neighbours(k, mask=True)
-    #         ]
-    #     results = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], 
-    #                                     callbacks=callbacks, run_model=False)
-
-    #     mask_is_train_label = torch.cat(results[0], dim=0) # N
-    #     num_train_label_nbs = torch.stack([torch.cat(l, dim=0) for l in results[1::2]]) # k, N
-    #     num_nbs = torch.stack([torch.cat(l, dim=0) for l in results[2::2]]) # k, N
-
-    #     return mask_is_train_label, num_train_label_nbs, num_nbs
-
-
 class EvaluateSoftmaxEntropy(PipelineMember):
     """ Pipeline member to evaluate the Softmax Entropy curves of the model for in-distribution and out-of-distribution data. """
 
@@ -245,6 +205,127 @@ class EvaluateSoftmaxEntropy(PipelineMember):
         roc_auc = roc_auc_score(~mask_is_train_label.long().numpy(), entropy.cpu().numpy()) # higher entropy -> higher uncertainty
         kwargs['metrics'][f'auroc_softmax_entropy{self.suffix}'] = roc_auc
         log_metrics(kwargs['logs'], {f'auroc_softmax_entropy{self.suffix}' : roc_auc}, 'softmax_entropy_plots')
+        
+        return args, kwargs
+
+class PipelineFeatureDensity(PipelineMember):
+    """ Superclass for pipeline members that fit a feature density. """
+
+    def __init__(self, gpus=0, fit_to=[data_constants.TRAIN], 
+        fit_to_ground_truth_labels=[data_constants.TRAIN], evaluate_on=[data_constants.TEST], **kwargs):
+        super().__init__(**kwargs)
+        self.gpus = gpus
+        self.fit_to = fit_to
+        self.fit_to_ground_truth_labels = fit_to_ground_truth_labels
+        self.evaluate_on = evaluate_on
+
+    def _get_features_and_labels_to_fit(self, **kwargs):
+        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
+        for idx, name in enumerate(self.fit_to):
+            if name.lower() in self.fit_to_ground_truth_labels: # Override predictions with ground truth for training data
+                predictions[idx] = label_binarize(labels[idx], num_classes=predictions[idx].size(1)).float()
+        return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
+
+    def _get_features_and_labels_to_evaluate(self, **kwargs):
+        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
+        return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
+
+class FitFeatureDensityGrid(PipelineFeatureDensity):
+    """ Pipeline member that fits a grid of several densities to the feature space of a model. """
+
+    name = 'FitFeatureDensityGrid'
+
+    def __init__(self, fit_to=[data_constants.TRAIN], fit_to_ground_truth_labels=[data_constants.TRAIN], 
+                    evaluate_on=[data_constants.VAL], density_types={}, dimensionality_reductions={}, log_plots=False, gpus=0,
+                    **kwargs):
+        super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, evaluate_on=evaluate_on, **kwargs)
+        self.density_types = density_types
+        self.dimensionality_reductions = dimensionality_reductions
+        self.log_plots = log_plots
+
+    def __str__(self):
+        return '\n'.join([
+            self.print_name,
+            f'\t Fit to : {self.fit_to}',
+            f'\t Ground truth labels for fitting used : {self.fit_to_ground_truth_labels}',
+            f'\t Evaluate on : {self.evaluate_on}',
+            f'\t Density Types : {list(self.density_types.keys())}',
+            f'\t Dimensionality Reduction Types : {list(self.dimensionality_reductions.keys())}',
+            f'\t Log plos : {self.log_plots}',
+        ])
+        
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+
+        # Only calculate data once
+        features_to_fit, predictions_to_fit, labels_to_fit = self._get_features_and_labels_to_fit(**kwargs)
+        # Note that for `self.fit_to_ground_truth_labels` data, the `predictions_to_fit` are overriden with a 1-hot ground truth
+        features_to_evaluate, predictions_to_evaluate, labels_to_evaluate = self._get_features_and_labels_to_evaluate(**kwargs)
+        mask_is_train_label, num_train_label_nbs, num_nbs = get_out_of_distribution_labels(
+            [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
+            len(kwargs['config']['model']['hidden_sizes']) + 1, # Receptive field of each vertex is num-hidden-layers + 1
+            kwargs['config']['data']['train_labels'],
+            mask = True,
+        )
+        mask_is_train_label = torch.cat(mask_is_train_label, dim=0) # N
+        num_train_label_nbs = torch.stack([torch.cat(l, dim=0) for l in num_train_label_nbs]) # k, N
+        num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k, N
+        mask_has_non_train_label_nb = ((num_nbs - num_train_label_nbs) > 0).any(dim=0)
+
+        # Plot the feature density distribution by train-label data i) with no non-train label neighbours ii) with at least one train label neighbour
+        labels_to_plot = torch.empty_like(mask_is_train_label).long()
+        labels_to_plot[~mask_is_train_label] = 0
+        labels_to_plot[mask_is_train_label & (~mask_has_non_train_label_nb)] = 1
+        labels_to_plot[mask_is_train_label & mask_has_non_train_label_nb] = 2
+
+        aurocs = {}
+
+        # Grid over dimensionality reductions
+        for dim_reduction_type, dim_reduction_grid in self.dimensionality_reductions.items():
+            keys = list(dim_reduction_grid.keys())
+            for values in product(*[dim_reduction_grid[k] for k in keys]):
+                dim_reduction_config = {key : values[idx] for idx, key in enumerate(keys)}
+                dim_reduction = DimensionalityReduction(type=dim_reduction_type, per_class=False, **dim_reduction_config)
+                dim_reduction.fit(features_to_fit, predictions_to_fit)
+                pipeline_log(f'{self.name} fitted dimensionality reduction {dim_reduction.compressed_name}')
+
+                # TODO: dim-reductions transform per-class, but this is not supported here, so we just take any and set `per_class` to false in its constructor
+                features_to_fit_reduced = torch.from_numpy(list(dim_reduction.transform(features_to_fit).values())[0])
+                features_to_evaluate_reduced = torch.from_numpy(list(dim_reduction.transform(features_to_evaluate).values())[0])
+
+                # Grid over feature space densities
+                for density_type, density_grid in self.density_types.items():
+                    keys_density = list(density_grid.keys())
+                    for values_density in product(*[density_grid[k] for k in keys_density]):
+                        density_config = {key : values_density[idx] for idx, key in enumerate(keys_density)}
+                        density_model = get_density_model(
+                            density_type=density_type, 
+                            dimensionality_reduction={'type' : None}, # Features are already reduced
+                            **density_config,
+                            )
+                        density_model.fit(features_to_fit_reduced, predictions_to_fit)
+                        log_density = density_model(features_to_evaluate_reduced).cpu()
+                        pipeline_log(f'{self.name} fitted density {density_model.compressed_name}')                        
+
+                        suffix = f'{density_model.compressed_name}:{dim_reduction.compressed_name}'
+                        metric_name = f'auroc:{suffix}{self.suffix}'
+                        if metric_name in aurocs:
+                            warn(f'Multiple configurations give auroc metric key {metric_name}')
+                        else:
+                            aurocs[metric_name] = roc_auc_score(mask_is_train_label.long().numpy(), log_density.cpu().numpy())
+                            
+                            if self.log_plots:
+                                k = len(kwargs['config']['model']['hidden_sizes']) + 1
+                                fig, ax = plot_histograms(log_density.cpu(), labels_to_plot.cpu(), 
+                                    label_names={0 : 'ood', 1 : f'id, no ood in {k}-hops', 2 : f'id, ood in {k}-hops'},
+                                    kind='overlapping', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
+                                log_figure(kwargs['logs'], fig, f'feature_log_density_histograms{suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
+                                pipeline_log(f'Saved feature density histogram to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms{suffix}.pdf')))
+                                plt.close(fig)
+
+        log_metrics(kwargs['logs'], aurocs, 'feature_density_auroc')
+        for k, auroc in aurocs.items():
+            kwargs['metrics'][k] = auroc
         
         return args, kwargs
 
@@ -584,7 +665,7 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
 
 pipeline_members = [
     EvaluateEmpircalLowerLipschitzBounds,
-    FitFeatureDensity,
+    FitFeatureDensity, # Deprecated: Use the Grid instead
     # EvaluateFeatureDensity,  # Merged into : FitFeatureDensity (why would you want to fit and not evaluate anyway??)
     LogFeatures,
     FitFeatureSpacePCA,
@@ -593,6 +674,7 @@ pipeline_members = [
     LogInductiveFeatureShift,
     LogInductiveSoftmaxEntropyShift,
     EvaluateSoftmaxEntropy,
+    FitFeatureDensityGrid,
 ]
 
 
@@ -616,7 +698,6 @@ def pipeline_configs_from_grid(config, delimiter=':'):
             config['name'] = format_name(config['name'], config.get('name_args', []), config)
         return [config]
     else:
-        print(config, type(config), dict(config), type(dict(config)), grid, type(grid))
         parameters = grid # dict of lists
         keys = list(parameters.keys())
         configs = []

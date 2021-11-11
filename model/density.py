@@ -86,7 +86,7 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
 
     def __init__(
             self, 
-            dimensionality_reduction={'type' : 'pca', 'number_components' : 2, 'per_class' : False}, 
+            dimensionality_reduction={'type' : None}, 
             diagonal_covariance=False, 
             **kwargs
         ):
@@ -102,6 +102,14 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
             str(self.dimensionality_reduction),
             f'\t Diagonal covariance : {self.diagonal_covariance}'
         ])
+
+    @property
+    def compressed_name(self):
+        if self.diagonal_covariance:
+            diagonal = 'diag'
+        else:
+            diagonal = 'full'
+        return f'gpc-{diagonal}'
 
     def _make_covariance_psd(self, cov, eps=1e-6):
         """ If a covariance matrix is not psd (numerical errors), a small value is added to its diagonal to make it psd.
@@ -192,7 +200,7 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
             self, 
             number_components=5, 
             seed=None,
-            dimensionality_reduction={'type' : None, 'number_components' : 2, 'per_class' : False},
+            dimensionality_reduction={'type' : None},
             **kwargs
         ):
         super().__init__()
@@ -211,6 +219,10 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
             f'\t Number of components : {self.number_components}',
             f'\t Seed : {self.seed}',
         ])
+
+    @property
+    def compressed_name(self):
+        return f'{self.number_components}-mog'
 
     def _transform(self, features):
         transformed_by_class = self.dimensionality_reduction.transform(features)

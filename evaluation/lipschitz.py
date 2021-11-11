@@ -23,8 +23,11 @@ def local_lipschitz_bounds(perturbations):
         The slope of the linear function that lower bounds all perturbations.
     """ 
     xs = torch.tensor(list(perturbations.keys())).numpy()
-    ys = torch.stack(list(perturbations.values()))
-    means, meds, maxs, mins = ys.mean(dim=-1), ys.median(dim=-1)[0].numpy(), ys.max(axis=-1)[0].numpy(), ys.min(axis=-1)[0].numpy()
+    ys = list(perturbations.values()) # Can't stack bc potentially of non-matching size
+    means = np.array([y.mean().item() for y in ys])
+    meds = np.array([y.median().item() for y in ys])
+    maxs = np.array([y.max().item() for y in ys])
+    mins = np.array([y.min().item() for y in ys])
 
     return (means / xs).mean(), (meds / xs).mean(), (maxs / xs).max(), (mins / xs).min()
 
@@ -157,12 +160,12 @@ def permutation_perturbations(model, dataset, num_permutations, num_perturbation
     rng = np.random.RandomState(seed)
     perturbations = np.sort(np.unique(np.linspace(1, dataset.x.size(1), num_permutations).astype(int))).tolist()
 
-    h = model(dataset)[-1][dataset.mask].cpu()
+    h = model(dataset)[-2].cpu()
     input_perturbations, output_perturbations = [], []
     for num_permutations in perturbations:
         for _ in range(num_perturbations_per_sample):
             x_perturbed = permute_features(dataset.x, num_permutations, rng=rng, per_sample=per_sample)
-            h_perturbed = model(Data(x=x_perturbed, edge_index=dataset.edge_index))[-1][dataset.mask]
+            h_perturbed = model(Data(x=x_perturbed, edge_index=dataset.edge_index))[-2].cpu()
             input_perturbations.append((x_perturbed - dataset.x).norm(dim=1).cpu())
             output_perturbations.append((h_perturbed - h).norm(dim=1).cpu())
     input_perturbations = torch.cat(input_perturbations).numpy() # N * len(perturbations) * num_perturbations_per_sample
@@ -173,5 +176,6 @@ def permutation_perturbations(model, dataset, num_permutations, num_perturbation
     bin_idxs = np.digitize(input_perturbations, bin_edges)
     results = {}
     for bin_idx in np.unique(bin_idxs):
-        result[0.5 * (bin_edges[bin_idx - 1] + bin_edges[bin_idx])] = output_perturbations[bin_idxs == bin_idx]
-    return result
+        if bin_idx == 0 or bin_idx >= bin_edges.shape[0]: continue # Outside of histogram, outliers...
+        results[0.5 * (bin_edges[bin_idx - 1] + bin_edges[bin_idx])] = torch.from_numpy(output_perturbations[bin_idxs == bin_idx])
+    return results

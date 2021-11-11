@@ -107,10 +107,11 @@ class ExperimentWrapper:
         self.init_run()
 
     @ex.capture(prefix='evaluation')
-    def init_evaluation(self, pipeline=[], print_pipeline=False):
+    def init_evaluation(self, pipeline=[], print_pipeline=False, ignore_exceptions=True):
         self.evaluation_config = {
             'pipeline' : pipeline,
             'print_pipeline' : print_pipeline,
+            'ignore_exceptions' : ignore_exceptions,
         }
 
     @ex.capture(prefix='run')
@@ -195,7 +196,8 @@ class ExperimentWrapper:
                                 result[f'{metric}-{name}'].append(value)
 
                 # Build evaluation pipeline
-                pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus, ignore_exceptions=True)
+                pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus, 
+                    ignore_exceptions=self.evaluation_config['ignore_exceptions'])
 
                 # Run evaluation pipeline
                 print(f'Executing pipeline...')

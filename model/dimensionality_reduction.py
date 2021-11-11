@@ -18,11 +18,19 @@ class Identity:
 class DimensionalityReduction:
     """ Base class for dimensionality reduction. """
 
-    def __init__(self, type='pca', number_components=2, per_class=True, number_neighbours=5, *args, **kwargs):
+    def __init__(self, type='pca', number_components=2, per_class=False, number_neighbours=5, *args, **kwargs):
         self.type = type
         self.number_components = number_components
         self.number_neighbours = number_neighbours
         self.per_class = per_class
+
+    @property
+    def compressed_name(self):
+        if not self.type or self.type.lower() == 'none' or self.type.lower() == 'identity':
+            return 'no'
+        else:
+            return f'{self.number_components}-{self.type.lower()}'
+
 
     def _make_transform(self):
         if not self.type or self.type.lower() == 'none' or self.type.lower() == 'identity':
@@ -48,6 +56,7 @@ class DimensionalityReduction:
             Soft class labels. Unused for this approach.
         """
         if self.per_class:
+            raise NotImplementedError # For now, if one impelements it should also be in the `compressed_name`
             # TODO: soft labels?
             self.transforms = {}
             labels_hard = labels.argmax(1)
