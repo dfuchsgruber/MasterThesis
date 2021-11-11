@@ -3,7 +3,8 @@ import torch
 import evaluation.lipschitz
 import plot.perturbations
 import matplotlib.pyplot as plt
-from evaluation.util import split_labels_into_id_and_ood, get_data_loader, feature_extraction, count_neighbours_with_label
+from evaluation.util import split_labels_into_id_and_ood, get_data_loader, run_model_on_datasets, count_neighbours_with_label, get_out_of_distribution_labels
+from evaluation.callbacks import *
 from plot.density import plot_2d_log_density
 from plot.features import plot_2d_features
 from plot.util import plot_histogram, plot_histograms, plot_2d_histogram
@@ -16,12 +17,13 @@ from torch_geometric.loader import DataLoader
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score
 import os.path as osp
-from data.util import label_binarize, data_get_summary, labels_in_dataset
+from data.util import label_binarize, data_get_summary, labels_in_dataset, vertex_intersection
 from warnings import warn
 from itertools import product
 from util import format_name, get_k_hop_neighbourhood
 from copy import deepcopy
 import traceback
+import data.constants as data_constants
 
 _ID_LABEL, _OOD_LABEL = 1, 0
 FEATURE_SHIFT_EPS = 1e-10 # Zero feature shift is bad in log space
@@ -130,19 +132,130 @@ class EvaluateEmpircalLowerLipschitzBounds(PipelineMember):
         
         return args, kwargs
 
-class FitFeatureDensity(PipelineMember):
-    """ Pipeline member that fits a density to the feature space of a model. """
 
-    name = 'FitFeatureDensity'
 
-    def __init__(self, density_type='unspecified', gpus=0, fit_to=['train'], fit_to_ground_truth_labels=[], 
-                    evaluate_on=['val'], **kwargs):
+class PipelineFeatureDensity(PipelineMember):
+    """ Superclass for pipeline members that fit a feature density. """
+
+    def __init__(self, gpus=0, fit_to=[data_constants.TRAIN], 
+        fit_to_ground_truth_labels=[data_constants.TRAIN], evaluate_on=[data_constants.TEST], **kwargs):
         super().__init__(**kwargs)
-        self.density = get_density_model(density_type=density_type, **kwargs)
         self.gpus = gpus
         self.fit_to = fit_to
         self.fit_to_ground_truth_labels = fit_to_ground_truth_labels
         self.evaluate_on = evaluate_on
+
+    def _get_features_and_labels_to_fit(self, **kwargs):
+        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
+        for idx, name in enumerate(self.fit_to):
+            if name.lower() in self.fit_to_ground_truth_labels: # Override predictions with ground truth for training data
+                predictions[idx] = label_binarize(labels[idx], num_classes=predictions[idx].size(1)).float()
+        return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
+
+    def _get_features_and_labels_to_evaluate(self, **kwargs):
+        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
+        return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
+
+    # def _get_out_of_distribution_labels_to_evaluate(self, **kwargs):
+    #     callbacks = [make_callback_is_ground_truth_in_labels(kwargs['config']['data']['train_labels'], mask=True)]
+    #     for k in range(1, len(kwargs['config']['model']['hidden_sizes']) + 2): # Receptive field is #hidden-layers + 1
+    #         callbacks += [
+    #             make_callback_count_neighbours_with_labels(kwargs['config']['data']['train_labels'], k, mask=True),
+    #             make_callback_count_neighbours(k, mask=True)
+    #         ]
+    #     results = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], 
+    #                                     callbacks=callbacks, run_model=False)
+
+    #     mask_is_train_label = torch.cat(results[0], dim=0) # N
+    #     num_train_label_nbs = torch.stack([torch.cat(l, dim=0) for l in results[1::2]]) # k, N
+    #     num_nbs = torch.stack([torch.cat(l, dim=0) for l in results[2::2]]) # k, N
+
+    #     return mask_is_train_label, num_train_label_nbs, num_nbs
+
+
+class EvaluateSoftmaxEntropy(PipelineMember):
+    """ Pipeline member to evaluate the Softmax Entropy curves of the model for in-distribution and out-of-distribution data. """
+
+    def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], **kwargs):
+        super().__init__(**kwargs)
+        self.gpus = gpus
+        self.evaluate_on = evaluate_on
+
+    def __str__(self):
+        return '\n'.join([
+            self.print_name,
+            f'\t Evaluate on : {self.evaluate_on}',
+        ])
+
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+
+        entropy, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
+                make_callback_get_softmax_entropy(mask=True),
+                make_callback_get_ground_truth(mask=True),
+            ], gpus=self.gpus)[0]
+        entropy, labels = torch.cat(entropy), torch.cat(labels)
+
+        # Log histograms and metrics label-wise
+        y = labels.cpu()
+        for label in torch.unique(y):
+            entropy_label = entropy[y == label]
+            log_histogram(kwargs['logs'], entropy_label.cpu().numpy(), 'softmax_entropy', global_step=label, label_suffix=str(label.item()))
+            log_metrics(kwargs['logs'], {
+                f'{self.prefix}mean_softmax_entropy' : entropy_label.mean(),
+                f'{self.prefix}std_softmax_entropy' : entropy_label.std(),
+                f'{self.prefix}min_softmax_entropy' : entropy_label.min(),
+                f'{self.prefix}max_softmax_entropy' : entropy_label.max(),
+                f'{self.prefix}median_softmax_entropy' : entropy_label.median(),
+            }, 'softmax_entropy', step=label)
+        fig, ax = plot_histograms(entropy.cpu(), y.cpu(), log_scale=False, kind='vertical', x_label='Entropy', y_label='Class')
+        log_figure(kwargs['logs'], fig, f'softmax_entropy_histograms_all_classes{self.suffix}', 'softmax_entropy_plots', save_artifact=kwargs['artifact_directory'])
+        pipeline_log(f'Evaluated softmax entropy for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
+        plt.close(fig)
+
+        mask_is_train_label, num_train_label_nbs, num_nbs = get_out_of_distribution_labels(
+            [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
+            len(kwargs['config']['model']['hidden_sizes']) + 1, # Receptive field of each vertex is num-hidden-layers + 1
+            kwargs['config']['data']['train_labels'],
+            mask = True,
+        )
+        mask_is_train_label = torch.cat(mask_is_train_label, dim=0) # N
+        num_train_label_nbs = torch.stack([torch.cat(l, dim=0) for l in num_train_label_nbs]) # k, N
+        num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k, N
+        mask_has_non_train_label_nb = ((num_nbs - num_train_label_nbs) > 0).any(dim=0)
+        
+        # Plot the softmax-entropy distribution by train-label data i) with no non-train label neighbours ii) with at least one train label neighbour
+        labels_to_plot = torch.empty_like(mask_is_train_label).long()
+        labels_to_plot[~mask_is_train_label] = 0
+        labels_to_plot[mask_is_train_label & (~mask_has_non_train_label_nb)] = 1
+        labels_to_plot[mask_is_train_label & mask_has_non_train_label_nb] = 2
+        
+        k = len(kwargs['config']['model']['hidden_sizes']) + 1
+        fig, ax = plot_histograms(entropy.cpu(), labels_to_plot.cpu(), 
+            label_names={0 : 'ood', 1 : f'id, no ood in {k}-hops', 2 : f'id, ood in {k}-hops'},
+            kind='overlapping', kde=True, log_scale=False,  x_label='Softmax-Entropy', y_label='Kind')
+        log_figure(kwargs['logs'], fig, f'softmax_entropy_histograms_id_vs_ood{self.suffix}', 'softmax_entropy_plots', save_artifact=kwargs['artifact_directory'])
+        pipeline_log(f'Saved softmax-entropy histogram to ' + str(osp.join(kwargs['artifact_directory'], f'softmax_entropy_histograms_id_vs_ood{self.suffix}.pdf')))
+        plt.close(fig)
+
+        # Calculate area under the ROC for separating in-distribution (label 1) from out of distribution (label 0)
+        roc_auc = roc_auc_score(~mask_is_train_label.long().numpy(), entropy.cpu().numpy()) # higher entropy -> higher uncertainty
+        kwargs['metrics'][f'auroc_softmax_entropy{self.suffix}'] = roc_auc
+        log_metrics(kwargs['logs'], {f'auroc_softmax_entropy{self.suffix}' : roc_auc}, 'softmax_entropy_plots')
+        
+        return args, kwargs
+
+    
+
+class FitFeatureDensity(PipelineFeatureDensity):
+    """ Pipeline member that fits a density to the feature space of a model. """
+
+    name = 'FitFeatureDensity'
+
+    def __init__(self, density_type='unspecified', gpus=0, fit_to=[data_constants.TRAIN], fit_to_ground_truth_labels=[data_constants.TRAIN], 
+                    evaluate_on=[data_constants.VAL], **kwargs):
+        super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, evaluate_on=evaluate_on, **kwargs)
+        self.density = get_density_model(density_type=density_type, **kwargs)
 
     def __str__(self):
         return '\n'.join([
@@ -156,19 +269,11 @@ class FitFeatureDensity(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
-        for idx, name in enumerate(self.fit_to):
-            if name.lower() in self.fit_to_ground_truth_labels:
-                # Override predictions with ground truth for training data
-                predictions[idx] = label_binarize(labels[idx], num_classes=predictions[idx].size(1)).float()
-        features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
-
+        features, predictions, labels = self._get_features_and_labels_to_fit(**kwargs)
         self.density.fit(features, predictions)
         pipeline_log(f'Fitted density of type {self.density.name} to {self.fit_to}')
 
-        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
-        features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
-
+        features, predictions, labels = self._get_features_and_labels_to_evaluate(**kwargs)
         log_density = self.density(features.cpu()).cpu()
         
         # Log histograms and metrics label-wise
@@ -188,34 +293,33 @@ class FitFeatureDensity(PipelineMember):
         pipeline_log(f'Evaluated feature density for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
         plt.close(fig)
 
-        # Split into in-distribution and out-of-distribution
-        labels_id_ood = split_labels_into_id_and_ood(y.cpu(), set(kwargs['config']['data']['train_labels']), id_label=_ID_LABEL, ood_label=_OOD_LABEL)
-        mask_is_id = labels_id_ood == _ID_LABEL
+        mask_is_train_label, num_train_label_nbs, num_nbs = get_out_of_distribution_labels(
+            [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
+            len(kwargs['config']['model']['hidden_sizes']) + 1, # Receptive field of each vertex is num-hidden-layers + 1
+            kwargs['config']['data']['train_labels'],
+            mask = True,
+        )
+        mask_is_train_label = torch.cat(mask_is_train_label, dim=0) # N
+        num_train_label_nbs = torch.stack([torch.cat(l, dim=0) for l in num_train_label_nbs]) # k, N
+        num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k, N
+        mask_has_non_train_label_nb = ((num_nbs - num_train_label_nbs) > 0).any(dim=0)
         
-        num_ood_nbs = []
-        receptive_field_size = len(kwargs['config']['model']['hidden_sizes']) + 1
-        # For id vertices, they might be influenced by ood neighbours, separate into vertices with ood k-hop neighbours and those with none such neighbours
-        for name in self.evaluate_on:
-            num_ood_nbs_name = torch.zeros(mask_is_id.size(0)).long()
-            for k in range(1, receptive_field_size + 1):
-                num_ood_nbs_name += count_neighbours_with_label(get_data_loader(name, kwargs['data_loaders']), set(y[~mask_is_id].tolist()), k=k, mask=True)[0]
-            num_ood_nbs.append(num_ood_nbs_name)
+        # Plot the feature density distribution by train-label data i) with no non-train label neighbours ii) with at least one train label neighbour
+        labels_to_plot = torch.empty_like(mask_is_train_label).long()
+        labels_to_plot[~mask_is_train_label] = 0
+        labels_to_plot[mask_is_train_label & (~mask_has_non_train_label_nb)] = 1
+        labels_to_plot[mask_is_train_label & mask_has_non_train_label_nb] = 2
         
-        has_ood_neighbours = torch.cat(num_ood_nbs) > 0
-        labels_plot = torch.empty_like(mask_is_id).long()
-        labels_plot[~mask_is_id] = 0
-        labels_plot[mask_is_id & ~(has_ood_neighbours)] = 1
-        labels_plot[mask_is_id & has_ood_neighbours] = 2
-        
-        fig, ax = plot_histograms(log_density.cpu(), labels_plot.cpu(), 
-            label_names={0 : 'ood', 1 : f'id, no ood <={receptive_field_size}-hop nbs', 2 : f'id, ood <={receptive_field_size}-hop nbs'},
+        k = len(kwargs['config']['model']['hidden_sizes']) + 1
+        fig, ax = plot_histograms(log_density.cpu(), labels_to_plot.cpu(), 
+            label_names={0 : 'ood', 1 : f'id, no ood in {k}-hops', 2 : f'id, ood in {k}-hops'},
             kind='overlapping', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
         log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_id_vs_ood{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Saved feature density histogram to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_id_vs_ood_{self.suffix}.pdf')))
         plt.close(fig)
 
         # Calculate area under the ROC for separating in-distribution (label 1) from out of distribution (label 0)
-        roc_auc = roc_auc_score(labels_id_ood.numpy(), log_density.cpu().numpy())
+        roc_auc = roc_auc_score(mask_is_train_label.long().numpy(), log_density.cpu().numpy())
         kwargs['metrics'][f'auroc{self.suffix}'] = roc_auc
         log_metrics(kwargs['logs'], {f'auroc{self.suffix}' : roc_auc}, 'feature_density_plots')
         
@@ -242,7 +346,7 @@ class FitFeatureSpacePCAIDvsOOD(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
+        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
         features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
         pca = PCA(n_components=2)
         transformed = pca.fit_transform(features.cpu().numpy())
@@ -251,7 +355,7 @@ class FitFeatureSpacePCAIDvsOOD(PipelineMember):
         pipeline_log(f'Logged 2d pca fitted to {self.fit_to}')
         plt.close(fig)
 
-        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
+        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
         features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
         transformed = pca.transform(features.cpu().numpy())
         fig, ax = plot_2d_features(torch.tensor(transformed), labels)
@@ -289,7 +393,7 @@ class FitFeatureSpacePCA(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, predictions, labels = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
+        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
         features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
 
         pca = PCA(n_components=self.num_components)
@@ -303,7 +407,7 @@ class FitFeatureSpacePCA(PipelineMember):
 
         if self.num_components == 2:
             loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
-            features, predictions, labels = feature_extraction(kwargs['model'], loaders, gpus=self.gpus)
+            features, predictions, labels = run_model_on_datasets(kwargs['model'], loaders, gpus=self.gpus)
             for idx, data_name in enumerate(self.evaluate_on):
                 # Get the label-to-name mapping
                 for data in loaders[idx]:
@@ -341,7 +445,7 @@ class LogFeatures(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features_all, predictions_all, labels_all = feature_extraction(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
+        features_all, predictions_all, labels_all = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
         for name, predictions, features, labels in zip(self.evaluate_on, features_all, predictions_all, labels_all):
             log_embedding(kwargs['logs'], features.cpu().numpy(), f'{name}_features', labels.cpu().numpy(), save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Logged features (size {features.size()}) of dataset {name}')
@@ -391,36 +495,89 @@ class LogInductiveFeatureShift(PipelineMember):
     
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
-        loader_before, loader_after = get_data_loader(self.data_before, kwargs['data_loaders']), get_data_loader(self.data_after, kwargs['data_loaders'])
-        for data_before in loader_before:
-            break
-        for data_after in loader_after:
-            break
-        model = kwargs['model']
-        if self.gpus > 0:
-            model = model.cuda()
-            data_before.cuda(), data_after.cuda()
-        shift, idx_before, idx_after = inductive_feature_shift(model, data_before, data_after)
+        
+        receptive_field_size = len(kwargs['config']['model']['hidden_sizes']) + 1
+        callbacks = [
+            make_callback_get_features(mask=False), 
+            make_callback_get_data(),
+        ]
+        for k in range(1, receptive_field_size + 1):
+            callbacks += [
+                make_callback_count_neighbours_with_labels(kwargs['config']['data']['train_labels'], k, mask=False),
+                make_callback_count_neighbours(k, mask=False),
+            ]
+        results = run_model_on_datasets(kwargs['model'], [get_data_loader(data, kwargs['data_loaders']) for data in (self.data_before, self.data_after)], gpus=self.gpus, callbacks=callbacks)
+        features, data, num_nbs_in_train_labels, num_nbs = results[0], results[1], results[2::2], results[3::2]
 
+        idx_before, idx_after = vertex_intersection(data[0], data[1])
+        shift = (features[0][idx_before] - features[1][idx_after]).norm(dim=1)
+        
         # Log the feature shift by "in mask / not in mask"
-        fig, ax = plot_histograms(shift.cpu() + FEATURE_SHIFT_EPS, data_before.mask[idx_before].cpu(), 
+        fig, ax = plot_histograms(shift.cpu() + FEATURE_SHIFT_EPS, data[0].mask[idx_before].cpu(), 
                 label_names={True : f'In {self.data_before}', False : f'Not in {self.data_before}'}, log_scale=True, kind='overlapping', x_label='Feature Shift')
         log_figure(kwargs['logs'], fig, f'feature_shift_by_mask', f'inductive_feature_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
         plt.close(fig)
         pipeline_log(f'Logged inductive feature shift for data {self.data_before} -> {self.data_after} by mask.')
 
-        # Log the feature shift by percentage of vertices in k neighbourhood
-        receptive_field_size = len(kwargs['config']['model']['hidden_sizes']) + 1
-        labels_not_in_before = set(data_after.label_to_idx[label].item() for label in labels_in_dataset(data_after, mask=True)) - set(data_before.label_to_idx[label].item() for label in labels_in_dataset(data_before, mask=True))
         for k in range(1, receptive_field_size + 1):
-            count, total = count_neighbours_with_label(get_data_loader(self.data_after, kwargs['data_loaders']), labels_not_in_before, k=k, mask=False)
-            print(k, count.size(), total.size(), total.sum(), count.sum(), labels_not_in_before)
-            fraction = count.float()
-            fraction[fraction > 0] /= total[fraction > 0].float()
+            fraction = 1 - (num_nbs_in_train_labels[k - 1][1].float() / (num_nbs[k - 1][1] + 1e-12))
             fig, ax = plot_2d_histogram(shift.cpu() + FEATURE_SHIFT_EPS, fraction[idx_after], x_label='Log Feature Shift', y_label=f'Fraction of ood vertices in {k} neighbourhood', log_scale_x=True)
             log_figure(kwargs['logs'], fig, f'feature_shift_by_{k}_nbs', f'inductive_feature_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
             plt.close(fig)
             pipeline_log(f'Logged inductive feature shift for data {self.data_before} -> {self.data_after} by {k}-hop neighbourhood.')
+        
+        return args, kwargs
+
+class LogInductiveSoftmaxEntropyShift(PipelineMember):
+    """ Logs the shift of softmax entropy in vertices of the train-graph when re-introducing new edges of the val-graph. """
+
+    name = 'LogInductiveSoftmaxEntropyShift'
+
+    def __init__(self, gpus=0, data_before='train', data_after='val', **kwargs):
+        super().__init__(**kwargs)
+        self.gpus = gpus
+        self.data_before = data_before
+        self.data_after = data_after
+
+    def __str__(self):
+        return '\n'.join([
+            self.print_name,
+            f'\t Evaluate before : {self.data_before}',
+            f'\t Evaluate train : {self.data_after}',
+        ])
+    
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+        
+        receptive_field_size = len(kwargs['config']['model']['hidden_sizes']) + 1
+        callbacks = [
+            make_callback_get_softmax_entropy(mask=False), 
+            make_callback_get_data(),
+        ]
+        for k in range(1, receptive_field_size + 1):
+            callbacks += [
+                make_callback_count_neighbours_with_labels(kwargs['config']['data']['train_labels'], k, mask=False),
+                make_callback_count_neighbours(k, mask=False),
+            ]
+        results = run_model_on_datasets(kwargs['model'], [get_data_loader(data, kwargs['data_loaders']) for data in (self.data_before, self.data_after)], gpus=self.gpus, callbacks=callbacks)
+        entropy, data, num_nbs_in_train_labels, num_nbs = results[0], results[1], results[2::2], results[3::2]
+
+        idx_before, idx_after = vertex_intersection(data[0], data[1])
+        shift = -(entropy[0][idx_before] - entropy[1][idx_after])
+        
+        # Log the entropy shift by "in mask / not in mask"
+        fig, ax = plot_histograms(shift.cpu() + 0, data[0].mask[idx_before].cpu(), 
+                label_names={True : f'In {self.data_before}', False : f'Not in {self.data_before}'}, log_scale=False, kind='overlapping', x_label='Entropy Shift')
+        log_figure(kwargs['logs'], fig, f'entropy_shift_by_mask', f'inductive_entropy_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
+        plt.close(fig)
+        pipeline_log(f'Logged inductive entropy shift for data {self.data_before} -> {self.data_after} by mask.')
+
+        for k in range(1, receptive_field_size + 1):
+            fraction = 1 - (num_nbs_in_train_labels[k - 1][1].float() / (num_nbs[k - 1][1] + 1e-12))
+            fig, ax = plot_2d_histogram(shift.cpu() + FEATURE_SHIFT_EPS, fraction[idx_after], x_label='Log Entropy Shift', y_label=f'Fraction of ood vertices in {k} neighbourhood', log_scale_x=False)
+            log_figure(kwargs['logs'], fig, f'entropy_shift_by_{k}_nbs', f'inductive_entropy_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
+            plt.close(fig)
+            pipeline_log(f'Logged inductive entropy shift for data {self.data_before} -> {self.data_after} by {k}-hop neighbourhood.')
         
         return args, kwargs
 
@@ -433,6 +590,8 @@ pipeline_members = [
     FitFeatureSpacePCAIDvsOOD,
     PrintDatasetSummary,
     LogInductiveFeatureShift,
+    LogInductiveSoftmaxEntropyShift,
+    EvaluateSoftmaxEntropy,
 ]
 
 

@@ -61,13 +61,13 @@ ex.init_evaluation(
     #     'seed' : 1337,
     #     'name' : 'derangement_perturbations',
     # },
-    # {
-    #     'type' : 'FitFeatureSpacePCA',
-    #     'fit_to' : ['train', 'val-reduced'],
-    #     'evaluate_on' : ['train', 'val', 'val-reduced'],
-    #     'num_components' : 2,
-    #     'name' : '2d-pca',
-    # },
+    {
+        'type' : 'FitFeatureSpacePCA',
+        'fit_to' : ['train', 'val-reduced'],
+        'evaluate_on' : ['train', 'val', 'val-reduced'],
+        'num_components' : 2,
+        'name' : '2d-pca',
+    },
     # {
     #     'type' : 'FitFeatureDensity',
     #     'density_type' : 'GaussianMixture',
@@ -116,17 +116,52 @@ ex.init_evaluation(
     #         'dimensionality_reduction:per_class',
     #     ]
     # },
+    # {
+    #     'type' : 'PrintDatasetSummary',
+    #     'evaluate_on' : ['train', 'val', 'val-reduced', 'val-train-labels', 'test']
+    # },
+    # {
+    #     'type' : 'FitFeatureDensity',
+    #     'density_type' : 'GaussianPerClass',
+    #     'dimensionality_reduction' : {
+    #         'type' : 'pca',
+    #         'per_class' : False,
+    #         'number_components' : 8,
+    #     },
+    #     'fit_to' : ['train'],
+    #     'fit_to_ground_truth_labels' : ['train'],
+    #     'evaluate_on' : ['val'],
+    #     'diagonal_covariance' : True,
+    #     'name' : 'gpc-{0}-{3}{1}-{2}-pc{4}',
+    #     'name_args' : [
+    #         'dimensionality_reduction:type',
+    #         'diagonal_covariance',
+    #         'fit_to',
+    #         'dimensionality_reduction:number_components',
+    #         'dimensionality_reduction:per_class',
+    #     ]
+    # },
     {
-        'type' : 'PrintDatasetSummary',
-        'evaluate_on' : ['train', 'val', 'val-reduced', 'val-train-labels', 'test']
+        'type' : 'EvaluateSoftmaxEntropy',
+        'evaluate_on' : ['val'],
+    },
+    {
+        'type' : 'LogInductiveFeatureShift',
+        'data_before' : 'train',
+        'data_after' : 'val',
+    },
+    {
+        'type' : 'LogInductiveSoftmaxEntropyShift',
+        'data_before' : 'train',
+        'data_after' : 'val',
     },
     {
         'type' : 'FitFeatureDensity',
         'density_type' : 'GaussianPerClass',
         'dimensionality_reduction' : {
-            'type' : 'pca',
+            'type' : 'isomap',
             'per_class' : False,
-            'number_components' : 8,
+            'number_components' : 16,
         },
         'fit_to' : ['train'],
         'fit_to_ground_truth_labels' : ['train'],
@@ -141,15 +176,10 @@ ex.init_evaluation(
             'dimensionality_reduction:per_class',
         ]
     },
-    {
-        'type' : 'LogInductiveFeatureShift',
-        'data_before' : 'train',
-        'data_after' : 'val',
-    },
 ]
 )
 
-results_path = (ex.train(max_epochs=1000, learning_rate=0.001, early_stopping={
+results_path = (ex.train(max_epochs=1, learning_rate=0.001, early_stopping={
     'monitor' : 'val_loss',
     'mode' : 'min',
     'patience' : 50,
