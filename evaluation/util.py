@@ -120,12 +120,12 @@ def count_neighbours_with_label(data_loader, labels, k=1, mask=True):
         count, total = count[data.mask], total[data.mask]
     return count, total
 
-def get_out_of_distribution_labels(loaders, k_max, train_labels, mask=True):
+def get_out_of_distribution_labels(data_loaders, k_max, train_labels, mask=True):
     """ Gets information about which vertices are from an out-of-distribution class and how many of those are in neighbourhoods.
     
     Parameters:
     -----------
-    loaders : list
+    data_loaders : list
         A list of data-loaders to get the information of.
     k_max : int
         The number of neighbours with an out-of-distribution class will be returned for k-hop neighbourhoods where k is in [1, 2, ... k_max]

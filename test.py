@@ -179,7 +179,7 @@ ex.init_evaluation(
 ]
 )
 
-results_path = (ex.train(max_epochs=1, learning_rate=0.001, early_stopping={
+results_path = (ex.train(max_epochs=1000, learning_rate=0.001, early_stopping={
     'monitor' : 'val_loss',
     'mode' : 'min',
     'patience' : 50,

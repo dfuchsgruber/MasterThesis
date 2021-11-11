@@ -176,6 +176,8 @@ class PipelineFeatureDensity(PipelineMember):
 class EvaluateSoftmaxEntropy(PipelineMember):
     """ Pipeline member to evaluate the Softmax Entropy curves of the model for in-distribution and out-of-distribution data. """
 
+    name = 'EvaluateSoftmaxEntropy'
+
     def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
@@ -190,10 +192,11 @@ class EvaluateSoftmaxEntropy(PipelineMember):
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
+        data_loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
         entropy, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
                 make_callback_get_softmax_entropy(mask=True),
                 make_callback_get_ground_truth(mask=True),
-            ], gpus=self.gpus)[0]
+            ], gpus=self.gpus)
         entropy, labels = torch.cat(entropy), torch.cat(labels)
 
         # Log histograms and metrics label-wise
@@ -244,8 +247,6 @@ class EvaluateSoftmaxEntropy(PipelineMember):
         log_metrics(kwargs['logs'], {f'auroc_softmax_entropy{self.suffix}' : roc_auc}, 'softmax_entropy_plots')
         
         return args, kwargs
-
-    
 
 class FitFeatureDensity(PipelineFeatureDensity):
     """ Pipeline member that fits a density to the feature space of a model. """
@@ -574,7 +575,7 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
 
         for k in range(1, receptive_field_size + 1):
             fraction = 1 - (num_nbs_in_train_labels[k - 1][1].float() / (num_nbs[k - 1][1] + 1e-12))
-            fig, ax = plot_2d_histogram(shift.cpu() + FEATURE_SHIFT_EPS, fraction[idx_after], x_label='Log Entropy Shift', y_label=f'Fraction of ood vertices in {k} neighbourhood', log_scale_x=False)
+            fig, ax = plot_2d_histogram(shift.cpu() + FEATURE_SHIFT_EPS, fraction[idx_after], x_label='Entropy Shift', y_label=f'Fraction of ood vertices in {k} neighbourhood', log_scale_x=False)
             log_figure(kwargs['logs'], fig, f'entropy_shift_by_{k}_nbs', f'inductive_entropy_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
             plt.close(fig)
             pipeline_log(f'Logged inductive entropy shift for data {self.data_before} -> {self.data_after} by {k}-hop neighbourhood.')
