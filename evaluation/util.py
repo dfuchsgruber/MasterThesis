@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 from util import get_k_hop_neighbourhood
 import evaluation.callbacks
+import evaluation.constants as evaluation_constants
 
 def split_labels_into_id_and_ood(y, id_labels, ood_labels=None, id_label=0, ood_label=1):
     """ Creates new labels that correspond to in-distribution and out-ouf-distribution.
@@ -120,7 +121,8 @@ def count_neighbours_with_label(data_loader, labels, k=1, mask=True):
         count, total = count[data.mask], total[data.mask]
     return count, total
 
-def get_out_of_distribution_labels(data_loaders, k_max, train_labels, mask=True):
+
+def get_distribution_labels_leave_out_classes(data_loaders, k_max, train_labels, mask=True):
     """ Gets information about which vertices are from an out-of-distribution class and how many of those are in neighbourhoods.
     
     Parameters:
@@ -136,12 +138,8 @@ def get_out_of_distribution_labels(data_loaders, k_max, train_labels, mask=True)
 
     Returns:
     --------
-    mask_is_train_label : list
-        For each loader, a mask that indicates if a vertex has a label within the train label set.
-    num_train_label_nbs : list
-        `k_max` lists, one for each k-hop neighbourhood. Elements in these lists are, for each loader, a tensor that that counts how many of a vertex's neighbours in a k-hop neighbourhood have an out of distribution label.
-    num_nbs : list
-        `k_max` lists, one for each k-hop neighbourhood. Elements in these lists are, for each loader, a tensor that gives the size of the k-hop neighbourhood of a vertex.
+    distribution_labels : torch.Tensor, [N]
+        Each vertex in the dataset with its distribution label (according to `evaluation.constants`)
     """
     train_labels = set(train_labels)
     callbacks = [
@@ -154,4 +152,58 @@ def get_out_of_distribution_labels(data_loaders, k_max, train_labels, mask=True)
         ]
     results = run_model_on_datasets(None, data_loaders, callbacks=callbacks, run_model=False)
 
-    return results[0], results[1::2], results[2::2]
+    mask_is_train_label, num_train_label_nbs, num_nbs = results[0], results[1::2], results[2::2]
+
+    # Concatenate values over all datasets
+    mask_is_train_label = torch.cat(mask_is_train_label, dim=0) # N
+    num_train_label_nbs = torch.stack([torch.cat(l, dim=0) for l in num_train_label_nbs]) # k, N
+    num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k, N
+    mask_has_non_train_label_nb = ((num_nbs - num_train_label_nbs) > 0).any(dim=0)
+    mask_has_train_label_nb = (num_train_label_nbs > 0).any(dim=0)
+
+    # Plot the softmax-entropy distribution by train-label data i) with no non-train label neighbours ii) with at least one train label neighbour
+    distribution_labels = torch.empty_like(mask_is_train_label).long()
+    distribution_labels[(~mask_is_train_label) & (~mask_has_train_label_nb)] = evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS
+    distribution_labels[(~mask_is_train_label) & mask_has_train_label_nb] = evaluation_constants.OOD_CLASS_ID_CLASS_NBS
+    distribution_labels[mask_is_train_label & (~mask_has_non_train_label_nb)] = evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS
+    distribution_labels[mask_is_train_label & mask_has_non_train_label_nb] = evaluation_constants.ID_CLASS_ODD_CLASS_NBS
+
+    print(torch.unique(distribution_labels, return_counts=True))
+
+    return distribution_labels
+
+def separate_distributions_leave_out_classes(distribution_labels, separate_distributions_by):
+    """ Gets the labels and mask used for auroc computations by separating the two data distributions.
+    
+    Parameters:
+    -----------
+    distribution_labels : torch.Tensor, shape [N]
+        Distribution labels according to `get_distribution_labels`.
+    separate_distributions_by : str
+        With which criterion to select and separate vertices used for the auroc computation.
+        Possible are:
+            - 'train-labels' : All vertices are used for auroc computation and positives are vertices with train labels.
+            - 'train-lables-neighbour' : Only vertices with train labels and neighbours within train-labels as well as vertices with non-train labels and neighbours within non-train labels are selected. Positives are vertices with train labels.
+    
+    Returns:
+    --------
+    auroc_labels : torch.Tensor, shape [N]
+        The labels used for auroc calculation.
+    auroc_mask : torch.Tensor, shape [N]
+        A mask that only selects vertices used for auroc calculation.
+    """
+    is_id_class = torch.zeros_like(distribution_labels).bool()
+    for label in evaluation_constants.ID_CLASS:
+        is_id_class |= (distribution_labels == label)
+
+    if separate_distributions_by.lower() in ('train_label', 'train-label'):
+        auroc_mask = torch.ones_like(is_id_class) # All vertices are used for the auroc
+        auroc_labels = is_id_class # Positive vertices are those that hold a train label
+    elif separate_distributions_by.lower() in ('neighbourhood', 'neighborhood'):
+        # For auroc, only use vertices with train label & exclusively train label nbs as well as non-train-label and exclusively non-train-label-nbs
+        auroc_mask = (distribution_labels == evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS) | (distribution_labels == evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS)
+        auroc_labels = is_id_class # Positive vertices are those that hold a train label
+    else:
+        raise RuntimeError(f'Unknown distribution separation {separate_distributions_by}')
+
+    return auroc_labels, auroc_mask

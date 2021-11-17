@@ -1,0 +1,135 @@
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week5_density_feature_space_big_grid
+  output_dir: /nfs/students/fuchsgru/seml_output/week5_density_feature_space_big_grid
+  project_root_dir: ../..
+
+slurm:
+  experiments_per_job: 1
+  sbatch_options:
+    gres: gpu:1       # num GPUs
+    mem: 16G          # memory
+    cpus-per-task: 2  # num cores
+    time: 0-08:00     # max time, D-HH:MM
+
+
+###### BEGIN PARAMETER CONFIGURATION ######
+
+fixed:
+  run.name: gcn_r:{1}_sn:{3}_ws:{0}_rl{4}_{2}
+  run.args:
+    - model:weight_scale
+    - model:residual
+    - model:hidden_sizes
+    - model:use_spectral_norm
+    - data:train_labels_remove_other
+
+  training.early_stopping.patience: 100
+  training.early_stopping.mode: min
+  training.early_stopping.monitor: val_loss
+  training.early_stopping.min_delta: 1e-3
+  training.max_epochs: 1000
+  training.gpus: 1
+
+  data.num_dataset_splits : 5
+  data.train_portion : 20
+  data.val_portion : 20
+  data.test_portion : 0.6
+  data.test_portion_fixed : 0.2
+  data.split_type: uniform
+  data.train_labels: [0, 1, 3, 4, 5, 6] # Leave out genetic algorithms
+  data.val_labels: all
+
+  model.num_initializations : 5
+  model.use_bias: true
+  model.activation: leaky_relu
+  model.leaky_relu_slope: 0.01
+  data.dataset: cora_ml
+  model.model_type: gcn
+  model.freeze_residual_projection: false
+  
+  evaluation.ignore_exceptions: true
+  evaluation.pipeline:
+    - type: EvaluateEmpircalLowerLipschitzBounds
+      num_perturbations: 20
+      min_perturbation: 0.1
+      max_perturbation: 10.0
+      num_perturbations_per_sample: 5
+      seed: 1337
+      perturbation_type: noise
+      name: noise-perturbations
+
+    - type: EvaluateEmpircalLowerLipschitzBounds
+      num_perturbations: 10
+      min_perturbation: 0.1
+      max_perturbation: 10.0
+      num_perturbations_per_sample: 2
+      seed: 1337
+      perturbation_type: derangement
+      name: derangement-perturbations
+
+    - type: FitFeatureSpacePCA
+      fit_to: [train, val]
+      evaluate_on: ['train', 'val-reduced', 'val']
+      num_components: 2
+      name: 2d-pca
+
+    - type: LogInductiveFeatureShift
+      data_before: 'train'
+      data_after: 'val'
+
+    - type: LogInductiveSoftmaxEntropyShift
+      data_before: 'train'
+      data_after: 'val'
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val']
+
+    - type: FitFeatureDensityGrid
+      fit_to: ['train']
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val']
+      density_types:
+        GaussianPerClass:
+          diagonal_covariance: [true, false]
+        GaussianMixture:
+          number_components: [2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20, 24, 32]
+      dimensionality_reductions:
+        none: {}
+        pca:
+          number_components: [2, 4, 8, 10, 12, 16, 18, 20, 24, 28, 32]
+        isomap:
+          number_components: [2, 4, 8, 10, 12, 16, 18, 20, 24, 28, 32]
+      log_plots: false
+
+  training.learning_rate: 0.001
+
+grid:
+  data.train_labels_remove_other:
+    type: choice
+    options: [true, false]
+  
+  model.use_spectral_norm: 
+    type: choice
+    options: [true, false]
+
+  model.hidden_sizes: 
+    type: choice
+    options:
+      - [64]
+      - [64, 32]
+      - [64, 64]
+
+
+residual:
+  fixed:
+    model.residual: true
+    model.weight_scale: 0.9
+
+no-residual:
+  fixed:
+    model.residual: false
+    model.weight_scale: 2.0
+
+
+

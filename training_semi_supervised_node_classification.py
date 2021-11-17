@@ -11,9 +11,9 @@ from collections import defaultdict
 import warnings
 import matplotlib.pyplot as plt
 
-from util import suppress_stdout, format_name
+from util import format_name
+from util import suppress_stdout as context_supress_stdout
 from model.util import module_numel
-from model.gnn import make_model_by_configuration
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
 from data.gust_dataset import GustDataset
 from data.util import data_get_num_attributes, data_get_num_classes
@@ -120,7 +120,7 @@ class ExperimentWrapper:
         self.run_name_format_args = args
 
     @ex.capture(prefix="training")
-    def train(self, max_epochs, learning_rate, early_stopping, gpus):
+    def train(self, max_epochs, learning_rate, early_stopping, gpus, suppress_stdout=True):
                 
         # Data loading
         data_list, dataset_fixed = load_data_from_configuration(self.data_config)
@@ -155,30 +155,31 @@ class ExperimentWrapper:
             for reinitialization, seed in enumerate(self.model_seeds):
                 pl.seed_everything(seed)
 
-                backbone = make_model_by_configuration(self.model_config, data_get_num_attributes(data_dict[data_constants.TRAIN][0]), data_get_num_classes(data_dict[data_constants.TRAIN][0]))
-                model = SemiSupervisedNodeClassification(backbone, learning_rate=learning_rate)
+                model = SemiSupervisedNodeClassification(self.model_config, 
+                    data_get_num_attributes(data_dict[data_constants.TRAIN][0]), 
+                    data_get_num_classes(data_dict[data_constants.TRAIN][0]), learning_rate=learning_rate)
                 print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
 
                 artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), f'{run_name}', f'{split_idx}-{reinitialization}')
                 os.makedirs(artifact_dir, exist_ok=True)
 
+                checkpoint_callback = ModelCheckpoint(
+                    artifact_dir,
+                    monitor=early_stopping['monitor'],
+                    mode=early_stopping['mode'],
+                    save_top_k=1,
+                )
+                early_stopping_callback = EarlyStopping(
+                    monitor=early_stopping['monitor'],
+                    mode=early_stopping['mode'],
+                    patience=early_stopping['patience'],
+                    min_delta=early_stopping['min_delta'],
+                )
+
                 # Model training
-                with suppress_stdout(), warnings.catch_warnings():
+                with context_supress_stdout(supress=suppress_stdout), warnings.catch_warnings():
                     warnings.filterwarnings("ignore")
-                    trainer = pl.Trainer(max_epochs=max_epochs, deterministic=True, callbacks=[
-                                            ModelCheckpoint(
-                                                artifact_dir,
-                                                monitor=early_stopping['monitor'],
-                                                mode=early_stopping['mode'],
-                                                save_top_k=1,
-                                            ),
-                                            EarlyStopping(
-                                                monitor=early_stopping['monitor'],
-                                                mode=early_stopping['mode'],
-                                                patience=early_stopping['patience'],
-                                                min_delta=early_stopping['min_delta'],
-                                            ),
-                                        ],
+                    trainer = pl.Trainer(max_epochs=max_epochs, deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ],
                                         logger=logger,
                                         progress_bar_refresh_rate=0,
                                         gpus=gpus,
@@ -194,6 +195,9 @@ class ExperimentWrapper:
                         for val_metric in metrics:
                             for metric, value in val_metric.items():
                                 result[f'{metric}-{name}'].append(value)
+
+                # Manually load best model
+                model = model.load_from_checkpoint(checkpoint_callback.best_model_path)
 
                 # Build evaluation pipeline
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus, 

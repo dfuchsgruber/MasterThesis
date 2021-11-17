@@ -24,16 +24,19 @@ from training_semi_supervised_node_classification import ExperimentWrapper
 from data.construct import uniform_split_with_fixed_test_set_portion
 from data.util import label_binarize, data_get_summary
 
-ex = ExperimentWrapper(init_all=False, collection_name='inductive-shift', run_id='gcn_64_32_residual')
-ex.init_dataset(dataset='cora_ml', num_dataset_splits=1, train_portion=20, val_portion=20, test_portion=0.6, test_portion_fixed=0.2,
-                    train_labels=[0, 1, 6, 3, 4, 5], val_labels='all', train_labels_remove_other=True, val_labels_remove_other=False,
-                    split_type='uniform',
-                    )
 # ex.init_dataset(dataset='cora_ml', num_dataset_splits=1, train_portion=0.05, val_portion=0.15, test_portion=0.6, test_portion_fixed=0.2,
 #                     train_labels=[0, 1, 2, 3, 4, 5], val_labels='all', train_labels_remove_other=False, val_labels_remove_other=False,
 #                     split_type='stratified',
 #                     )
-ex.init_model(model_type='gcn', hidden_sizes=[64,32], num_initializations=1, weight_scale=1.0, 
+
+
+ex = ExperimentWrapper(init_all=False, collection_name='week5-best', run_id='gcn_64_32_residual')
+ex.init_dataset(dataset='cora_ml', num_dataset_splits=1, train_portion=20, val_portion=20, test_portion=0.6, test_portion_fixed=0.2,
+                    train_labels=[0, 1, 6, 3, 4, 5], val_labels='all', train_labels_remove_other=False, val_labels_remove_other=False,
+                    split_type='uniform',
+                    )
+
+ex.init_model(model_type='gcn', hidden_sizes=[64,32], num_initializations=1, weight_scale=0.9, 
     use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
     residual=True, freeze_residual_projection=False)
 ex.init_run(name='model_no_remove_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
@@ -116,10 +119,10 @@ ex.init_evaluation(
     #         'dimensionality_reduction:per_class',
     #     ]
     # },
-    {
-        'type' : 'PrintDatasetSummary',
-        'evaluate_on' : ['train', 'val', 'val-reduced', 'val-train-labels', 'test']
-    },
+    # {
+    #     'type' : 'PrintDatasetSummary',
+    #     'evaluate_on' : ['train', 'val', 'val-reduced', 'val-train-labels', 'test']
+    # },
     # {
     #     'type' : 'FitFeatureDensity',
     #     'density_type' : 'GaussianPerClass',
@@ -183,22 +186,18 @@ ex.init_evaluation(
         'evaluate_on' : ['val'],
         'density_types' : {
             'GaussianPerClass' : {
-                'diagonal_covariance' : [True, False],
+                'diagonal_covariance' : [True],
             },
-            'GaussianMixture' : {
-                'number_components' : [2, 10,],
-            }
         },
         'dimensionality_reductions' : {
-            'none' : {},
-            'pca' : {
-                'number_components' : [3, 4],
-            },
             'isomap' : {
-                'number_components' : [5, 6],
+                'number_components' : [32],
+            },
+            'none' : {
+                
             }
         },
-        'log_plots' : False,
+        'log_plots' : True,
     },
     ],
     ignore_exceptions=False,
@@ -209,7 +208,7 @@ results_path = (ex.train(max_epochs=1, learning_rate=0.001, early_stopping={
     'mode' : 'min',
     'patience' : 50,
     'min_delta' : 1e-3,
-}, gpus=1))
+}, gpus=1, suppress_stdout=False))
 
 with open(results_path) as f:
     print(json.load(f))

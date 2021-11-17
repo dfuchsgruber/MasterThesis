@@ -3,14 +3,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from metrics import accuracy
+from model.gnn import make_model_by_configuration
 
 class SemiSupervisedNodeClassification(pl.LightningModule):
     """ Wrapper for networks that perform semi supervised node classification. """
 
-    def __init__(self, backbone, learning_rate=1e-2):
+    def __init__(self, backbone_configuration, num_input_features, num_classes, learning_rate=1e-2):
         super().__init__()
+        self.save_hyperparameters()
+        self.backbone = make_model_by_configuration(backbone_configuration, num_input_features, num_classes)
         self.learning_rate = learning_rate
-        self.backbone = backbone
 
     def forward(self, batch):
         return self.backbone(batch)
@@ -34,3 +36,6 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         loss = self.cross_entropy_loss(logits[batch.mask], batch.y[batch.mask])
         self.log('val_loss', loss)
         self.log('val_accuracy', accuracy(logits[batch.mask], batch.y[batch.mask]))
+
+    def on_load_checkpoint(self, checkpoint):
+        print('ckpt', checkpoint)

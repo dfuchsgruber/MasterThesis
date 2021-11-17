@@ -41,7 +41,8 @@ def plot_histogram(values, bins=20, logscale=False, eps=1e-10):
     return fig, ax
 
 
-def plot_histograms(x, labels, label_names=None, bins=20, log_scale=False, kind='vertical', kde=True, x_label='density', y_label='label'):
+def plot_histograms(x, labels, label_names=None, bins=20, log_scale=False, kind='vertical', kde=True, 
+                    x_label='density', y_label='label', remove_outliers=True):
     """ Plots an histogram for data of different labels.
     
     Parameters:
@@ -60,7 +61,8 @@ def plot_histograms(x, labels, label_names=None, bins=20, log_scale=False, kind=
         - 'overlapping' : Normal overlapping histograms.
     kde : bool
         If True, a kernel-density-estimation is applied as well.
-
+    remove_outliers : bool
+        If True, outliers will be removed.
     
     Returns:
     --------
@@ -69,6 +71,11 @@ def plot_histograms(x, labels, label_names=None, bins=20, log_scale=False, kind=
     plt.axis.Axes
         The axis of the plot or an array of axis if `overlapping` is set to `False`.
     """
+    if remove_outliers:
+        outlier_mask = is_outlier(x.cpu().numpy())
+        x = x[~outlier_mask]
+        labels = labels[~outlier_mask]
+
     if label_names is None:
         label_names = {label : f'Label {label}' for label in np.unique(labels)}
 

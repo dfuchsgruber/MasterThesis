@@ -3,7 +3,8 @@ import torch
 import evaluation.lipschitz
 import plot.perturbations
 import matplotlib.pyplot as plt
-from evaluation.util import split_labels_into_id_and_ood, get_data_loader, run_model_on_datasets, count_neighbours_with_label, get_out_of_distribution_labels
+from evaluation.util import split_labels_into_id_and_ood, get_data_loader, run_model_on_datasets, count_neighbours_with_label, get_distribution_labels_leave_out_classes, separate_distributions_leave_out_classes
+import evaluation.constants as evaluation_constants
 from evaluation.callbacks import *
 from plot.density import plot_2d_log_density
 from plot.features import plot_2d_features
@@ -138,15 +139,18 @@ class EvaluateSoftmaxEntropy(PipelineMember):
 
     name = 'EvaluateSoftmaxEntropy'
 
-    def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], **kwargs):
+    def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', 
+            **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.evaluate_on = evaluate_on
+        self.separate_distributions_by = separate_distributions_by
 
     def __str__(self):
         return '\n'.join([
             self.print_name,
             f'\t Evaluate on : {self.evaluate_on}',
+            f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}'
         ])
 
     @torch.no_grad()
@@ -176,33 +180,39 @@ class EvaluateSoftmaxEntropy(PipelineMember):
         pipeline_log(f'Evaluated softmax entropy for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
         plt.close(fig)
 
-        mask_is_train_label, num_train_label_nbs, num_nbs = get_out_of_distribution_labels(
+        # Classify vertices according to which distribution they belong to
+        k = len(kwargs['config']['model']['hidden_sizes']) + 1
+        distribution_labels = get_distribution_labels_leave_out_classes(
             [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
-            len(kwargs['config']['model']['hidden_sizes']) + 1, # Receptive field of each vertex is num-hidden-layers + 1
+            k, # Receptive field of each vertex is num-hidden-layers + 1
             kwargs['config']['data']['train_labels'],
             mask = True,
         )
-        mask_is_train_label = torch.cat(mask_is_train_label, dim=0) # N
-        num_train_label_nbs = torch.stack([torch.cat(l, dim=0) for l in num_train_label_nbs]) # k, N
-        num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k, N
-        mask_has_non_train_label_nb = ((num_nbs - num_train_label_nbs) > 0).any(dim=0)
+        auroc_labels, auroc_mask = separate_distributions_leave_out_classes(distribution_labels, self.separate_distributions_by)
+        distribution_label_names = {
+            evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS : f'ood, no id nbs in {k} hops', 
+            evaluation_constants.OOD_CLASS_ID_CLASS_NBS : f'ood, id nbs in {k}-hops',
+            evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS : f'id, no ood nbs in {k}-hops', 
+            evaluation_constants.ID_CLASS_ODD_CLASS_NBS : f'id, ood nbs in {k}-hops'
+        }
         
-        # Plot the softmax-entropy distribution by train-label data i) with no non-train label neighbours ii) with at least one train label neighbour
-        labels_to_plot = torch.empty_like(mask_is_train_label).long()
-        labels_to_plot[~mask_is_train_label] = 0
-        labels_to_plot[mask_is_train_label & (~mask_has_non_train_label_nb)] = 1
-        labels_to_plot[mask_is_train_label & mask_has_non_train_label_nb] = 2
-        
-        k = len(kwargs['config']['model']['hidden_sizes']) + 1
-        fig, ax = plot_histograms(entropy.cpu(), labels_to_plot.cpu(), 
-            label_names={0 : 'ood', 1 : f'id, no ood in {k}-hops', 2 : f'id, ood in {k}-hops'},
-            kind='overlapping', kde=True, log_scale=False,  x_label='Softmax-Entropy', y_label='Kind')
-        log_figure(kwargs['logs'], fig, f'softmax_entropy_histograms_id_vs_ood{self.suffix}', 'softmax_entropy_plots', save_artifact=kwargs['artifact_directory'])
-        pipeline_log(f'Saved softmax-entropy histogram to ' + str(osp.join(kwargs['artifact_directory'], f'softmax_entropy_histograms_id_vs_ood{self.suffix}.pdf')))
+        fig, ax = plot_histograms(entropy.cpu(), distribution_labels.cpu(), 
+            label_names=distribution_label_names,
+            kind='vertical', kde=True, log_scale=False,  x_label='Softmax-Entropy', y_label='Kind')
+        log_figure(kwargs['logs'], fig, f'softmax_entropy_histograms_all_kinds{self.suffix}', 'softmax_entropy_plots', save_artifact=kwargs['artifact_directory'])
+        pipeline_log(f'Saved softmax-entropy (all kinds) histogram to ' + str(osp.join(kwargs['artifact_directory'], f'softmax_entropy_histograms_all_kinds{self.suffix}.pdf')))
         plt.close(fig)
 
+        fig, ax = plot_histograms(entropy[auroc_mask].cpu(), auroc_labels[auroc_mask].cpu().long(), 
+            label_names={0 : 'Out ouf distribution', 1 : 'In distribution'},
+            kind='overlapping', kde=True, log_scale=False,  x_label='Softmax-Entropy', y_label='Kind')
+        log_figure(kwargs['logs'], fig, f'softmax_entropy_histograms_id_vs_ood{self.suffix}', 'softmax_entropy_plots', save_artifact=kwargs['artifact_directory'])
+        pipeline_log(f'Saved softmax-entropy histogram (id vs ood) to ' + str(osp.join(kwargs['artifact_directory'], f'softmax_entropy_histograms_id_vs_ood{self.suffix}.pdf')))
+        plt.close(fig)
+
+
         # Calculate area under the ROC for separating in-distribution (label 1) from out of distribution (label 0)
-        roc_auc = roc_auc_score(~mask_is_train_label.long().numpy(), entropy.cpu().numpy()) # higher entropy -> higher uncertainty
+        roc_auc = roc_auc_score(auroc_labels[auroc_mask].cpu().long().numpy(), -entropy[auroc_mask].cpu().numpy()) # higher entropy -> higher uncertainty
         kwargs['metrics'][f'auroc_softmax_entropy{self.suffix}'] = roc_auc
         log_metrics(kwargs['logs'], {f'auroc_softmax_entropy{self.suffix}' : roc_auc}, 'softmax_entropy_plots')
         
@@ -237,11 +247,13 @@ class FitFeatureDensityGrid(PipelineFeatureDensity):
 
     def __init__(self, fit_to=[data_constants.TRAIN], fit_to_ground_truth_labels=[data_constants.TRAIN], 
                     evaluate_on=[data_constants.VAL], density_types={}, dimensionality_reductions={}, log_plots=False, gpus=0,
+                    separate_distributions_by='train-label',
                     **kwargs):
         super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, evaluate_on=evaluate_on, **kwargs)
         self.density_types = density_types
         self.dimensionality_reductions = dimensionality_reductions
         self.log_plots = log_plots
+        self.separate_distributions_by = separate_distributions_by.lower()
 
     def __str__(self):
         return '\n'.join([
@@ -252,6 +264,7 @@ class FitFeatureDensityGrid(PipelineFeatureDensity):
             f'\t Density Types : {list(self.density_types.keys())}',
             f'\t Dimensionality Reduction Types : {list(self.dimensionality_reductions.keys())}',
             f'\t Log plos : {self.log_plots}',
+            f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}'
         ])
         
     @torch.no_grad()
@@ -259,24 +272,25 @@ class FitFeatureDensityGrid(PipelineFeatureDensity):
 
         # Only calculate data once
         features_to_fit, predictions_to_fit, labels_to_fit = self._get_features_and_labels_to_fit(**kwargs)
+
         # Note that for `self.fit_to_ground_truth_labels` data, the `predictions_to_fit` are overriden with a 1-hot ground truth
         features_to_evaluate, predictions_to_evaluate, labels_to_evaluate = self._get_features_and_labels_to_evaluate(**kwargs)
-        mask_is_train_label, num_train_label_nbs, num_nbs = get_out_of_distribution_labels(
+
+        # Classify vertices according to which distribution they belong to
+        k = len(kwargs['config']['model']['hidden_sizes']) + 1
+        distribution_labels = get_distribution_labels_leave_out_classes(
             [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
-            len(kwargs['config']['model']['hidden_sizes']) + 1, # Receptive field of each vertex is num-hidden-layers + 1
+            k, # Receptive field of each vertex is num-hidden-layers + 1
             kwargs['config']['data']['train_labels'],
             mask = True,
         )
-        mask_is_train_label = torch.cat(mask_is_train_label, dim=0) # N
-        num_train_label_nbs = torch.stack([torch.cat(l, dim=0) for l in num_train_label_nbs]) # k, N
-        num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k, N
-        mask_has_non_train_label_nb = ((num_nbs - num_train_label_nbs) > 0).any(dim=0)
-
-        # Plot the feature density distribution by train-label data i) with no non-train label neighbours ii) with at least one train label neighbour
-        labels_to_plot = torch.empty_like(mask_is_train_label).long()
-        labels_to_plot[~mask_is_train_label] = 0
-        labels_to_plot[mask_is_train_label & (~mask_has_non_train_label_nb)] = 1
-        labels_to_plot[mask_is_train_label & mask_has_non_train_label_nb] = 2
+        auroc_labels, auroc_mask = separate_distributions_leave_out_classes(distribution_labels, self.separate_distributions_by)
+        distribution_label_names = {
+            evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS : f'ood, no id nbs in {k} hops', 
+            evaluation_constants.OOD_CLASS_ID_CLASS_NBS : f'ood, id nbs in {k}-hops',
+            evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS : f'id, no ood nbs in {k}-hops', 
+            evaluation_constants.ID_CLASS_ODD_CLASS_NBS : f'id, ood nbs in {k}-hops'
+        }
 
         aurocs = {}
 
@@ -312,15 +326,23 @@ class FitFeatureDensityGrid(PipelineFeatureDensity):
                         if metric_name in aurocs:
                             warn(f'Multiple configurations give auroc metric key {metric_name}')
                         else:
-                            aurocs[metric_name] = roc_auc_score(mask_is_train_label.long().numpy(), log_density.cpu().numpy())
-                            
+                            aurocs[metric_name] = roc_auc_score(
+                                auroc_labels[auroc_mask].cpu().long().numpy(), 
+                                log_density[auroc_mask].cpu().numpy(),
+                            )
                             if self.log_plots:
-                                k = len(kwargs['config']['model']['hidden_sizes']) + 1
-                                fig, ax = plot_histograms(log_density.cpu(), labels_to_plot.cpu(), 
-                                    label_names={0 : 'ood', 1 : f'id, no ood in {k}-hops', 2 : f'id, ood in {k}-hops'},
-                                    kind='overlapping', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
-                                log_figure(kwargs['logs'], fig, f'feature_log_density_histograms{suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
-                                pipeline_log(f'Saved feature density histogram to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms{suffix}.pdf')))
+                                fig, ax = plot_histograms(log_density.cpu(), distribution_labels.cpu(), 
+                                    label_names=distribution_label_names,
+                                    kind='vertical', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
+                                log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_all_kinds{suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
+                                pipeline_log(f'Saved feature density histogram (all kinds) to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_all_kinds{suffix}.pdf')))
+                                plt.close(fig)
+
+                                fig, ax = plot_histograms(log_density[auroc_mask].cpu(), auroc_labels[auroc_mask].cpu().long(), 
+                                    label_names={0 : 'Out ouf distribution', 1 : 'In distribution'},
+                                    kind='overlapping', kde=True, log_scale=False,  x_label='Softmax-Entropy', y_label='Kind')
+                                log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_id_vs_ood{suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
+                                pipeline_log(f'Saved feature density histogram (id vs ood) to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_id_vs_ood{suffix}.pdf')))
                                 plt.close(fig)
 
         log_metrics(kwargs['logs'], aurocs, 'feature_density_auroc')
@@ -335,9 +357,10 @@ class FitFeatureDensity(PipelineFeatureDensity):
     name = 'FitFeatureDensity'
 
     def __init__(self, density_type='unspecified', gpus=0, fit_to=[data_constants.TRAIN], fit_to_ground_truth_labels=[data_constants.TRAIN], 
-                    evaluate_on=[data_constants.VAL], **kwargs):
+                    evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', **kwargs):
         super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, evaluate_on=evaluate_on, **kwargs)
         self.density = get_density_model(density_type=density_type, **kwargs)
+        self.separate_distributions_by = separate_distributions_by
 
     def __str__(self):
         return '\n'.join([
@@ -346,6 +369,7 @@ class FitFeatureDensity(PipelineFeatureDensity):
             f'\t Ground truth labels for fitting used : {self.fit_to_ground_truth_labels}',
             f'\t Evaluate on : {self.evaluate_on}',
             f'\t Density : {self.density}',
+            f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}',
         ])
 
     @torch.no_grad()
@@ -375,33 +399,32 @@ class FitFeatureDensity(PipelineFeatureDensity):
         pipeline_log(f'Evaluated feature density for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
         plt.close(fig)
 
-        mask_is_train_label, num_train_label_nbs, num_nbs = get_out_of_distribution_labels(
+        
+        # Classify vertices according to which distribution they belong to
+        k = len(kwargs['config']['model']['hidden_sizes']) + 1
+        distribution_labels = get_distribution_labels_leave_out_classes(
             [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
-            len(kwargs['config']['model']['hidden_sizes']) + 1, # Receptive field of each vertex is num-hidden-layers + 1
+            k, # Receptive field of each vertex is num-hidden-layers + 1
             kwargs['config']['data']['train_labels'],
             mask = True,
         )
-        mask_is_train_label = torch.cat(mask_is_train_label, dim=0) # N
-        num_train_label_nbs = torch.stack([torch.cat(l, dim=0) for l in num_train_label_nbs]) # k, N
-        num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k, N
-        mask_has_non_train_label_nb = ((num_nbs - num_train_label_nbs) > 0).any(dim=0)
+        auroc_labels, auroc_mask = separate_distributions_leave_out_classes(distribution_labels, self.separate_distributions_by)
+        distribution_label_names = {
+            evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS : f'ood, no id nbs in {k} hops', 
+            evaluation_constants.OOD_CLASS_ID_CLASS_NBS : f'ood, id nbs in {k}-hops',
+            evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS : f'id, no ood nbs in {k}-hops', 
+            evaluation_constants.ID_CLASS_ODD_CLASS_NBS : f'id, ood nbs in {k}-hops'
+        }
         
-        # Plot the feature density distribution by train-label data i) with no non-train label neighbours ii) with at least one train label neighbour
-        labels_to_plot = torch.empty_like(mask_is_train_label).long()
-        labels_to_plot[~mask_is_train_label] = 0
-        labels_to_plot[mask_is_train_label & (~mask_has_non_train_label_nb)] = 1
-        labels_to_plot[mask_is_train_label & mask_has_non_train_label_nb] = 2
-        
-        k = len(kwargs['config']['model']['hidden_sizes']) + 1
-        fig, ax = plot_histograms(log_density.cpu(), labels_to_plot.cpu(), 
-            label_names={0 : 'ood', 1 : f'id, no ood in {k}-hops', 2 : f'id, ood in {k}-hops'},
+        fig, ax = plot_histograms(log_density.cpu(), distribution_labels.cpu(), 
+            label_names=distribution_label_names,
             kind='overlapping', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
         log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_id_vs_ood{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Saved feature density histogram to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_id_vs_ood_{self.suffix}.pdf')))
         plt.close(fig)
 
         # Calculate area under the ROC for separating in-distribution (label 1) from out of distribution (label 0)
-        roc_auc = roc_auc_score(mask_is_train_label.long().numpy(), log_density.cpu().numpy())
+        roc_auc = roc_auc_score(auroc_labels[auroc_mask].cpu().long().numpy(), log_density[auroc_mask].cpu().numpy())
         kwargs['metrics'][f'auroc{self.suffix}'] = roc_auc
         log_metrics(kwargs['logs'], {f'auroc{self.suffix}' : roc_auc}, 'feature_density_plots')
         
