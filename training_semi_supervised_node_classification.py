@@ -155,10 +155,13 @@ class ExperimentWrapper:
             for reinitialization, seed in enumerate(self.model_seeds):
                 pl.seed_everything(seed)
 
-                model = SemiSupervisedNodeClassification(self.model_config, 
+                model = SemiSupervisedNodeClassification(
+                    self.model_config, 
                     data_get_num_attributes(data_dict[data_constants.TRAIN][0]), 
-                    data_get_num_classes(data_dict[data_constants.TRAIN][0]), learning_rate=learning_rate)
-                print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
+                    data_get_num_classes(data_dict[data_constants.TRAIN][0]), 
+                    learning_rate=learning_rate
+                )
+                # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
 
                 artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), f'{run_name}', f'{split_idx}-{reinitialization}')
                 os.makedirs(artifact_dir, exist_ok=True)
