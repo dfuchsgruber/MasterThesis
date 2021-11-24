@@ -58,7 +58,7 @@ class ExperimentWrapper:
     def init_dataset(self, dataset, num_dataset_splits, train_portion, val_portion, test_portion, test_portion_fixed,
                         train_labels='all', train_labels_remove_other=False, train_labels_compress=True,
                         val_labels='all', val_labels_remove_other=False, val_labels_compress=True,
-                        split_type='stratified',
+                        split_type='stratified', base_labels='all',
                         ):
         self.data_config = {
             'dataset' : dataset,
@@ -74,6 +74,7 @@ class ExperimentWrapper:
             'val_labels_remove_other' : val_labels_remove_other,
             'val_labels_compress' : val_labels_compress,
             'split_type' : split_type,
+            'base_labels' : base_labels,
         }
         # self.data_mask_split, self.data_mask_test_fixed = stratified_split_with_fixed_test_set_portion(self.data[0].y.numpy(), num_dataset_splits, 
         #     portion_train=train_portion, portion_val=val_portion, portion_test_fixed=test_portion_fixed, portion_test_not_fixed=test_portion)
@@ -201,6 +202,7 @@ class ExperimentWrapper:
 
                 # Manually load best model
                 model = model.load_from_checkpoint(checkpoint_callback.best_model_path)
+                model.eval()
 
                 # Build evaluation pipeline
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus, 
@@ -215,7 +217,7 @@ class ExperimentWrapper:
                 # Create a group that will just log the split and initaliation idx
                 logs[SPLIT_INIT_GROUP] = {
                     NAME_SPLIT : split_idx, NAME_INIT : reinitialization 
-                } 
+                }
                 pipeline_metrics = {} # Metrics logged by the pipeline
                 pipeline(
                     model=model,

@@ -19,13 +19,16 @@ from torch_geometric.loader import DataLoader
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score
 import os.path as osp
-from data.util import label_binarize, data_get_summary, labels_in_dataset, vertex_intersection
+from data.util import label_binarize, data_get_summary, labels_in_dataset, vertex_intersection, labels_to_idx, graph_select_labels
+from data.base import SingleGraphDataset
+from data.transform import RemoveEdgesTransform
 from warnings import warn
 from itertools import product
 from util import format_name, get_k_hop_neighbourhood
 from copy import deepcopy
 import traceback
 import data.constants as data_constants
+from torch_geometric.transforms import Compose
 
 _ID_LABEL, _OOD_LABEL = 1, 0
 FEATURE_SHIFT_EPS = 1e-10 # Zero feature shift is bad in log space
@@ -140,17 +143,21 @@ class EvaluateSoftmaxEntropy(PipelineMember):
     name = 'EvaluateSoftmaxEntropy'
 
     def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', 
-            **kwargs):
+                separate_distributions_tolerance=0.0, model_kwargs={}, **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.evaluate_on = evaluate_on
         self.separate_distributions_by = separate_distributions_by
+        self.separate_distributions_tolerance = separate_distributions_tolerance
+        self.model_kwargs = model_kwargs
 
     def __str__(self):
         return '\n'.join([
             self.print_name,
             f'\t Evaluate on : {self.evaluate_on}',
-            f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}'
+            f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}',
+            f'\t Tolerance on impurity of in-distribution and out-of-distribution neighbours {self.separate_distributions_tolerance}',
+            f'\t Model run arguments : {self.model_kwargs}'
         ])
 
     @torch.no_grad()
@@ -160,7 +167,7 @@ class EvaluateSoftmaxEntropy(PipelineMember):
         entropy, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
                 make_callback_get_softmax_entropy(mask=True),
                 make_callback_get_ground_truth(mask=True),
-            ], gpus=self.gpus)
+            ], gpus=self.gpus, model_kwargs=self.model_kwargs)
         entropy, labels = torch.cat(entropy), torch.cat(labels)
 
         # Log histograms and metrics label-wise
@@ -187,6 +194,7 @@ class EvaluateSoftmaxEntropy(PipelineMember):
             k, # Receptive field of each vertex is num-hidden-layers + 1
             kwargs['config']['data']['train_labels'],
             mask = True,
+            threshold = self.separate_distributions_tolerance,
         )
         auroc_labels, auroc_mask = separate_distributions_leave_out_classes(distribution_labels, self.separate_distributions_by)
         distribution_label_names = {
@@ -222,22 +230,26 @@ class PipelineFeatureDensity(PipelineMember):
     """ Superclass for pipeline members that fit a feature density. """
 
     def __init__(self, gpus=0, fit_to=[data_constants.TRAIN], 
-        fit_to_ground_truth_labels=[data_constants.TRAIN], evaluate_on=[data_constants.TEST], **kwargs):
+        fit_to_ground_truth_labels=[data_constants.TRAIN], evaluate_on=[data_constants.TEST], 
+        model_kwargs_fit={}, model_kwargs_evaluate={},
+        **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.fit_to = fit_to
         self.fit_to_ground_truth_labels = fit_to_ground_truth_labels
         self.evaluate_on = evaluate_on
+        self.model_kwargs_fit = model_kwargs_fit
+        self.model_kwargs_evaluate = model_kwargs_evaluate
 
     def _get_features_and_labels_to_fit(self, **kwargs):
-        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus)
+        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus, model_kwargs=self.model_kwargs_fit)
         for idx, name in enumerate(self.fit_to):
             if name.lower() in self.fit_to_ground_truth_labels: # Override predictions with ground truth for training data
                 predictions[idx] = label_binarize(labels[idx], num_classes=predictions[idx].size(1)).float()
         return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
 
     def _get_features_and_labels_to_evaluate(self, **kwargs):
-        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus)
+        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus, model_kwargs=self.model_kwargs_evaluate)
         return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
 
 class FitFeatureDensityGrid(PipelineFeatureDensity):
@@ -247,13 +259,15 @@ class FitFeatureDensityGrid(PipelineFeatureDensity):
 
     def __init__(self, fit_to=[data_constants.TRAIN], fit_to_ground_truth_labels=[data_constants.TRAIN], 
                     evaluate_on=[data_constants.VAL], density_types={}, dimensionality_reductions={}, log_plots=False, gpus=0,
-                    separate_distributions_by='train-label',
+                    separate_distributions_by='train-label', separate_distributions_tolerance=0.0, seed=1337,
                     **kwargs):
         super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, evaluate_on=evaluate_on, **kwargs)
         self.density_types = density_types
         self.dimensionality_reductions = dimensionality_reductions
         self.log_plots = log_plots
         self.separate_distributions_by = separate_distributions_by.lower()
+        self.separate_distributions_tolerance = separate_distributions_tolerance
+        self.seed = seed
 
     def __str__(self):
         return '\n'.join([
@@ -264,14 +278,19 @@ class FitFeatureDensityGrid(PipelineFeatureDensity):
             f'\t Density Types : {list(self.density_types.keys())}',
             f'\t Dimensionality Reduction Types : {list(self.dimensionality_reductions.keys())}',
             f'\t Log plos : {self.log_plots}',
-            f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}'
+            f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}',
+            f'\t Tolerance on impurity of in-distribution and out-of-distribution neighbours {self.separate_distributions_tolerance}',
         ])
         
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
+        np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
+
         # Only calculate data once
         features_to_fit, predictions_to_fit, labels_to_fit = self._get_features_and_labels_to_fit(**kwargs)
+
 
         # Note that for `self.fit_to_ground_truth_labels` data, the `predictions_to_fit` are overriden with a 1-hot ground truth
         features_to_evaluate, predictions_to_evaluate, labels_to_evaluate = self._get_features_and_labels_to_evaluate(**kwargs)
@@ -283,6 +302,7 @@ class FitFeatureDensityGrid(PipelineFeatureDensity):
             k, # Receptive field of each vertex is num-hidden-layers + 1
             kwargs['config']['data']['train_labels'],
             mask = True,
+            threshold = self.separate_distributions_tolerance,
         )
         auroc_labels, auroc_mask = separate_distributions_leave_out_classes(distribution_labels, self.separate_distributions_by)
         distribution_label_names = {
@@ -334,15 +354,15 @@ class FitFeatureDensityGrid(PipelineFeatureDensity):
                                 fig, ax = plot_histograms(log_density.cpu(), distribution_labels.cpu(), 
                                     label_names=distribution_label_names,
                                     kind='vertical', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
-                                log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_all_kinds{suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
-                                pipeline_log(f'Saved feature density histogram (all kinds) to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_all_kinds{suffix}.pdf')))
+                                log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_all_kinds{suffix}{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
+                                pipeline_log(f'Saved feature density histogram (all kinds) to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_all_kinds{suffix}{self.suffix}.pdf')))
                                 plt.close(fig)
 
                                 fig, ax = plot_histograms(log_density[auroc_mask].cpu(), auroc_labels[auroc_mask].cpu().long(), 
                                     label_names={0 : 'Out ouf distribution', 1 : 'In distribution'},
-                                    kind='overlapping', kde=True, log_scale=False,  x_label='Softmax-Entropy', y_label='Kind')
-                                log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_id_vs_ood{suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
-                                pipeline_log(f'Saved feature density histogram (id vs ood) to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_id_vs_ood{suffix}.pdf')))
+                                    kind='overlapping', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
+                                log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_id_vs_ood{suffix}{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
+                                pipeline_log(f'Saved feature density histogram (id vs ood) to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_id_vs_ood{suffix}{self.suffix}.pdf')))
                                 plt.close(fig)
 
         log_metrics(kwargs['logs'], aurocs, 'feature_density_auroc')
@@ -357,10 +377,11 @@ class FitFeatureDensity(PipelineFeatureDensity):
     name = 'FitFeatureDensity'
 
     def __init__(self, density_type='unspecified', gpus=0, fit_to=[data_constants.TRAIN], fit_to_ground_truth_labels=[data_constants.TRAIN], 
-                    evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', **kwargs):
+                    evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', separate_distributions_tolerance=0.0, **kwargs):
         super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, evaluate_on=evaluate_on, **kwargs)
         self.density = get_density_model(density_type=density_type, **kwargs)
         self.separate_distributions_by = separate_distributions_by
+        self.separate_distributions_tolerance = separate_distributions_tolerance
 
     def __str__(self):
         return '\n'.join([
@@ -370,6 +391,7 @@ class FitFeatureDensity(PipelineFeatureDensity):
             f'\t Evaluate on : {self.evaluate_on}',
             f'\t Density : {self.density}',
             f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}',
+            f'\t Tolerance on impurity of in-distribution and out-of-distribution neighbours {self.separate_distributions_tolerance}',
         ])
 
     @torch.no_grad()
@@ -407,6 +429,7 @@ class FitFeatureDensity(PipelineFeatureDensity):
             k, # Receptive field of each vertex is num-hidden-layers + 1
             kwargs['config']['data']['train_labels'],
             mask = True,
+            threshold = self.separate_distributions_tolerance,
         )
         auroc_labels, auroc_mask = separate_distributions_leave_out_classes(distribution_labels, self.separate_distributions_by)
         distribution_label_names = {
@@ -514,10 +537,7 @@ class FitFeatureSpacePCA(PipelineMember):
             loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
             features, predictions, labels = run_model_on_datasets(kwargs['model'], loaders, gpus=self.gpus)
             for idx, data_name in enumerate(self.evaluate_on):
-                # Get the label-to-name mapping
-                for data in loaders[idx]:
-                    idx_to_label = {idx : label for label, idx in data.label_to_idx.items()}
-                    break
+
                 projected = pca.fit_transform(features[idx].cpu().numpy())
                 fig, ax = plot_2d_features(torch.tensor(projected), labels[idx])
                 log_figure(kwargs['logs'], fig, f'pca_{self.suffix}_{data_name}_gnd', 'pca', save_artifact=kwargs['artifact_directory'])
@@ -686,6 +706,69 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
         
         return args, kwargs
 
+class SubsetDataByLabel(PipelineMember):
+    """ Creates a new data loader that holds a subset of some dataset with only certain labels. """
+
+    name = 'SubsetDataByLabel'
+
+    def __init__(self, base_data=data_constants.VAL, subset_name='unnamed-subset', labels='all', **kwargs):
+        super().__init__(**kwargs)
+        self.base_data = base_data
+        self.subset_name = subset_name.lower()
+        self.labels = labels
+
+    def __str__(self):
+        return '\n'.join([
+            self.print_name,
+            f'\t Based on : {self.base_data}',
+            f'\t Subset name : {self.subset_name}',
+            f'\t Labels : {self.labels}',
+        ])
+
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+        base_loader = get_data_loader(self.base_data, kwargs['data_loaders'])
+        if len(base_loader) != 1:
+            raise RuntimeError(f'Subsetting by label is only supported for single graph data.')
+        data = base_loader.dataset[0]
+        labels = labels_to_idx(self.labels, data)
+        x, edge_index, y, vertex_to_idx, label_to_idx, mask = graph_select_labels(data.x.numpy(), 
+            data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, labels, 
+            connected=True, _compress_labels=True)
+        data = SingleGraphDataset(x, edge_index, y, vertex_to_idx, label_to_idx, np.ones(y.shape[0]).astype(bool))
+        kwargs['data_loaders'][self.subset_name] = DataLoader(data, batch_size=1, shuffle=False)
+        return args, kwargs
+
+class RemoveEdges(PipelineMember):
+    """ Creates a new data loader that holds a subset of some dataset with only certain labels. """
+
+    name = 'RemoveEdges'
+
+    def __init__(self, base_data=data_constants.VAL, dataset_name='unnamed-data', **kwargs):
+        super().__init__(**kwargs)
+        self.base_data = base_data
+        self.dataset_name = dataset_name.lower()
+
+    def __str__(self):
+        return '\n'.join([
+            self.print_name,
+            f'\t Based on : {self.base_data}',
+            f'\t Dataset name : {self.dataset_name}',
+        ])
+
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+        base_loader = get_data_loader(self.base_data, kwargs['data_loaders'])
+        if len(base_loader) != 1:
+            raise RuntimeError(f'Subsetting by label is only supported for single graph data.')
+        data = base_loader.dataset[0]
+        dataset = SingleGraphDataset(data.x.numpy(), torch.tensor([]).view(2, 0).long().numpy(), 
+            data.y.numpy(), data.vertex_to_idx, data.label_to_idx, data.mask.numpy())
+        kwargs['data_loaders'][self.dataset_name] = DataLoader(dataset, batch_size=1, shuffle=False)
+
+        return args, kwargs
+
+
 pipeline_members = [
     EvaluateEmpircalLowerLipschitzBounds,
     FitFeatureDensity, # Deprecated: Use the Grid instead
@@ -698,6 +781,8 @@ pipeline_members = [
     LogInductiveSoftmaxEntropyShift,
     EvaluateSoftmaxEntropy,
     FitFeatureDensityGrid,
+    SubsetDataByLabel,
+    RemoveEdges,
 ]
 
 

@@ -60,7 +60,7 @@ def make_callback_is_ground_truth_in_labels(labels, mask=True, cpu=True):
     def callback(data, output):
         is_train_label = torch.zeros_like(data.y).bool()
         for label in labels:
-            is_train_label[data.y == label] = True
+            is_train_label[data.y == data.label_to_idx[label]] = True
         if mask:
             is_train_label = is_train_label[data.mask]
         if cpu:

@@ -56,3 +56,6 @@ if __name__ == '__main__':
 
     pubmed = GustDataset('pubmed')[0]
     print(pubmed.x.size(), pubmed.edge_index.size(), pubmed.y.size())
+
+    cora_full = GustDataset('cora_full')[0]
+    print(cora_full.x.size(), cora_full.edge_index.size(), torch.unique(cora_full.y).size())

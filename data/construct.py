@@ -128,7 +128,7 @@ def load_data_from_configuration_uniform_split(config):
     data_test_fixed : torch_geometric.data.Dataset
         Fixed test dataset that is consistent among all splits.
     """
-    if config['dataset'].lower() in ('cora_ml', 'citeseer', 'pubmed'):
+    if config['dataset'].lower() in ('cora_ml', 'citeseer', 'pubmed', 'cora_full'):
         base_data = GustDataset(config['dataset'])[0]
     else:
         raise RuntimeError(f'Unsupported dataset type {config["dataset"]}')
@@ -143,6 +143,7 @@ def load_data_from_configuration_uniform_split(config):
         val_labels_remove_other = config['val_labels_remove_other'],
         compress_train_labels=config.get('train_labels_compress', True),
         compress_val_labels=config.get('val_labels_compress', True),
+        base_labels = config.get('base_labels', 'all'),
         )
 
 def load_data_from_configuration(config):

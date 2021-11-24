@@ -4,6 +4,7 @@ import numpy as np
 from util import get_k_hop_neighbourhood
 import evaluation.callbacks
 import evaluation.constants as evaluation_constants
+from collections.abc import Iterable
 
 def split_labels_into_id_and_ood(y, id_labels, ood_labels=None, id_label=0, ood_label=1):
     """ Creates new labels that correspond to in-distribution and out-ouf-distribution.
@@ -47,8 +48,8 @@ def get_data_loader(name, loaders):
 def run_model_on_datasets(model, data_loaders, gpus=0, callbacks=[
     evaluation.callbacks.make_callback_get_features(), 
     evaluation.callbacks.make_callback_get_predictions(), 
-    evaluation.callbacks.make_callback_get_ground_truth()
-], run_model=True):
+    evaluation.callbacks.make_callback_get_ground_truth(),
+], run_model=True, model_kwargs={}):
     """ Extracts features of all data loaders. 
     
     model : torch.nn.Module
@@ -61,6 +62,8 @@ def run_model_on_datasets(model, data_loaders, gpus=0, callbacks=[
         A list of functions that is run on every pair of (data, model_output). Its results are aggregated into lists.
     run_model : bool
         If `False`, the model will not be run at all and `model_output` will be `None`.
+    model_kwargs : dict
+        Keyword arguments that are passed to the model.
 
     Returns:
     --------
@@ -77,7 +80,7 @@ def run_model_on_datasets(model, data_loaders, gpus=0, callbacks=[
             if gpus > 0:
                 data = data.to('cuda')
             if run_model:
-                output = model(data)
+                output = model(data, **model_kwargs)
             else:
                 output = None
             for idx, callback in enumerate(callbacks):
@@ -122,7 +125,7 @@ def count_neighbours_with_label(data_loader, labels, k=1, mask=True):
     return count, total
 
 
-def get_distribution_labels_leave_out_classes(data_loaders, k_max, train_labels, mask=True):
+def get_distribution_labels_leave_out_classes(data_loaders, k_max, train_labels, mask=True, threshold=0.0):
     """ Gets information about which vertices are from an out-of-distribution class and how many of those are in neighbourhoods.
     
     Parameters:
@@ -135,6 +138,13 @@ def get_distribution_labels_leave_out_classes(data_loaders, k_max, train_labels,
         All labels that are considered in-distribution.
     mask : bool
         If the information is to be extracted for only the vertices in a datasets mask or all vertices in the graph.
+    threshold : float or list
+        The fraction of neighbours that is ignored for the labeling. For example, if a vertex with an in-distribution class
+        has less than theshold out-of-distribution-class neighbours, it will still be labeled `in distribution with only in distribution nbs`
+        If a single value is given, then the cirterion for purity within the k-hop neighbourhood will be set to (1 - threshold)**k.
+        If a list is given, then this purity threshold within the k-hop neighbourhood will be 1-threshold[k - 1].
+
+        Use a value of `0.0` for a strict labeling.
 
     Returns:
     --------
@@ -157,18 +167,26 @@ def get_distribution_labels_leave_out_classes(data_loaders, k_max, train_labels,
     # Concatenate values over all datasets
     mask_is_train_label = torch.cat(mask_is_train_label, dim=0) # N
     num_train_label_nbs = torch.stack([torch.cat(l, dim=0) for l in num_train_label_nbs]) # k, N
+
+    # Calculate purity of each k-hop neighbourhood
     num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k, N
-    mask_has_non_train_label_nb = ((num_nbs - num_train_label_nbs) > 0).any(dim=0)
-    mask_has_train_label_nb = (num_train_label_nbs > 0).any(dim=0)
+    fraction_train_label_nbs = (num_train_label_nbs / num_nbs).permute(1, 0) # N, k
+    if isinstance(threshold, Iterable):
+        threshold = 1 - np.array(threshold)
+    else:
+        threshold = np.array([(1 - threshold)**k for k in range(1, k_max + 1)])
+    threshold = torch.tensor(threshold)
+    mask_has_only_train_label_nbs = (fraction_train_label_nbs >= threshold).all(dim=1) # N
+    mask_has_only_non_train_label_nbs = ((1 - fraction_train_label_nbs) >= threshold).all(dim=1) # N
 
     # Plot the softmax-entropy distribution by train-label data i) with no non-train label neighbours ii) with at least one train label neighbour
     distribution_labels = torch.empty_like(mask_is_train_label).long()
-    distribution_labels[(~mask_is_train_label) & (~mask_has_train_label_nb)] = evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS
-    distribution_labels[(~mask_is_train_label) & mask_has_train_label_nb] = evaluation_constants.OOD_CLASS_ID_CLASS_NBS
-    distribution_labels[mask_is_train_label & (~mask_has_non_train_label_nb)] = evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS
-    distribution_labels[mask_is_train_label & mask_has_non_train_label_nb] = evaluation_constants.ID_CLASS_ODD_CLASS_NBS
+    distribution_labels[(~mask_is_train_label) & (mask_has_only_non_train_label_nbs)] = evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS
+    distribution_labels[(~mask_is_train_label) & (~mask_has_only_non_train_label_nbs)] = evaluation_constants.OOD_CLASS_ID_CLASS_NBS
+    distribution_labels[mask_is_train_label & (mask_has_only_train_label_nbs)] = evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS
+    distribution_labels[mask_is_train_label & (~mask_has_only_train_label_nbs)] = evaluation_constants.ID_CLASS_ODD_CLASS_NBS
 
-    print(torch.unique(distribution_labels, return_counts=True))
+    # print(torch.unique(distribution_labels, return_counts=True), train_labels)
 
     return distribution_labels
 

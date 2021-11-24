@@ -47,4 +47,3 @@ class SingleGraphDataset(Dataset):
     def __getitem__(self, idx):
         assert idx == 0, f'ŚingleGraphDataset only has a single graph! (Trying to index with {idx}...)'
         return self.transform(self._data.clone()) # This way we can apply in-place transforms
-    

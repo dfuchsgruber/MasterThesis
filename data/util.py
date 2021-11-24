@@ -123,8 +123,35 @@ def permute_label_to_idx_to_match(label_to_idx_base, label_to_idx_target):
     return remapping
 
 
+def labels_to_idx(labels, dataset):
+    """ Gets the idxs of a certain label set within a dataset. 
+    
+    Parameters:
+    -----------
+    labels : iterable of int or str or 'all'
+        The labels to get
+    dataset : SingleGraphDataset
+        The dataset in which to get labels from.
+    
+    Returns:
+    --------
+    labels : list of int
+        Integer labels.
+    """
+    if labels == 'all':
+        return list(dataset.label_to_idx.values())
+    else:
+        if all(isinstance(label, str) for label in labels):
+            labels = [dataset.label_to_idx[label] for label in labels]
+        elif all(isinstance(label, int) for label in labels):
+            raise RuntimeError(f'Using ints to adress labels is deprecated!')
+        if all(isinstance(label, int) for label in labels):
+            return list(labels)
+        else:
+            raise RuntimeError(f'Could not understand the datatype of labels {set(type(label) for label in labels)}')
+
 def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, num_val=20, portion_test_fixed=0.2, train_labels='all', train_labels_remove_other=False, 
-        val_labels='all', val_labels_remove_other=False, compress_train_labels=True, compress_val_labels=True):
+        val_labels='all', val_labels_remove_other=False, compress_train_labels=True, compress_val_labels=True, base_labels='all'):
     """ Splits the data by uniformaly sampling a fixed amount of vertices per class for each dataset.
     The procedure goes as follows:
     A. Split into a fixed test-set and a non-fixed dataset in a stratified manner
@@ -159,7 +186,9 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
         If `True`, labels on the training graph are mapped onto (0, 1, ..., k)
     compress_val_labels : bool
         If `True`, labels on the validation graph are mapped onto (0, 1, ..., k)
-    
+    base_labels : iterable or 'all'
+        If given, the entire graph is reduced to these base labels before.
+
     Returns:
     --------
     data_list : list
@@ -167,18 +196,23 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
     data_test_fixed : torch_geometric.data.Dataset
         Fixed test dataset that is consistent among all splits.
     """
+    if base_labels != 'all':
+        base_labels = labels_to_idx(base_labels, data)
+        # Reduce the data before-hand: Note that this shifts labels, so it recommended to refer to them by string names
+        x, edge_index, y, vertex_to_idx, label_to_idx, mask = graph_select_labels(data.x.numpy(), 
+            data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, base_labels, 
+            connected=True, _compress_labels=True)
+        data = SingleGraphDataset(x, edge_index, y, vertex_to_idx, label_to_idx, np.ones(y.shape[0]).astype(bool))[0]
+
     seeds = data_split_seeds(num_splits + 1) # The first seed is used to fix the shared testing data
     
     # First stratified split to get the untouched test data
     mask_fixed, mask_non_fixed = stratified_split(data.y.numpy(), seeds[0:1], [portion_test_fixed, 1 - portion_test_fixed])[:, 0, :]
 
-    all_labels = set(np.unique(data.y.numpy()))
+    all_labels = set(labels_to_idx('all', data))
 
     # Reduce the graph for training
-    if train_labels == 'all':
-        train_labels = all_labels.copy()
-    else:
-        train_labels = set(train_labels)
+    train_labels = set(labels_to_idx(train_labels, data))
     if train_labels_remove_other:
         x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_train_graph = graph_select_labels(data.x.numpy(), 
             data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, train_labels, connected=True, _compress_labels=compress_train_labels)
@@ -187,10 +221,7 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
             data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx.copy(), data.label_to_idx.copy(), torch.ones_like(data.y).bool())
 
     # Reduce graph for validation
-    if val_labels == 'all':
-        val_labels = all_labels.copy()
-    else:
-        val_labels = set(val_labels)
+    val_labels = set(labels_to_idx(val_labels, data))
     if val_labels_remove_other:
         x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, mask_val_graph = graph_select_labels(data.x.numpy(), 
             data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, val_labels, connected=True, _compress_labels=compress_val_labels)

@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.colors as mcolors
 
-_tableaeu_colors = list(mcolors.TABLEAU_COLORS.keys())
+_tableaeu_colors = list(mcolors.TABLEAU_COLORS.keys()) + list(mcolors.CSS4_COLORS.keys())
 
 def plot_2d_features(points, labels, label_names=None):
     """ Makes a 2d log-density plot of a space. 

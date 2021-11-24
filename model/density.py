@@ -87,13 +87,15 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
     def __init__(
             self, 
             dimensionality_reduction={'type' : None}, 
-            diagonal_covariance=False, 
+            diagonal_covariance=False,
+            prior=0.0,
             **kwargs
         ):
         super().__init__()
         self._fitted = False
         self.dimensionality_reduction = DimensionalityReduction(**dimensionality_reduction)
         self.diagonal_covariance = diagonal_covariance
+        self.prior = prior
 
     def __str__(self):
         return '\n'.join([
@@ -101,6 +103,7 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
             f'\t Dimensionality Reduction : ',
             str(self.dimensionality_reduction),
             f'\t Diagonal covariance : {self.diagonal_covariance}'
+            f'\t Prior: {self.prior}',
         ])
 
     @property
@@ -111,7 +114,7 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
             diagonal = 'full'
         return f'gpc-{diagonal}'
 
-    def _make_covariance_psd(self, cov, eps=1e-6):
+    def _make_covariance_psd(self, cov, eps=1e-6, tol=1e-6):
         """ If a covariance matrix is not psd (numerical errors), a small value is added to its diagonal to make it psd.
         
         Parameters:
@@ -120,10 +123,12 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
             Covariance matrix.
         eps : float
             The small value to add to the diagonal. If it still is not psd after that, eps is multiplied by 10 and the process repeats.
+        tol : float
+            The minimal eigenvalue that is required for the covariance matrix.
         """
         # Make covariance psd in case of numerical inaccuracies
         eps = 1e-6
-        while not (np.linalg.eigvals(cov.numpy()) >= 0).all():
+        while not (np.linalg.eigvals(cov.numpy()) > tol).all():
             print(f'Covariance not positive semi-definite. Adding {eps} to the diagnoal.')
             cov += torch.eye(cov.numpy().shape[0]) * eps
             eps *= 10
@@ -155,6 +160,7 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
 
             transformed = torch.tensor(transformed_by_class[label]).float()
             self.covs[label], self.means[label] = cov_and_mean(transformed, aweights=labels[:, label])
+            self.covs[label] += torch.eye(transformed.size(1)) * self.prior
             self.coefs[label] = labels[:, label].sum(0) / labels.size(0)
 
             if self.diagonal_covariance:
@@ -186,7 +192,7 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
         log_densities = [] # Per component, weighted with component
         for label in self.coefs:
             transformed = torch.tensor(transformed_by_class[label]).float()
-            log_densities.append(MultivariateNormal(self.means[label], covariance_matrix=self.covs[label]).log_prob(transformed))
+            log_densities.append(MultivariateNormal(self.means[label], covariance_matrix=self.covs[label], validate_args=False).log_prob(transformed))
         log_densities = torch.stack(log_densities) # shape n_classes, N
         return torch.logsumexp(log_densities, 0) # Shape N
 
@@ -199,7 +205,7 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
     def __init__(
             self, 
             number_components=5, 
-            seed=None,
+            seed=1337,
             dimensionality_reduction={'type' : None},
             **kwargs
         ):

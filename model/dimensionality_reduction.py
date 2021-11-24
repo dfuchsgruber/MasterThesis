@@ -18,11 +18,12 @@ class Identity:
 class DimensionalityReduction:
     """ Base class for dimensionality reduction. """
 
-    def __init__(self, type='pca', number_components=2, per_class=False, number_neighbours=5, *args, **kwargs):
+    def __init__(self, type='pca', number_components=2, per_class=False, number_neighbours=5, seed=1337, *args, **kwargs):
         self.type = type
         self.number_components = number_components
         self.number_neighbours = number_neighbours
         self.per_class = per_class
+        self.seed = seed
 
     @property
     def compressed_name(self):
@@ -36,7 +37,7 @@ class DimensionalityReduction:
         if not self.type or self.type.lower() == 'none' or self.type.lower() == 'identity':
             return Identity()
         elif self.type.lower() == 'pca':
-            return PCA(n_components=self.number_components)
+            return PCA(n_components=self.number_components, random_state=self.seed)
         elif self.type.lower() == 'isomap':
             return Isomap(n_components=self.number_components, n_neighbors=self.number_neighbours)
         # elif self.type.lower() == 'mds':  # MDS is not a fixed manifold?

@@ -4,6 +4,17 @@ import torch_geometric.transforms as T
 from data.util import graph_select_labels, compress_labels
 from torch_geometric.data import Data
 
+class RemoveEdgesTransform(T.BaseTransform):
+    """ Removes all edges in the dataset. """
+
+    def __init__(self):
+        super().__init__()
+    
+    @torch.no_grad()
+    def __call__(self, data):
+        data.edge_index = torch.tensor([]).view((2, 0)).long()
+        return data
+
 class MaskTransform(T.BaseTransform):
     """ Sets a mask to the dataset. """
 
