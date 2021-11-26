@@ -3,7 +3,14 @@ import torch.nn.functional as F
 import numpy as np
 from util import get_k_hop_neighbourhood
 
-def make_callback_get_softmax_entropy(cpu=True, mask=True, layer=-1, eps=1e-20):
+def make_callback_get_softmax_energy(cpu=True, mask=True, layer=-1, temperature=1.0):
+    """ Calculates the softmax entropy for each vertex's predictions. """
+    def callback(data, output):
+        logits = make_callback_get_predictions(layer=layer, softmax=False, mask=mask, cpu=cpu)(data, output)
+        return -temperature * torch.logsumexp(logits / temperature, dim=-1)
+    return callback
+
+def make_callback_get_softmax_entropy(cpu=True, mask=True, layer=-1):
     """ Calculates the softmax entropy for each vertex's predictions. """
     def callback(data, output):
         probs = make_callback_get_predictions(layer=layer, softmax=True, mask=mask, cpu=cpu)(data, output)

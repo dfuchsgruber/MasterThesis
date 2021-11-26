@@ -289,6 +289,43 @@ class OODDetection(OODSeparation):
         kwargs['metrics'][f'auroc_{proxy_name}{self.suffix}'] = roc_auc
         log_metrics(kwargs['logs'], {f'auroc_{proxy_name}{self.suffix}' : roc_auc}, f'{proxy_name}_plots')
         
+class EvaluateLogitEnergy(OODDetection):
+    """ Pipeline member to evaluate the Logit Energy curves of the model for in-distribution and out-of-distribution data. """
+
+    name = 'EvaluateLogitEnergy'
+
+    def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', 
+                separate_distributions_tolerance=0.0, model_kwargs={}, log_plots=True, **kwargs):
+        super().__init__(separate_distributions_by=separate_distributions_by, 
+                            separate_distributions_tolerance=separate_distributions_tolerance,
+                            evaluate_on=evaluate_on,
+                            **kwargs)
+        self.gpus = gpus
+        self.model_kwargs = model_kwargs
+        self.log_plots = log_plots
+
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Kwargs for model' : self.model_kwargs,
+            'Log plots' : self.log_plots,
+        }
+
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+
+        data_loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
+        energy, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
+                make_callback_get_softmax_energy(mask=True),
+                make_callback_get_ground_truth(mask=True),
+            ], gpus=self.gpus, model_kwargs=self.model_kwargs)
+        energy, labels = torch.cat(energy), torch.cat(labels)
+
+        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
+        self.ood_detection(-energy, labels, 'logit-energy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+        
+        return args, kwargs
+
 class EvaluateSoftmaxEntropy(OODDetection):
     """ Pipeline member to evaluate the Softmax Entropy curves of the model for in-distribution and out-of-distribution data. """
 
@@ -737,6 +774,7 @@ pipeline_members = [
     PrintDatasetSummary,
     LogInductiveFeatureShift,
     LogInductiveSoftmaxEntropyShift,
+    EvaluateLogitEnergy,
     EvaluateSoftmaxEntropy,
     FitFeatureDensityGrid,
     SubsetDataByLabel,

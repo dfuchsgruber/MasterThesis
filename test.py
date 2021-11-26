@@ -33,44 +33,59 @@ num_splits, num_inits = 1, 1
 
 
 ex = ExperimentWrapper(init_all=False, collection_name='model-test', run_id='gcn_64_32_residual')
-ex.init_dataset(dataset='cora_full', num_dataset_splits=num_splits, train_portion=20, val_portion=20, test_portion=0.6, test_portion_fixed=0.2,
+ex.init_dataset(dataset='cora_ml', num_dataset_splits=num_splits, train_portion=20, val_portion=20, test_portion=0.6, test_portion_fixed=0.2,
                     train_labels_remove_other=False, val_labels_remove_other=False,
                     split_type='uniform',
                     train_labels = [
                         'Artificial_Intelligence/Machine_Learning/Case-Based', 
                         'Artificial_Intelligence/Machine_Learning/Theory', 
-                        'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 
+                        # 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 
                         'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 
                         'Artificial_Intelligence/Machine_Learning/Neural_Networks',
                         'Artificial_Intelligence/Machine_Learning/Rule_Learning',
-                        'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
-                    ],
+                        # 'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
+                    ], 
                     val_labels = 'all',
-                    base_labels = [
-                        'Artificial_Intelligence/NLP', 
-                        'Artificial_Intelligence/Data_Mining',
-                        'Artificial_Intelligence/Speech', 
-                        'Artificial_Intelligence/Knowledge_Representation',
-                        'Artificial_Intelligence/Theorem_Proving', 
-                        'Artificial_Intelligence/Games_and_Search',
-                        'Artificial_Intelligence/Vision_and_Pattern_Recognition', 
-                        'Artificial_Intelligence/Planning',
-                        'Artificial_Intelligence/Agents',
-                        'Artificial_Intelligence/Robotics', 
-                        'Artificial_Intelligence/Expert_Systems',
-                        'Artificial_Intelligence/Machine_Learning/Case-Based', 
-                        'Artificial_Intelligence/Machine_Learning/Theory', 
-                        'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 
-                        'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 
-                        'Artificial_Intelligence/Machine_Learning/Neural_Networks',
-                        'Artificial_Intelligence/Machine_Learning/Rule_Learning',
-                        'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
-                        'Operating_Systems/Distributed', 
-                        'Operating_Systems/Memory_Management', 
-                        'Operating_Systems/Realtime', 
-                        'Operating_Systems/Fault_Tolerance',
-                    ]
-                    )
+                    base_labels = 'all',
+)
+# ex.init_dataset(dataset='cora_full', num_dataset_splits=num_splits, train_portion=20, val_portion=20, test_portion=0.6, test_portion_fixed=0.2,
+#                     train_labels_remove_other=False, val_labels_remove_other=False,
+#                     split_type='uniform',
+#                     train_labels = [
+#                         'Artificial_Intelligence/Machine_Learning/Case-Based', 
+#                         'Artificial_Intelligence/Machine_Learning/Theory', 
+#                         'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 
+#                         'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 
+#                         'Artificial_Intelligence/Machine_Learning/Neural_Networks',
+#                         'Artificial_Intelligence/Machine_Learning/Rule_Learning',
+#                         'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
+#                     ],
+#                     val_labels = 'all',
+#                     base_labels = [
+#                         'Artificial_Intelligence/NLP', 
+#                         'Artificial_Intelligence/Data_Mining',
+#                         'Artificial_Intelligence/Speech', 
+#                         'Artificial_Intelligence/Knowledge_Representation',
+#                         'Artificial_Intelligence/Theorem_Proving', 
+#                         'Artificial_Intelligence/Games_and_Search',
+#                         'Artificial_Intelligence/Vision_and_Pattern_Recognition', 
+#                         'Artificial_Intelligence/Planning',
+#                         'Artificial_Intelligence/Agents',
+#                         'Artificial_Intelligence/Robotics', 
+#                         'Artificial_Intelligence/Expert_Systems',
+#                         'Artificial_Intelligence/Machine_Learning/Case-Based', 
+#                         'Artificial_Intelligence/Machine_Learning/Theory', 
+#                         'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 
+#                         'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 
+#                         'Artificial_Intelligence/Machine_Learning/Neural_Networks',
+#                         'Artificial_Intelligence/Machine_Learning/Rule_Learning',
+#                         'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
+#                         'Operating_Systems/Distributed', 
+#                         'Operating_Systems/Memory_Management', 
+#                         'Operating_Systems/Realtime', 
+#                         'Operating_Systems/Fault_Tolerance',
+#                     ]
+#                     )
 
 ex.init_model(model_type='gcn', hidden_sizes=[64,32], num_initializations=num_inits, weight_scale=0.9, 
     use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
@@ -81,59 +96,55 @@ ex.init_run(name='model_no_remove_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
 ex.init_evaluation(
     print_pipeline=True,
     pipeline=[
-        {
-            'type' : 'SubsetDataByLabel',
-            'base_data' : 'val',
-            'subset_name' : 'val-subset-ai',
-            'labels' : [
-                        'Artificial_Intelligence/NLP', 
-                        'Artificial_Intelligence/Data_Mining',
-                        'Artificial_Intelligence/Speech', 
-                        'Artificial_Intelligence/Knowledge_Representation',
-                        'Artificial_Intelligence/Theorem_Proving', 
-                        'Artificial_Intelligence/Games_and_Search',
-                        'Artificial_Intelligence/Vision_and_Pattern_Recognition', 
-                        'Artificial_Intelligence/Planning',
-                        'Artificial_Intelligence/Agents',
-                        'Artificial_Intelligence/Robotics', 
-                        'Artificial_Intelligence/Expert_Systems',
-                        'Artificial_Intelligence/Machine_Learning/Case-Based', 
-                        'Artificial_Intelligence/Machine_Learning/Theory', 
-                        'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 
-                        'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 
-                        'Artificial_Intelligence/Machine_Learning/Neural_Networks',
-                        'Artificial_Intelligence/Machine_Learning/Rule_Learning',
-                        'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
-                    ]
-        },{
-            'type' : 'SubsetDataByLabel',
-            'base_data' : 'val',
-            'subset_name' : 'val-subset-os',
-            'labels' : [
-                        'Artificial_Intelligence/Machine_Learning/Case-Based', 
-                        'Artificial_Intelligence/Machine_Learning/Theory', 
-                        'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 
-                        'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 
-                        'Artificial_Intelligence/Machine_Learning/Neural_Networks',
-                        'Artificial_Intelligence/Machine_Learning/Rule_Learning',
-                        'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
-                        'Operating_Systems/Distributed', 
-                        'Operating_Systems/Memory_Management', 
-                        'Operating_Systems/Realtime', 
-                        'Operating_Systems/Fault_Tolerance',
-                    ]
-        },
-
+    # {
+    #     'type' : 'SubsetDataByLabel',
+    #     'base_data' : 'val',
+    #     'subset_name' : 'val-subset-ai',
+    #     'labels' : [
+    #                 'Artificial_Intelligence/NLP', 
+    #                 'Artificial_Intelligence/Data_Mining',
+    #                 'Artificial_Intelligence/Speech', 
+    #                 'Artificial_Intelligence/Knowledge_Representation',
+    #                 'Artificial_Intelligence/Theorem_Proving', 
+    #                 'Artificial_Intelligence/Games_and_Search',
+    #                 'Artificial_Intelligence/Vision_and_Pattern_Recognition', 
+    #                 'Artificial_Intelligence/Planning',
+    #                 'Artificial_Intelligence/Agents',
+    #                 'Artificial_Intelligence/Robotics', 
+    #                 'Artificial_Intelligence/Expert_Systems',
+    #                 'Artificial_Intelligence/Machine_Learning/Case-Based', 
+    #                 'Artificial_Intelligence/Machine_Learning/Theory', 
+    #                 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 
+    #                 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 
+    #                 'Artificial_Intelligence/Machine_Learning/Neural_Networks',
+    #                 'Artificial_Intelligence/Machine_Learning/Rule_Learning',
+    #                 'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
+    #             ]
+    # },{
+    #     'type' : 'SubsetDataByLabel',
+    #     'base_data' : 'val',
+    #     'subset_name' : 'val-subset-os',
+    #     'labels' : [
+    #                 'Artificial_Intelligence/Machine_Learning/Case-Based', 
+    #                 'Artificial_Intelligence/Machine_Learning/Theory', 
+    #                 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 
+    #                 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 
+    #                 'Artificial_Intelligence/Machine_Learning/Neural_Networks',
+    #                 'Artificial_Intelligence/Machine_Learning/Rule_Learning',
+    #                 'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
+    #                 'Operating_Systems/Distributed', 
+    #                 'Operating_Systems/Memory_Management', 
+    #                 'Operating_Systems/Realtime', 
+    #                 'Operating_Systems/Fault_Tolerance',
+    #             ]
+    # },
     {
         'type' : 'FitFeatureSpacePCAIDvsOOD',
         'fit_to' : ['train'],
+        'separate_distributions_by' : 'neighbourhood',
+        'separate_distributions_tolerance' : 0.1,
+        'kind' : 'leave_out_classes',
     },
-
-        # {
-        #     'type' : 'RemoveEdges',
-        #     'base_data' : 'val-subset-ai',
-        #     'dataset_name' : 'val-subset-ai-no-edges',
-        # },
     # {
     #     'type' : 'EvaluateEmpircalLowerLipschitzBounds',
     #     'num_perturbations' : 2,
@@ -271,11 +282,10 @@ ex.init_evaluation(
     #     ]
     # },
     {
-        'name' : 'subset-ai',
         'type' : 'FitFeatureDensityGrid',
         'fit_to' : ['train'],
         'fit_to_ground_truth_labels' : ['train'],
-        'evaluate_on' : ['val-subset-ai'],
+        'evaluate_on' : ['val'],
         'density_types' : {
             'GaussianPerClass' : {
                 'diagonal_covariance' : [True],
@@ -291,68 +301,80 @@ ex.init_evaluation(
         },
         'separate_distributions_by' : 'neighbourhood',
         'separate_distributions_tolerance' : 0.1,
+        'kind' : 'leave_out_classes',
         'log_plots' : True,
     },
-    {
-        'name' : 'subset-ai-no-edges',
-        'type' : 'FitFeatureDensityGrid',
-        'fit_to' : ['train'],
-        'fit_to_ground_truth_labels' : ['train'],
-        'evaluate_on' : ['val-subset-ai'],
-        'density_types' : {
-            'GaussianPerClass' : {
-                'diagonal_covariance' : [True],
-            },
-        },
-        'dimensionality_reductions' : {
-            'isomap' : {
-                'number_components' : [24],
-            },
-            'none' : {
+    # {
+    #     'name' : 'subset-ai-no-edges',
+    #     'type' : 'FitFeatureDensityGrid',
+    #     'fit_to' : ['train'],
+    #     'fit_to_ground_truth_labels' : ['train'],
+    #     'evaluate_on' : ['val-subset-ai'],
+    #     'density_types' : {
+    #         'GaussianPerClass' : {
+    #             'diagonal_covariance' : [True],
+    #         },
+    #     },
+    #     'dimensionality_reductions' : {
+    #         'isomap' : {
+    #             'number_components' : [24],
+    #         },
+    #         'none' : {
                 
-            }
-        },
-        'separate_distributions_by' : 'neighbourhood',
-        'separate_distributions_tolerance' : 0.1,
-        'log_plots' : True,
-        'model_kwargs_evaluate' : {'remove_edges' : True},
-    },{
-        'name' : 'subset-ai2',
-        'type' : 'FitFeatureDensityGrid',
-        'fit_to' : ['train'],
-        'fit_to_ground_truth_labels' : ['train'],
-        'evaluate_on' : ['val-subset-ai'],
-        'density_types' : {
-            'GaussianPerClass' : {
-                'diagonal_covariance' : [True],
-            },
-        },
-        'dimensionality_reductions' : {
-            'isomap' : {
-                'number_components' : [24],
-            },
-            'none' : {
+    #         }
+    #     },
+    #     'separate_distributions_by' : 'neighbourhood',
+    #     'separate_distributions_tolerance' : 0.1,
+    #     'kind' : 'leave_out_classes',
+    #     'log_plots' : True,
+    #     'model_kwargs_evaluate' : {'remove_edges' : True},
+    # },{
+    #     'name' : 'subset-ai2',
+    #     'type' : 'FitFeatureDensityGrid',
+    #     'fit_to' : ['train'],
+    #     'fit_to_ground_truth_labels' : ['train'],
+    #     'evaluate_on' : ['val-subset-ai'],
+    #     'density_types' : {
+    #         'GaussianPerClass' : {
+    #             'diagonal_covariance' : [True],
+    #         },
+    #     },
+    #     'dimensionality_reductions' : {
+    #         'isomap' : {
+    #             'number_components' : [24],
+    #         },
+    #         'none' : {
                 
-            }
-        },
-        'separate_distributions_by' : 'neighbourhood',
-        'separate_distributions_tolerance' : 0.1,
-        'log_plots' : True,
-    },
-    {
-        'type' : 'EvaluateSoftmaxEntropy',
-        'evaluate_on' : ['val-subset-ai'],
-        'separate_distributions_by' : 'neighbourhood',
-        'separate_distributions_tolerance' : 0.1,
-    },
+    #         }
+    #     },
+    #     'separate_distributions_by' : 'neighbourhood',
+    #     'separate_distributions_tolerance' : 0.1,
+    #     'kind' : 'leave_out_classes',
+    #     'log_plots' : True,
+    # },
     {
         'type' : 'EvaluateSoftmaxEntropy',
-        'name' : 'no-edges',
-        'evaluate_on' : ['val-subset-ai'],
+        'evaluate_on' : ['val'],
         'separate_distributions_by' : 'neighbourhood',
         'separate_distributions_tolerance' : 0.1,
-        'model_kwargs' : {'remove_edges' : True},
+        'kind' : 'leave_out_classes',
     },
+    {
+        'type' : 'EvaluateLogitEnergy',
+        'evaluate_on' : ['val'],
+        'separate_distributions_by' : 'neighbourhood',
+        'separate_distributions_tolerance' : 0.1,
+        'kind' : 'leave_out_classes',
+    },
+    # {
+    #     'type' : 'EvaluateSoftmaxEntropy',
+    #     'name' : 'no-edges',
+    #     'evaluate_on' : ['val-subset-ai'],
+    #     'separate_distributions_by' : 'neighbourhood',
+    #     'separate_distributions_tolerance' : 0.1,
+    #     'model_kwargs' : {'remove_edges' : True},
+    #     'kind' : 'leave_out_classes',
+    # },
     ],
     ignore_exceptions=False,
 )
