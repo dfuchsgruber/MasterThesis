@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import pytorch_lightning as pl
 import evaluation.lipschitz
 import plot.perturbations
 import matplotlib.pyplot as plt
@@ -59,6 +60,13 @@ class PipelineMember:
             return f'{self.name} (unnamed)'
         else:
             return f'{self.name} : "{self._name}"'
+    
+    @property
+    def configuration(self):
+        return {}
+
+    def __str__(self):
+        return '\n'.join([self.print_name] + [f'\t{key} : {value}' for key, value in self.configuration.items()])
 
 class EvaluateEmpircalLowerLipschitzBounds(PipelineMember):
     """ Pipeline element for evaluation of Lipschitz bounds. """
@@ -78,27 +86,21 @@ class EvaluateEmpircalLowerLipschitzBounds(PipelineMember):
         self.gpus = gpus
         self.evaluate_on = evaluate_on
 
-    def __str__(self):
+    @property
+    def configuration(self):
+        config = super().configuration
+        config |= {
+            'Perturbation type' : self.perturbation_type,
+            'Number of perturbations per sample' : self.num_perturbations,
+            'Seed' : self.seed,
+            'Evaluate on' : self.evaluate_on,
+        }
         if self.perturbation_type.lower() == 'noise':
-            stats = [
-                f'\t Min perturbation : {self.min_perturbation}',
-                f'\t Max perturbation : {self.max_perturbation}',
-            ]
+            config['Min perturbation'] = self.min_perturbation
+            config['Max perturbation'] = self.max_perturbation
         elif self.perturbation_type.lower() == 'derangement':
-            stats = [
-                f'\t Permutation per Sample : {self.permute_per_sample}',
-            ]
-
-
-        return '\n'.join([
-            self.print_name,
-            f'\t Perturbation type : {self.perturbation_type}',
-        ] + stats + [
-            f'\t Number perturbations per sample : {self.num_perturbations_per_sample}',
-            f'\t Number of perturbations : {self.num_perturbations}',
-            f'\t Seed : {self.seed}',
-            f'\t Evaluate on : {self.evaluate_on}',
-        ])
+            config['Permutation per Sample'] = self.permute_per_sample
+        return config
 
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
@@ -137,56 +139,42 @@ class EvaluateEmpircalLowerLipschitzBounds(PipelineMember):
         
         return args, kwargs
 
-class EvaluateSoftmaxEntropy(PipelineMember):
-    """ Pipeline member to evaluate the Softmax Entropy curves of the model for in-distribution and out-of-distribution data. """
+class OODSeparation(PipelineMember):
+    """ Base class to perform any kind of method that separates id from ood data. """
 
-    name = 'EvaluateSoftmaxEntropy'
-
-    def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', 
-                separate_distributions_tolerance=0.0, model_kwargs={}, **kwargs):
-        super().__init__(**kwargs)
-        self.gpus = gpus
-        self.evaluate_on = evaluate_on
+    name = 'OODSeparation'
+    
+    def __init__(self, *args, separate_distributions_by='train_label', separate_distributions_tolerance=0.0,
+            evaluate_on=[data_constants.VAL], kind='leave-out-classes', **kwargs):
+        super().__init__(*args, **kwargs)
         self.separate_distributions_by = separate_distributions_by
         self.separate_distributions_tolerance = separate_distributions_tolerance
-        self.model_kwargs = model_kwargs
+        self.kind = kind
+        self.evaluate_on = evaluate_on
 
-    def __str__(self):
-        return '\n'.join([
-            self.print_name,
-            f'\t Evaluate on : {self.evaluate_on}',
-            f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}',
-            f'\t Tolerance on impurity of in-distribution and out-of-distribution neighbours {self.separate_distributions_tolerance}',
-            f'\t Model run arguments : {self.model_kwargs}'
-        ])
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Evaluate on' : self.evaluate_on,
+            'Separate distributions by' : self.separate_distributions_by,
+            'Separate distributions tolerance' : self.separate_distributions_tolerance,
+            'OOD kind' : self.kind,
+        }
 
-    @torch.no_grad()
-    def __call__(self, *args, **kwargs):
-
-        data_loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
-        entropy, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
-                make_callback_get_softmax_entropy(mask=True),
-                make_callback_get_ground_truth(mask=True),
-            ], gpus=self.gpus, model_kwargs=self.model_kwargs)
-        entropy, labels = torch.cat(entropy), torch.cat(labels)
-
-        # Log histograms and metrics label-wise
-        y = labels.cpu()
-        for label in torch.unique(y):
-            entropy_label = entropy[y == label]
-            log_histogram(kwargs['logs'], entropy_label.cpu().numpy(), 'softmax_entropy', global_step=label, label_suffix=str(label.item()))
-            log_metrics(kwargs['logs'], {
-                f'{self.prefix}mean_softmax_entropy' : entropy_label.mean(),
-                f'{self.prefix}std_softmax_entropy' : entropy_label.std(),
-                f'{self.prefix}min_softmax_entropy' : entropy_label.min(),
-                f'{self.prefix}max_softmax_entropy' : entropy_label.max(),
-                f'{self.prefix}median_softmax_entropy' : entropy_label.median(),
-            }, 'softmax_entropy', step=label)
-        fig, ax = plot_histograms(entropy.cpu(), y.cpu(), log_scale=False, kind='vertical', x_label='Entropy', y_label='Class')
-        log_figure(kwargs['logs'], fig, f'softmax_entropy_histograms_all_classes{self.suffix}', 'softmax_entropy_plots', save_artifact=kwargs['artifact_directory'])
-        pipeline_log(f'Evaluated softmax entropy for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
-        plt.close(fig)
-
+    def _get_distribution_labels_leave_out_classes(self, **kwargs):
+        """ Gets labels for id vs ood where ood data is left out classes.
+        
+        Returns:
+        --------
+        auroc_labels : torch.Tensor, shape [N]
+            Labels per sample assigning them to a certain distribution, used for auroc calculation.
+        auroc_mask : torch.Tensor, shape [N]
+            Which samples should be used for AUROC calculation.
+        distribution_labels : torch.Tensor, shape [N]
+            Labels for different types of distributions.
+        distribution_label_names : dict
+            Mapping that names all the labels in `distribution_labels`.
+        """
         # Classify vertices according to which distribution they belong to
         k = len(kwargs['config']['model']['hidden_sizes']) + 1
         distribution_labels = get_distribution_labels_leave_out_classes(
@@ -203,43 +191,172 @@ class EvaluateSoftmaxEntropy(PipelineMember):
             evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS : f'id, no ood nbs in {k}-hops', 
             evaluation_constants.ID_CLASS_ODD_CLASS_NBS : f'id, ood nbs in {k}-hops'
         }
+        return auroc_labels, auroc_mask, distribution_labels, distribution_label_names
+
+    def get_distribution_labels(self, **kwargs):
+        """ Gets labels for id vs ood where ood data is left out classes.
+
+        Parameters:
+        -----------
+        kind : str
+            With which method to get out of distribution data.
         
-        fig, ax = plot_histograms(entropy.cpu(), distribution_labels.cpu(), 
-            label_names=distribution_label_names,
-            kind='vertical', kde=True, log_scale=False,  x_label='Softmax-Entropy', y_label='Kind')
-        log_figure(kwargs['logs'], fig, f'softmax_entropy_histograms_all_kinds{self.suffix}', 'softmax_entropy_plots', save_artifact=kwargs['artifact_directory'])
-        pipeline_log(f'Saved softmax-entropy (all kinds) histogram to ' + str(osp.join(kwargs['artifact_directory'], f'softmax_entropy_histograms_all_kinds{self.suffix}.pdf')))
-        plt.close(fig)
+        Returns:
+        --------
+        auroc_labels : torch.Tensor, shape [N]
+            Labels per sample assigning them to a certain distribution, used for auroc calculation.
+        auroc_mask : torch.Tensor, shape [N]
+            Which samples should be used for AUROC calculation.
+        distribution_labels : torch.Tensor, shape [N]
+            Labels for different types of distributions.
+        distribution_label_names : dict
+            Mapping that names all the labels in `distribution_labels`.
+        """
+        if self.kind.lower() in ('leave-out-classes', 'loc', 'leave_out_classes'):
+            return self._get_distribution_labels_leave_out_classes(**kwargs)
+        else:
+            raise RuntimeError(f'Could not separate distribution labels (id vs ood) by unknown type {self.kind}.')
 
-        fig, ax = plot_histograms(entropy[auroc_mask].cpu(), auroc_labels[auroc_mask].cpu().long(), 
-            label_names={0 : 'Out ouf distribution', 1 : 'In distribution'},
-            kind='overlapping', kde=True, log_scale=False,  x_label='Softmax-Entropy', y_label='Kind')
-        log_figure(kwargs['logs'], fig, f'softmax_entropy_histograms_id_vs_ood{self.suffix}', 'softmax_entropy_plots', save_artifact=kwargs['artifact_directory'])
-        pipeline_log(f'Saved softmax-entropy histogram (id vs ood) to ' + str(osp.join(kwargs['artifact_directory'], f'softmax_entropy_histograms_id_vs_ood{self.suffix}.pdf')))
-        plt.close(fig)
+class OODDetection(OODSeparation):
+    """ Pipeline member to perform OOD detection for a given metric. Evaluates AUROC scores and logs plots. """
 
+    name = 'OODDetection'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def ood_detection(self, proxy, labels, proxy_name, auroc_labels, auroc_mask, distribution_labels, distribution_label_names,
+                        plot_proxy_log_scale=True, log_plots=True,**kwargs):
+        """ Performs ood detection and logs metrics and plots.
+        
+        Parameters:
+        -----------
+        proxy : torch.Tensor, shape [N]
+            The proxy for separating id and ood. Higher values should be assigned to id data.
+        labels : torch.Tensor, shape [N]
+            Ground truth labels. Used to separate the proxy values by ground truth label.
+        proxy_name : str
+            Name of the proxy to use.
+        auroc_labels : torch.Tensor, shape [N]
+            Labels per sample assigning them to a certain distribution, used for auroc calculation.
+        auroc_mask : torch.Tensor, shape [N]
+            Which samples should be used for AUROC calculation.
+        distribution_labels : torch.Tensor, shape [N]
+            Labels for different types of distributions.
+        distribution_label_names : dict
+            Mapping that names all the labels in `distribution_labels`.
+        plot_proxy_log_scale : bool
+            If `True`, the proxy will be plotted in log scale.
+        log_plots : bool
+            If `True`, plots will be logged.
+        """
+
+        # Log histograms and metrics label-wise
+        if log_plots:
+            y = labels.cpu()
+            for label in torch.unique(y):
+                proxy_label = proxy[y == label]
+                log_histogram(kwargs['logs'], proxy_label.cpu().numpy(), f'{proxy_name}', global_step=label, label_suffix=str(label.item()))
+                log_metrics(kwargs['logs'], {
+                    f'{self.prefix}mean_{proxy_name}' : proxy_label.mean(),
+                    f'{self.prefix}std_{proxy_name}' : proxy_label.std(),
+                    f'{self.prefix}min_{proxy_name}' : proxy_label.min(),
+                    f'{self.prefix}max_{proxy_name}' : proxy_label.max(),
+                    f'{self.prefix}median_{proxy_name}' : proxy_label.median(),
+                }, f'{proxy_name}', step=label)
+            fig, ax = plot_histograms(proxy.cpu(), y.cpu(), log_scale=plot_proxy_log_scale, kind='vertical', x_label='proxy', y_label='Class')
+            log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_all_classes{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
+            pipeline_log(f'Evaluated {proxy_name}.')
+            plt.close(fig)
+
+        if log_plots:
+            fig, ax = plot_histograms(proxy.cpu(), distribution_labels.cpu(), 
+                label_names=distribution_label_names,
+                kind='vertical', kde=True, log_scale=plot_proxy_log_scale,  x_label=proxy_name, y_label='Kind')
+            log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_all_kinds{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
+            pipeline_log(f'Saved {proxy_name} (all kinds) histogram to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_histograms_all_kinds{self.suffix}.pdf')))
+            plt.close(fig)
+
+            fig, ax = plot_histograms(proxy[auroc_mask].cpu(), auroc_labels[auroc_mask].cpu().long(), 
+                label_names={0 : 'Out ouf distribution', 1 : 'In distribution'},
+                kind='overlapping', kde=True, log_scale=plot_proxy_log_scale,  x_label='Softmax-proxy', y_label='Kind')
+            log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_id_vs_ood{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
+            pipeline_log(f'Saved {proxy_name} histogram (id vs ood) to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_histograms_id_vs_ood{self.suffix}.pdf')))
+            plt.close(fig)
 
         # Calculate area under the ROC for separating in-distribution (label 1) from out of distribution (label 0)
-        roc_auc = roc_auc_score(auroc_labels[auroc_mask].cpu().long().numpy(), -entropy[auroc_mask].cpu().numpy()) # higher entropy -> higher uncertainty
-        kwargs['metrics'][f'auroc_softmax_entropy{self.suffix}'] = roc_auc
-        log_metrics(kwargs['logs'], {f'auroc_softmax_entropy{self.suffix}' : roc_auc}, 'softmax_entropy_plots')
+        roc_auc = roc_auc_score(auroc_labels[auroc_mask].cpu().long().numpy(), proxy[auroc_mask].cpu().numpy()) # higher proxy -> higher uncertainty
+        kwargs['metrics'][f'auroc_{proxy_name}{self.suffix}'] = roc_auc
+        log_metrics(kwargs['logs'], {f'auroc_{proxy_name}{self.suffix}' : roc_auc}, f'{proxy_name}_plots')
+        
+class EvaluateSoftmaxEntropy(OODDetection):
+    """ Pipeline member to evaluate the Softmax Entropy curves of the model for in-distribution and out-of-distribution data. """
+
+    name = 'EvaluateSoftmaxEntropy'
+
+    def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', 
+                separate_distributions_tolerance=0.0, model_kwargs={}, log_plots=True, **kwargs):
+        super().__init__(separate_distributions_by=separate_distributions_by, 
+                            separate_distributions_tolerance=separate_distributions_tolerance,
+                            evaluate_on=evaluate_on,
+                            **kwargs)
+        self.gpus = gpus
+        self.model_kwargs = model_kwargs
+        self.log_plots = log_plots
+
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Kwargs for model' : self.model_kwargs,
+            'Log plots' : self.log_plots,
+        }
+
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+
+        data_loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
+        entropy, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
+                make_callback_get_softmax_entropy(mask=True),
+                make_callback_get_ground_truth(mask=True),
+            ], gpus=self.gpus, model_kwargs=self.model_kwargs)
+        entropy, labels = torch.cat(entropy), torch.cat(labels)
+
+        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
+        self.ood_detection(-entropy, labels, 'softmax-entropy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
         
         return args, kwargs
 
-class PipelineFeatureDensity(PipelineMember):
+class FeatureDensity(OODDetection):
     """ Superclass for pipeline members that fit a feature density. """
+
+    name = 'FeatureDensity'
 
     def __init__(self, gpus=0, fit_to=[data_constants.TRAIN], 
         fit_to_ground_truth_labels=[data_constants.TRAIN], evaluate_on=[data_constants.TEST], 
-        model_kwargs_fit={}, model_kwargs_evaluate={},
+        model_kwargs_fit={}, model_kwargs_evaluate={}, separate_distributions_by='train_label',
+        separate_distributions_tolerance=0.0, kind='leave_out_classes',
         **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(
+            separate_distributions_by=separate_distributions_by,
+            separate_distributions_tolerance=separate_distributions_tolerance,
+            kind=kind,
+            evaluate_on=evaluate_on,
+            **kwargs
+        )
         self.gpus = gpus
         self.fit_to = fit_to
         self.fit_to_ground_truth_labels = fit_to_ground_truth_labels
-        self.evaluate_on = evaluate_on
         self.model_kwargs_fit = model_kwargs_fit
         self.model_kwargs_evaluate = model_kwargs_evaluate
+
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Fit to' : self.fit_to,
+            'Use ground truth labels for fit on' : self.fit_to_ground_truth_labels,
+            'Kwargs for model (fit)' : self.model_kwargs_fit,
+            'Kwargs for model (evaluate)' : self.model_kwargs_evaluate,
+        }
 
     def _get_features_and_labels_to_fit(self, **kwargs):
         features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus, model_kwargs=self.model_kwargs_fit)
@@ -252,7 +369,7 @@ class PipelineFeatureDensity(PipelineMember):
         features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus, model_kwargs=self.model_kwargs_evaluate)
         return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
 
-class FitFeatureDensityGrid(PipelineFeatureDensity):
+class FitFeatureDensityGrid(FeatureDensity):
     """ Pipeline member that fits a grid of several densities to the feature space of a model. """
 
     name = 'FitFeatureDensityGrid'
@@ -261,58 +378,36 @@ class FitFeatureDensityGrid(PipelineFeatureDensity):
                     evaluate_on=[data_constants.VAL], density_types={}, dimensionality_reductions={}, log_plots=False, gpus=0,
                     separate_distributions_by='train-label', separate_distributions_tolerance=0.0, seed=1337,
                     **kwargs):
-        super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, evaluate_on=evaluate_on, **kwargs)
+        super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, 
+                        separate_distributions_by=separate_distributions_by,
+                        separate_distributions_tolerance=separate_distributions_tolerance,
+                        evaluate_on=evaluate_on, **kwargs)
         self.density_types = density_types
         self.dimensionality_reductions = dimensionality_reductions
         self.log_plots = log_plots
-        self.separate_distributions_by = separate_distributions_by.lower()
-        self.separate_distributions_tolerance = separate_distributions_tolerance
         self.seed = seed
 
-    def __str__(self):
-        return '\n'.join([
-            self.print_name,
-            f'\t Fit to : {self.fit_to}',
-            f'\t Ground truth labels for fitting used : {self.fit_to_ground_truth_labels}',
-            f'\t Evaluate on : {self.evaluate_on}',
-            f'\t Density Types : {list(self.density_types.keys())}',
-            f'\t Dimensionality Reduction Types : {list(self.dimensionality_reductions.keys())}',
-            f'\t Log plos : {self.log_plots}',
-            f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}',
-            f'\t Tolerance on impurity of in-distribution and out-of-distribution neighbours {self.separate_distributions_tolerance}',
-        ])
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Density types' : self.density_types,
+            'Dimensionality Reductions' : self.dimensionality_reductions,
+            'Log plots' : self.log_plots,
+            'Seed' : self.seed,
+        }
         
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        np.random.seed(self.seed)
-        torch.manual_seed(self.seed)
+        if self.seed is not None:
+            pl.seed_everything(self.seed)
 
-        # Only calculate data once
+        # Only compute data once
         features_to_fit, predictions_to_fit, labels_to_fit = self._get_features_and_labels_to_fit(**kwargs)
-
 
         # Note that for `self.fit_to_ground_truth_labels` data, the `predictions_to_fit` are overriden with a 1-hot ground truth
         features_to_evaluate, predictions_to_evaluate, labels_to_evaluate = self._get_features_and_labels_to_evaluate(**kwargs)
-
-        # Classify vertices according to which distribution they belong to
-        k = len(kwargs['config']['model']['hidden_sizes']) + 1
-        distribution_labels = get_distribution_labels_leave_out_classes(
-            [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
-            k, # Receptive field of each vertex is num-hidden-layers + 1
-            kwargs['config']['data']['train_labels'],
-            mask = True,
-            threshold = self.separate_distributions_tolerance,
-        )
-        auroc_labels, auroc_mask = separate_distributions_leave_out_classes(distribution_labels, self.separate_distributions_by)
-        distribution_label_names = {
-            evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS : f'ood, no id nbs in {k} hops', 
-            evaluation_constants.OOD_CLASS_ID_CLASS_NBS : f'ood, id nbs in {k}-hops',
-            evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS : f'id, no ood nbs in {k}-hops', 
-            evaluation_constants.ID_CLASS_ODD_CLASS_NBS : f'id, ood nbs in {k}-hops'
-        }
-
-        aurocs = {}
+        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
 
         # Grid over dimensionality reductions
         for dim_reduction_type, dim_reduction_grid in self.dimensionality_reductions.items():
@@ -341,135 +436,29 @@ class FitFeatureDensityGrid(PipelineFeatureDensity):
                         log_density = density_model(features_to_evaluate_reduced).cpu()
                         pipeline_log(f'{self.name} fitted density {density_model.compressed_name}')                        
 
-                        suffix = f'{density_model.compressed_name}:{dim_reduction.compressed_name}'
-                        metric_name = f'auroc:{suffix}{self.suffix}'
-                        if metric_name in aurocs:
-                            warn(f'Multiple configurations give auroc metric key {metric_name}')
-                        else:
-                            aurocs[metric_name] = roc_auc_score(
-                                auroc_labels[auroc_mask].cpu().long().numpy(), 
-                                log_density[auroc_mask].cpu().numpy(),
+                        self.ood_detection(log_density, labels_to_evaluate,
+                             f'{density_model.compressed_name}:{dim_reduction.compressed_name}',
+                             auroc_labels, auroc_mask, distribution_labels, distribution_label_names, 
+                             plot_proxy_log_scale=True, log_plots=self.log_plots, **kwargs
                             )
-                            if self.log_plots:
-                                fig, ax = plot_histograms(log_density.cpu(), distribution_labels.cpu(), 
-                                    label_names=distribution_label_names,
-                                    kind='vertical', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
-                                log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_all_kinds{suffix}{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
-                                pipeline_log(f'Saved feature density histogram (all kinds) to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_all_kinds{suffix}{self.suffix}.pdf')))
-                                plt.close(fig)
 
-                                fig, ax = plot_histograms(log_density[auroc_mask].cpu(), auroc_labels[auroc_mask].cpu().long(), 
-                                    label_names={0 : 'Out ouf distribution', 1 : 'In distribution'},
-                                    kind='overlapping', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
-                                log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_id_vs_ood{suffix}{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
-                                pipeline_log(f'Saved feature density histogram (id vs ood) to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_id_vs_ood{suffix}{self.suffix}.pdf')))
-                                plt.close(fig)
-
-        log_metrics(kwargs['logs'], aurocs, 'feature_density_auroc')
-        for k, auroc in aurocs.items():
-            kwargs['metrics'][k] = auroc
-        
         return args, kwargs
 
-class FitFeatureDensity(PipelineFeatureDensity):
-    """ Pipeline member that fits a density to the feature space of a model. """
-
-    name = 'FitFeatureDensity'
-
-    def __init__(self, density_type='unspecified', gpus=0, fit_to=[data_constants.TRAIN], fit_to_ground_truth_labels=[data_constants.TRAIN], 
-                    evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', separate_distributions_tolerance=0.0, **kwargs):
-        super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, evaluate_on=evaluate_on, **kwargs)
-        self.density = get_density_model(density_type=density_type, **kwargs)
-        self.separate_distributions_by = separate_distributions_by
-        self.separate_distributions_tolerance = separate_distributions_tolerance
-
-    def __str__(self):
-        return '\n'.join([
-            self.print_name,
-            f'\t Fit to : {self.fit_to}',
-            f'\t Ground truth labels for fitting used : {self.fit_to_ground_truth_labels}',
-            f'\t Evaluate on : {self.evaluate_on}',
-            f'\t Density : {self.density}',
-            f'\t Separate in-distribution from out-of-distribution by : {self.separate_distributions_by}',
-            f'\t Tolerance on impurity of in-distribution and out-of-distribution neighbours {self.separate_distributions_tolerance}',
-        ])
-
-    @torch.no_grad()
-    def __call__(self, *args, **kwargs):
-
-        features, predictions, labels = self._get_features_and_labels_to_fit(**kwargs)
-        self.density.fit(features, predictions)
-        pipeline_log(f'Fitted density of type {self.density.name} to {self.fit_to}')
-
-        features, predictions, labels = self._get_features_and_labels_to_evaluate(**kwargs)
-        log_density = self.density(features.cpu()).cpu()
-        
-        # Log histograms and metrics label-wise
-        y = labels.cpu()
-        for label in torch.unique(y):
-            log_density_label = log_density[y == label] + 1e-20
-            log_histogram(kwargs['logs'], log_density_label.cpu().numpy(), 'feature_log_density', global_step=label, label_suffix=str(label.item()))
-            log_metrics(kwargs['logs'], {
-                f'{self.prefix}mean_feature_log_density' : log_density_label.mean(),
-                f'{self.prefix}std_feature_log_density' : log_density_label.std(),
-                f'{self.prefix}min_feature_log_density' : log_density_label.min(),
-                f'{self.prefix}max_feature_log_density' : log_density_label.max(),
-                f'{self.prefix}median_feature_log_density' : log_density_label.median(),
-            }, 'feature_density', step=label)
-        fig, ax = plot_histograms(log_density.cpu(), y.cpu(), log_scale=False, kind='vertical', x_label='Log-Density', y_label='Class')
-        log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_all_classes{self.suffix}', 'feature_class_density_plots', save_artifact=kwargs['artifact_directory'])
-        pipeline_log(f'Evaluated feature density for entire validation dataset (labels : {torch.unique(y).cpu().tolist()}).')
-        plt.close(fig)
-
-        
-        # Classify vertices according to which distribution they belong to
-        k = len(kwargs['config']['model']['hidden_sizes']) + 1
-        distribution_labels = get_distribution_labels_leave_out_classes(
-            [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
-            k, # Receptive field of each vertex is num-hidden-layers + 1
-            kwargs['config']['data']['train_labels'],
-            mask = True,
-            threshold = self.separate_distributions_tolerance,
-        )
-        auroc_labels, auroc_mask = separate_distributions_leave_out_classes(distribution_labels, self.separate_distributions_by)
-        distribution_label_names = {
-            evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS : f'ood, no id nbs in {k} hops', 
-            evaluation_constants.OOD_CLASS_ID_CLASS_NBS : f'ood, id nbs in {k}-hops',
-            evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS : f'id, no ood nbs in {k}-hops', 
-            evaluation_constants.ID_CLASS_ODD_CLASS_NBS : f'id, ood nbs in {k}-hops'
-        }
-        
-        fig, ax = plot_histograms(log_density.cpu(), distribution_labels.cpu(), 
-            label_names=distribution_label_names,
-            kind='overlapping', kde=True, log_scale=False,  x_label='Log-Density', y_label='Kind')
-        log_figure(kwargs['logs'], fig, f'feature_log_density_histograms_id_vs_ood{self.suffix}', 'feature_density_plots', save_artifact=kwargs['artifact_directory'])
-        pipeline_log(f'Saved feature density histogram to ' + str(osp.join(kwargs['artifact_directory'], f'feature_log_density_histograms_id_vs_ood_{self.suffix}.pdf')))
-        plt.close(fig)
-
-        # Calculate area under the ROC for separating in-distribution (label 1) from out of distribution (label 0)
-        roc_auc = roc_auc_score(auroc_labels[auroc_mask].cpu().long().numpy(), log_density[auroc_mask].cpu().numpy())
-        kwargs['metrics'][f'auroc{self.suffix}'] = roc_auc
-        log_metrics(kwargs['logs'], {f'auroc{self.suffix}' : roc_auc}, 'feature_density_plots')
-        
-        return args, kwargs
-
-class FitFeatureSpacePCAIDvsOOD(PipelineMember):
+class FitFeatureSpacePCAIDvsOOD(OODSeparation):
     """ Fits a 2d PCA to the feature space and separates id and ood data. """
 
     name = 'FitFeatureSpacePCAIDvsOOD'
 
-    def __init__(self, gpus=0, fit_to=['train'], evaluate_on=['val'], **kwargs):
+    def __init__(self, gpus=0, fit_to=[data_constants.TRAIN], **kwargs):
             super().__init__(**kwargs)
             self.gpus = gpus
             self.fit_to = fit_to
-            self.evaluate_on = evaluate_on
 
-    def __str__(self):
-        return '\n'.join([
-            self.print_name,
-            f'\t Fit to : {self.fit_to}',
-            f'\t Evaluate on : {self.evaluate_on}',
-        ])
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Fit to' : self.fit_to,
+        }
 
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
@@ -491,8 +480,8 @@ class FitFeatureSpacePCAIDvsOOD(PipelineMember):
         pipeline_log(f'Logged 2d pca fitted to {self.fit_to}, evaluated on {self.evaluate_on} by label')
         plt.close(fig)
 
-        labels_id_ood = split_labels_into_id_and_ood(labels.cpu(), set(kwargs['config']['data']['train_labels']), id_label=_ID_LABEL, ood_label=_OOD_LABEL)
-        fig, ax = plot_2d_features(torch.tensor(transformed), labels_id_ood)
+        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
+        fig, ax = plot_2d_features(torch.tensor(transformed), distribution_labels, distribution_label_names)
         log_figure(kwargs['logs'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_by_id_vs_ood', 'feature_space_pca_id_vs_ood', save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Logged 2d pca fitted to {self.fit_to}, evaluated on {self.evaluate_on} by in-distribution vs out-of-distribution')
         plt.close(fig)
@@ -510,13 +499,14 @@ class FitFeatureSpacePCA(PipelineMember):
         self.fit_to = fit_to
         self.evaluate_on = evaluate_on
         self.num_components = num_components
-    def __str__(self):
-        return '\n'.join([
-            self.print_name,
-            f'\t Fit to : {self.fit_to}',
-            f'\t Evaluate on : {self.evaluate_on}',
-            f'\t Number of components : {self.num_components}',
-        ])
+
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Fit to' : self.fit_to,
+            'Evaluate on' : self.evaluate_on,
+            'Number of components' : self.num_components,
+        }
 
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
@@ -561,11 +551,11 @@ class LogFeatures(PipelineMember):
         self.gpus = gpus
         self.evaluate_on = evaluate_on
 
-    def __str__(self):
-        return '\n'.join([
-            self.name,
-            f'\t Evaluate on : {self.evaluate_on}',
-        ])
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Evaluate on' : self.evaluate_on,
+        }
     
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
@@ -586,11 +576,11 @@ class PrintDatasetSummary(PipelineMember):
         super().__init__(**kwargs)
         self.evaluate_on = evaluate_on
 
-    def __str__(self):
-        return '\n'.join([
-            self.print_name,
-            f'\t Evaluate on : {self.evaluate_on}',
-        ])
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Evaluate on' : self.evaluate_on,
+        }
 
     def __call__(self, *args, **kwargs):
         for name in self.evaluate_on:
@@ -605,18 +595,18 @@ class LogInductiveFeatureShift(PipelineMember):
 
     name = 'LogInductiveFeatureShift'
 
-    def __init__(self, gpus=0, data_before='train', data_after='val', **kwargs):
+    def __init__(self, gpus=0, data_before=data_constants.TRAIN, data_after=data_constants.VAL, **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.data_before = data_before
         self.data_after = data_after
 
-    def __str__(self):
-        return '\n'.join([
-            self.print_name,
-            f'\t Evaluate before : {self.data_before}',
-            f'\t Evaluate train : {self.data_after}',
-        ])
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Dataset before shift' : {self.data_before},
+            'Dataset after shift' : {self.data_after},
+        }
     
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
@@ -658,18 +648,18 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
 
     name = 'LogInductiveSoftmaxEntropyShift'
 
-    def __init__(self, gpus=0, data_before='train', data_after='val', **kwargs):
+    def __init__(self, gpus=0, data_before=data_constants.TRAIN, data_after=data_constants.VAL, **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.data_before = data_before
         self.data_after = data_after
 
-    def __str__(self):
-        return '\n'.join([
-            self.print_name,
-            f'\t Evaluate before : {self.data_before}',
-            f'\t Evaluate train : {self.data_after}',
-        ])
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Dataset before shift' : {self.data_before},
+            'Dataset after shift' : {self.data_after},
+        }
     
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
@@ -717,13 +707,13 @@ class SubsetDataByLabel(PipelineMember):
         self.subset_name = subset_name.lower()
         self.labels = labels
 
-    def __str__(self):
-        return '\n'.join([
-            self.print_name,
-            f'\t Based on : {self.base_data}',
-            f'\t Subset name : {self.subset_name}',
-            f'\t Labels : {self.labels}',
-        ])
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Based on' : self.base_data,
+            'Subset name' : self.subset_name,
+            'Labels' : self.labels,
+        }
 
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
@@ -739,40 +729,8 @@ class SubsetDataByLabel(PipelineMember):
         kwargs['data_loaders'][self.subset_name] = DataLoader(data, batch_size=1, shuffle=False)
         return args, kwargs
 
-class RemoveEdges(PipelineMember):
-    """ Creates a new data loader that holds a subset of some dataset with only certain labels. """
-
-    name = 'RemoveEdges'
-
-    def __init__(self, base_data=data_constants.VAL, dataset_name='unnamed-data', **kwargs):
-        super().__init__(**kwargs)
-        self.base_data = base_data
-        self.dataset_name = dataset_name.lower()
-
-    def __str__(self):
-        return '\n'.join([
-            self.print_name,
-            f'\t Based on : {self.base_data}',
-            f'\t Dataset name : {self.dataset_name}',
-        ])
-
-    @torch.no_grad()
-    def __call__(self, *args, **kwargs):
-        base_loader = get_data_loader(self.base_data, kwargs['data_loaders'])
-        if len(base_loader) != 1:
-            raise RuntimeError(f'Subsetting by label is only supported for single graph data.')
-        data = base_loader.dataset[0]
-        dataset = SingleGraphDataset(data.x.numpy(), torch.tensor([]).view(2, 0).long().numpy(), 
-            data.y.numpy(), data.vertex_to_idx, data.label_to_idx, data.mask.numpy())
-        kwargs['data_loaders'][self.dataset_name] = DataLoader(dataset, batch_size=1, shuffle=False)
-
-        return args, kwargs
-
-
 pipeline_members = [
     EvaluateEmpircalLowerLipschitzBounds,
-    FitFeatureDensity, # Deprecated: Use the Grid instead
-    # EvaluateFeatureDensity,  # Merged into : FitFeatureDensity (why would you want to fit and not evaluate anyway??)
     LogFeatures,
     FitFeatureSpacePCA,
     FitFeatureSpacePCAIDvsOOD,
@@ -782,7 +740,6 @@ pipeline_members = [
     EvaluateSoftmaxEntropy,
     FitFeatureDensityGrid,
     SubsetDataByLabel,
-    RemoveEdges,
 ]
 
 

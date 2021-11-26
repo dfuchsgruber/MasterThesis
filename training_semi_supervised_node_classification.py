@@ -82,7 +82,7 @@ class ExperimentWrapper:
     @ex.capture(prefix="model")
     def init_model(self, model_type: str, hidden_sizes: list, weight_scale: float, num_initializations: int, use_spectral_norm: bool, num_heads=-1, 
         diffusion_iterations=5, teleportation_probability=0.1, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01, normalize=True,
-        residual=False, freeze_residual_projection=False):
+        residual=False, freeze_residual_projection=False, num_ensemble_members=1):
         self.model_config = {
             'hidden_sizes' : hidden_sizes,
             'weight_scale' : weight_scale,
@@ -97,6 +97,7 @@ class ExperimentWrapper:
             'normalize' : normalize,
             'residual' : residual,
             'freeze_residual_projection' : freeze_residual_projection,
+            'num_ensemble_members' : num_ensemble_members,
         }
         self.model_seeds = model_seeds(num_initializations, model_name=model_type)
 
@@ -155,54 +156,57 @@ class ExperimentWrapper:
             # Re-initializing the model multiple times to average over results
             for reinitialization, seed in enumerate(self.model_seeds):
                 pl.seed_everything(seed)
+                ensembles = []
+                for ensemble_idx in range(self.model_config.get('num_ensemble_members', 1)):
 
-                model = SemiSupervisedNodeClassification(
-                    self.model_config, 
-                    data_get_num_attributes(data_dict[data_constants.TRAIN][0]), 
-                    data_get_num_classes(data_dict[data_constants.TRAIN][0]), 
-                    learning_rate=learning_rate
-                )
-                # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
+                    model = SemiSupervisedNodeClassification(
+                        self.model_config, 
+                        data_get_num_attributes(data_dict[data_constants.TRAIN][0]), 
+                        data_get_num_classes(data_dict[data_constants.TRAIN][0]), 
+                        learning_rate=learning_rate
+                    )
+                    # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
 
-                artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), f'{run_name}', f'{split_idx}-{reinitialization}')
-                os.makedirs(artifact_dir, exist_ok=True)
+                    artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), f'{run_name}', f'{split_idx}-{reinitialization}-{ensemble_idx}')
+                    os.makedirs(artifact_dir, exist_ok=True)
 
-                checkpoint_callback = ModelCheckpoint(
-                    artifact_dir,
-                    monitor=early_stopping['monitor'],
-                    mode=early_stopping['mode'],
-                    save_top_k=1,
-                )
-                early_stopping_callback = EarlyStopping(
-                    monitor=early_stopping['monitor'],
-                    mode=early_stopping['mode'],
-                    patience=early_stopping['patience'],
-                    min_delta=early_stopping['min_delta'],
-                )
+                    checkpoint_callback = ModelCheckpoint(
+                        artifact_dir,
+                        monitor=early_stopping['monitor'],
+                        mode=early_stopping['mode'],
+                        save_top_k=1,
+                    )
+                    early_stopping_callback = EarlyStopping(
+                        monitor=early_stopping['monitor'],
+                        mode=early_stopping['mode'],
+                        patience=early_stopping['patience'],
+                        min_delta=early_stopping['min_delta'],
+                    )
 
-                # Model training
-                with context_supress_stdout(supress=suppress_stdout), warnings.catch_warnings():
-                    warnings.filterwarnings("ignore")
-                    trainer = pl.Trainer(max_epochs=max_epochs, deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ],
-                                        logger=logger,
-                                        progress_bar_refresh_rate=0,
-                                        gpus=gpus,
-                                        )
-                    trainer.fit(model, data_loaders[data_constants.TRAIN], data_loaders[data_constants.VAL_REDUCED])
-                    val_metrics = {
-                        name : trainer.validate(None, data_loaders[name], ckpt_path='best')
-                        for name in (data_constants.VAL_TRAIN_LABELS, data_constants.VAL_REDUCED)
-                    }
-                    for name, metrics in val_metrics.items():
-                        with open(osp.join(artifact_dir, f'metrics-{name}.json'), 'w+') as f:
-                            json.dump(val_metrics, f)
-                        for val_metric in metrics:
-                            for metric, value in val_metric.items():
-                                result[f'{metric}-{name}'].append(value)
+                    # Model training
+                    with context_supress_stdout(supress=suppress_stdout), warnings.catch_warnings():
+                        warnings.filterwarnings("ignore")
+                        trainer = pl.Trainer(max_epochs=max_epochs, deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ],
+                                            logger=logger,
+                                            progress_bar_refresh_rate=0,
+                                            gpus=gpus,
+                                            )
+                        trainer.fit(model, data_loaders[data_constants.TRAIN], data_loaders[data_constants.VAL_REDUCED])
+                        val_metrics = {
+                            name : trainer.validate(None, data_loaders[name], ckpt_path='best')
+                            for name in (data_constants.VAL_TRAIN_LABELS, data_constants.VAL_REDUCED)
+                        }
+                        for name, metrics in val_metrics.items():
+                            with open(osp.join(artifact_dir, f'metrics-{name}.json'), 'w+') as f:
+                                json.dump(val_metrics, f)
+                            for val_metric in metrics:
+                                for metric, value in val_metric.items():
+                                    result[f'{metric}-{name}-{ensemble_idx}'].append(value)
 
-                # Manually load best model
-                model = model.load_from_checkpoint(checkpoint_callback.best_model_path)
-                model.eval()
+                    # Manually load best model
+                    model = model.load_from_checkpoint(checkpoint_callback.best_model_path)
+                    model.eval()
+                    ensembles.append(model)
 
                 # Build evaluation pipeline
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus, 
@@ -228,7 +232,8 @@ class ExperimentWrapper:
                     split_idx = split_idx,
                     initialization_idx = reinitialization,
                     logs=logs,
-                    metrics=pipeline_metrics, 
+                    metrics=pipeline_metrics,
+                    ensembles=ensembles,
                 )
                 all_logs.append(logs)
                 for metric, value in pipeline_metrics.items():

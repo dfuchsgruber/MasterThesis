@@ -98,7 +98,7 @@ fixed:
     - type: FitFeatureDensityGrid
       fit_to: ['train']
       fit_to_ground_truth_labels: ['train']
-      evaluate_on: ['val-ai']
+      evaluate_on: ['val']
       density_types:
         GaussianPerClass:
           diagonal_covariance: [false]
@@ -116,7 +116,7 @@ fixed:
       name: no-edges
       fit_to: ['train']
       fit_to_ground_truth_labels: ['train']
-      evaluate_on: ['val-ai']
+      evaluate_on: ['val']
       density_types:
         GaussianPerClass:
           diagonal_covariance: [false]

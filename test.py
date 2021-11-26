@@ -74,9 +74,9 @@ ex.init_dataset(dataset='cora_full', num_dataset_splits=num_splits, train_portio
 
 ex.init_model(model_type='gcn', hidden_sizes=[64,32], num_initializations=num_inits, weight_scale=0.9, 
     use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
-    residual=True, freeze_residual_projection=False)
+    residual=True, freeze_residual_projection=False, num_ensemble_members=1,)
 ex.init_run(name='model_no_remove_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
-    'model:model_type', 'model:hidden_sizes', 'model:weight_scale'
+    'model:model_type', 'model:hidden_sizes', 'model:weight_scale',
 ])
 ex.init_evaluation(
     print_pipeline=True,
@@ -123,6 +123,12 @@ ex.init_evaluation(
                         'Operating_Systems/Fault_Tolerance',
                     ]
         },
+
+    {
+        'type' : 'FitFeatureSpacePCAIDvsOOD',
+        'fit_to' : ['train'],
+    },
+
         # {
         #     'type' : 'RemoveEdges',
         #     'base_data' : 'val-subset-ai',
@@ -351,7 +357,7 @@ ex.init_evaluation(
     ignore_exceptions=False,
 )
 
-results_path = (ex.train(max_epochs=1, learning_rate=0.001, early_stopping={
+results_path = (ex.train(max_epochs=1000, learning_rate=0.001, early_stopping={
     'monitor' : 'val_loss',
     'mode' : 'min',
     'patience' : 50,
