@@ -141,8 +141,6 @@ def load_data_from_configuration_uniform_split(config):
         train_labels_remove_other=config.get('train_labels_remove_other', False),
         val_labels = config.get('val_labels', 'all'),
         val_labels_remove_other = config['val_labels_remove_other'],
-        compress_train_labels=config.get('train_labels_compress', True),
-        compress_val_labels=config.get('val_labels_compress', True),
         base_labels = config.get('base_labels', 'all'),
         )
 

@@ -18,7 +18,7 @@ from evaluation.features import inductive_feature_shift
 from torch_geometric.data import Dataset, Data
 from torch_geometric.loader import DataLoader
 from sklearn.decomposition import PCA
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve, auc
 import os.path as osp
 from data.util import label_binarize, data_get_summary, labels_in_dataset, vertex_intersection, labels_to_idx, graph_select_labels
 from data.base import SingleGraphDataset
@@ -33,6 +33,7 @@ from torch_geometric.transforms import Compose
 
 _ID_LABEL, _OOD_LABEL = 1, 0
 FEATURE_SHIFT_EPS = 1e-10 # Zero feature shift is bad in log space
+ENTROPY_EPS = 1e-20 # For entropy of zero classes
 
 class PipelineMember:
     """ Superclass for all pipeline members. """
@@ -264,7 +265,7 @@ class OODDetection(OODSeparation):
                     f'{self.prefix}max_{proxy_name}' : proxy_label.max(),
                     f'{self.prefix}median_{proxy_name}' : proxy_label.median(),
                 }, f'{proxy_name}', step=label)
-            fig, ax = plot_histograms(proxy.cpu(), y.cpu(), log_scale=plot_proxy_log_scale, kind='vertical', x_label='proxy', y_label='Class')
+            fig, ax = plot_histograms(proxy.cpu(), y.cpu(), log_scale=plot_proxy_log_scale, kind='vertical', x_label=f'{proxy}', y_label='Class')
             log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_all_classes{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Evaluated {proxy_name}.')
             plt.close(fig)
@@ -279,7 +280,7 @@ class OODDetection(OODSeparation):
 
             fig, ax = plot_histograms(proxy[auroc_mask].cpu(), auroc_labels[auroc_mask].cpu().long(), 
                 label_names={0 : 'Out ouf distribution', 1 : 'In distribution'},
-                kind='overlapping', kde=True, log_scale=plot_proxy_log_scale,  x_label='Softmax-proxy', y_label='Kind')
+                kind='overlapping', kde=True, log_scale=plot_proxy_log_scale,  x_label=f'{proxy}', y_label='Kind')
             log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_id_vs_ood{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Saved {proxy_name} histogram (id vs ood) to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_histograms_id_vs_ood{self.suffix}.pdf')))
             plt.close(fig)
@@ -288,6 +289,17 @@ class OODDetection(OODSeparation):
         roc_auc = roc_auc_score(auroc_labels[auroc_mask].cpu().long().numpy(), proxy[auroc_mask].cpu().numpy()) # higher proxy -> higher uncertainty
         kwargs['metrics'][f'auroc_{proxy_name}{self.suffix}'] = roc_auc
         log_metrics(kwargs['logs'], {f'auroc_{proxy_name}{self.suffix}' : roc_auc}, f'{proxy_name}_plots')
+
+        # Calculate the area under the PR curve
+        precision, recall, _ = precision_recall_curve(auroc_labels[auroc_mask].cpu().long().numpy(), proxy[auroc_mask].cpu().numpy())
+        aucpr = auc(recall, precision)
+        kwargs['metrics'][f'aucpr_{proxy_name}{self.suffix}'] = aucpr
+        log_metrics(kwargs['logs'], {f'aucpr_{proxy_name}{self.suffix}' : aucpr}, f'{proxy_name}_plots')
+
+        # # Calculate average precision score
+        # apr = average_precision_score(auroc_labels[auroc_mask].cpu().long().numpy(), proxy[auroc_mask].cpu().numpy()) # higher proxy -> higher uncertainty
+        # kwargs['metrics'][f'apr_{proxy_name}{self.suffix}'] = apr
+        # log_metrics(kwargs['logs'], {f'apr_{proxy_name}{self.suffix}' : apr}, f'{proxy_name}_plots')
         
 class EvaluateLogitEnergy(OODDetection):
     """ Pipeline member to evaluate the Logit Energy curves of the model for in-distribution and out-of-distribution data. """
@@ -295,7 +307,7 @@ class EvaluateLogitEnergy(OODDetection):
     name = 'EvaluateLogitEnergy'
 
     def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', 
-                separate_distributions_tolerance=0.0, model_kwargs={}, log_plots=True, **kwargs):
+                separate_distributions_tolerance=0.0, model_kwargs={}, log_plots=True, temperature=1.0, **kwargs):
         super().__init__(separate_distributions_by=separate_distributions_by, 
                             separate_distributions_tolerance=separate_distributions_tolerance,
                             evaluate_on=evaluate_on,
@@ -303,23 +315,27 @@ class EvaluateLogitEnergy(OODDetection):
         self.gpus = gpus
         self.model_kwargs = model_kwargs
         self.log_plots = log_plots
+        self.temperature = temperature
 
     @property
     def configuration(self):
         return super().configuration | {
             'Kwargs for model' : self.model_kwargs,
             'Log plots' : self.log_plots,
+            'Temperature' : self.temperature,
         }
 
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
         data_loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
-        energy, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
-                make_callback_get_softmax_energy(mask=True),
+        logits, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
+                make_callback_get_logits(mask=True, ensemble_average=False),
                 make_callback_get_ground_truth(mask=True),
             ], gpus=self.gpus, model_kwargs=self.model_kwargs)
-        energy, labels = torch.cat(energy), torch.cat(labels)
+        logits, labels = torch.cat(logits), torch.cat(labels) # Logits are of shape : N, n_classes, n_ensemble
+        energy = -self.temperature * torch.logsumexp(logits / self.temperature, dim=1) # N, n_ensemble
+        energy = energy.mean(-1) # Average over ensemble members
 
         auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
         self.ood_detection(-energy, labels, 'logit-energy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
@@ -352,14 +368,25 @@ class EvaluateSoftmaxEntropy(OODDetection):
     def __call__(self, *args, **kwargs):
 
         data_loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
-        entropy, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
-                make_callback_get_softmax_entropy(mask=True),
+        scores, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
+                make_callback_get_predictions(mask=True, ensemble_average=False), # Average the prediction scores over the ensemble
                 make_callback_get_ground_truth(mask=True),
             ], gpus=self.gpus, model_kwargs=self.model_kwargs)
-        entropy, labels = torch.cat(entropy), torch.cat(labels)
+        scores, labels = torch.cat(scores), torch.cat(labels) # Scores are of shape : N, n_classes, n_ensemble
+
+        # Aleatoric uncertainty is the expected entropy
+        expected_entropy = -(scores * torch.log2(scores + ENTROPY_EPS)).sum(1)
+        expected_entropy = expected_entropy.mean(-1) # Get the expectation over all ensemble members
+
+        # Epistemic uncertainty is the information gain, i.e. predictive uncertainty - aleatoric uncertainty
+        avg_scores = scores.mean(-1) # Expectations of predictions in all ensemble members
+        predictive_entropy = -(avg_scores * torch.log2(avg_scores + ENTROPY_EPS)).sum(1)
 
         auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
-        self.ood_detection(-entropy, labels, 'softmax-entropy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+        self.ood_detection(-predictive_entropy, labels, 'total-predictive-entropy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+        if scores.size()[-1] > 1: # Some ensembling is used (ensembles, dropout, etc.), so epistemic and aleatoric estimates can be disentangled
+            self.ood_detection(-expected_entropy, labels, 'expected-softmax-entropy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+            self.ood_detection(-(predictive_entropy - expected_entropy), labels, 'mutual-information', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
         
         return args, kwargs
 

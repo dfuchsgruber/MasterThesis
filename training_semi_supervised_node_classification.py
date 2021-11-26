@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from util import format_name
 from util import suppress_stdout as context_supress_stdout
 from model.util import module_numel
-from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
+from model.semi_supervised_node_classification import SemiSupervisedNodeClassification, Ensemble
 from data.gust_dataset import GustDataset
 from data.util import data_get_num_attributes, data_get_num_classes
 from data.construct import load_data_from_configuration
@@ -56,8 +56,8 @@ class ExperimentWrapper:
     # With the prefix option we can "filter" the configuration for the sub-dictionary under "data".
     @ex.capture(prefix="data")
     def init_dataset(self, dataset, num_dataset_splits, train_portion, val_portion, test_portion, test_portion_fixed,
-                        train_labels='all', train_labels_remove_other=False, train_labels_compress=True,
-                        val_labels='all', val_labels_remove_other=False, val_labels_compress=True,
+                        train_labels='all', train_labels_remove_other=False,
+                        val_labels='all', val_labels_remove_other=False,
                         split_type='stratified', base_labels='all',
                         ):
         self.data_config = {
@@ -69,10 +69,10 @@ class ExperimentWrapper:
             'test_portion_fixed' : test_portion_fixed,
             'train_labels' : train_labels,
             'train_labels_remove_other' : train_labels_remove_other,
-            'train_labels_compress' : train_labels_compress,
+            # 'train_labels_compress' : train_labels_compress, # Train labels should always be compressed
             'val_labels' : val_labels,
             'val_labels_remove_other' : val_labels_remove_other,
-            'val_labels_compress' : val_labels_compress,
+            # 'val_labels_compress' : val_labels_compress, # Val labels should never be compressed
             'split_type' : split_type,
             'base_labels' : base_labels,
         }
@@ -82,7 +82,7 @@ class ExperimentWrapper:
     @ex.capture(prefix="model")
     def init_model(self, model_type: str, hidden_sizes: list, weight_scale: float, num_initializations: int, use_spectral_norm: bool, num_heads=-1, 
         diffusion_iterations=5, teleportation_probability=0.1, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01, normalize=True,
-        residual=False, freeze_residual_projection=False, num_ensemble_members=1):
+        residual=False, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1, dropout=0.0, drop_edge=0.0,):
         self.model_config = {
             'hidden_sizes' : hidden_sizes,
             'weight_scale' : weight_scale,
@@ -98,6 +98,9 @@ class ExperimentWrapper:
             'residual' : residual,
             'freeze_residual_projection' : freeze_residual_projection,
             'num_ensemble_members' : num_ensemble_members,
+            'num_samples' : num_samples,
+            'dropout' : dropout,
+            'drop_edge' : drop_edge,
         }
         self.model_seeds = model_seeds(num_initializations, model_name=model_type)
 
@@ -207,6 +210,8 @@ class ExperimentWrapper:
                     model = model.load_from_checkpoint(checkpoint_callback.best_model_path)
                     model.eval()
                     ensembles.append(model)
+
+                model = Ensemble(ensembles, self.model_config.get('num_samples', 1)) # In case of non-ensemble training, an ensemble of 1 model behaves like 1 model
 
                 # Build evaluation pipeline
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus, 

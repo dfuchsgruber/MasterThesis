@@ -34,7 +34,7 @@ num_splits, num_inits = 1, 1
 
 ex = ExperimentWrapper(init_all=False, collection_name='model-test', run_id='gcn_64_32_residual')
 ex.init_dataset(dataset='cora_ml', num_dataset_splits=num_splits, train_portion=20, val_portion=20, test_portion=0.6, test_portion_fixed=0.2,
-                    train_labels_remove_other=False, val_labels_remove_other=False,
+                    train_labels_remove_other=True, val_labels_remove_other=True,
                     split_type='uniform',
                     train_labels = [
                         'Artificial_Intelligence/Machine_Learning/Case-Based', 
@@ -45,7 +45,16 @@ ex.init_dataset(dataset='cora_ml', num_dataset_splits=num_splits, train_portion=
                         'Artificial_Intelligence/Machine_Learning/Rule_Learning',
                         # 'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
                     ], 
-                    val_labels = 'all',
+                    # val_labels = 'all',
+                    val_labels = [
+                        'Artificial_Intelligence/Machine_Learning/Case-Based', 
+                        'Artificial_Intelligence/Machine_Learning/Theory', 
+                        # 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 
+                        #'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 
+                        #'Artificial_Intelligence/Machine_Learning/Neural_Networks',
+                        #'Artificial_Intelligence/Machine_Learning/Rule_Learning',
+                        'Artificial_Intelligence/Machine_Learning/Reinforcement_Learning',
+                    ], 
                     base_labels = 'all',
 )
 # ex.init_dataset(dataset='cora_full', num_dataset_splits=num_splits, train_portion=20, val_portion=20, test_portion=0.6, test_portion_fixed=0.2,
@@ -89,7 +98,9 @@ ex.init_dataset(dataset='cora_ml', num_dataset_splits=num_splits, train_portion=
 
 ex.init_model(model_type='gcn', hidden_sizes=[64,32], num_initializations=num_inits, weight_scale=0.9, 
     use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
-    residual=True, freeze_residual_projection=False, num_ensemble_members=1,)
+    residual=True, freeze_residual_projection=False, num_ensemble_members=2, num_samples=2,
+    dropout=0.5, drop_edge=0.5,
+    )
 ex.init_run(name='model_no_remove_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
     'model:model_type', 'model:hidden_sizes', 'model:weight_scale',
 ])
@@ -219,10 +230,10 @@ ex.init_evaluation(
     #         'dimensionality_reduction:per_class',
     #     ]
     # },
-    # {
-    #     'type' : 'PrintDatasetSummary',
-    #     'evaluate_on' : ['train', 'val', 'val-reduced', 'val-train-labels', 'test', 'val-subset-ai']
-    # },
+    {
+        'type' : 'PrintDatasetSummary',
+        'evaluate_on' : ['train', 'val', 'val-reduced', 'val-train-labels', 'test', 'test-reduced', 'test-train-labels']
+    },
     # {
     #     'type' : 'FitFeatureDensity',
     #     'density_type' : 'GaussianPerClass',
@@ -379,7 +390,7 @@ ex.init_evaluation(
     ignore_exceptions=False,
 )
 
-results_path = (ex.train(max_epochs=1000, learning_rate=0.001, early_stopping={
+results_path = (ex.train(max_epochs=1, learning_rate=0.001, early_stopping={
     'monitor' : 'val_loss',
     'mode' : 'min',
     'patience' : 50,

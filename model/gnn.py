@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch
 import torch_geometric
 import torch.nn.functional as F
+from torch_geometric.utils import dropout_adj
 from model.spectral_norm import spectral_norm
 import pytorch_lightning as pl
 from metrics import accuracy
@@ -81,10 +82,13 @@ class GCN(nn.Module):
 
     def __init__(self, input_dim, num_classes, hidden_dims, activation=F.leaky_relu, 
                     use_bias=True, use_spectral_norm=True, weight_scale=1.0, cached=True,
-                    residual=False, freeze_residual_projection=False, orthogonalize_residual_projection=False):
+                    residual=False, freeze_residual_projection=False, orthogonalize_residual_projection=False,
+                    dropout=0.0, drop_edge=0.0):
         super().__init__()
         self.activation = activation
         self.residual = residual
+        self.dropout = dropout
+        self.drop_edge = drop_edge
 
         self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, self._make_conv_with_spectral_norm,
                                                 cached=cached, bias=use_bias, use_spectral_norm=use_spectral_norm,
@@ -99,13 +103,18 @@ class GCN(nn.Module):
             conv.lin = spectral_norm(conv.lin, name='weight', rescaling=weight_scale)
         return conv
 
-    def forward(self, data):
+    def forward(self, data, dropout=True):
         x, edge_index = data.x, data.edge_index
+        if self.drop_edge > 0:
+            edge_index, _ = dropout_adj(edge_index, p=self.drop_edge, 
+                                            force_undirected=False, training=dropout)
         embeddings = []
         for num, layer in enumerate(self.convs):
             x = layer(x, edge_index)
             if num < len(self.convs) - 1:
                 x = self.activation(x)
+                if self.dropout > 0:
+                    x = F.dropout(x, p=self.dropout, inplace=False, training=dropout)
             embeddings.append(x)
         return embeddings
 
@@ -263,7 +272,9 @@ def make_model_by_configuration(configuration, input_dim, output_dim):
         return GCN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
             use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
             cached=configuration.get('cached', False), residual=configuration.get('residual', False),
-            freeze_residual_projection=configuration.get('freeze_residual_projection', False))
+            freeze_residual_projection=configuration.get('freeze_residual_projection', False),
+            drop_edge=configuration.get('drop_edge'), dropout = configuration.get('dropout'),
+            )
     # elif configuration['model_type'] == 'gat':
     #     return GAT(input_dim, output_dim, configuration['hidden_sizes'], configuration['num_heads'], make_activation_by_configuration(configuration), 
     #         use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])

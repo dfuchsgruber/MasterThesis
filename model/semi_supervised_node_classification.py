@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 from metrics import accuracy
 from model.gnn import make_model_by_configuration
+from model.prediction import Prediction
 
 class SemiSupervisedNodeClassification(pl.LightningModule):
     """ Wrapper for networks that perform semi supervised node classification. """
@@ -17,7 +18,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
     def forward(self, batch, *args, remove_edges=False, **kwargs):
         if remove_edges:
             batch.edge_index = torch.tensor([]).view(2, 0).long().to(batch.edge_index.device)
-        return self.backbone(batch, *args, **kwargs)
+        return Prediction(self.backbone(batch, *args, **kwargs))
 
     def configure_optimizers(self):  
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
@@ -27,14 +28,47 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         return F.cross_entropy(logits, labels)
 
     def training_step(self, batch, batch_idx):
-        logits = self(batch)[-1]
+        logits = self(batch).get_logits(average=True)
         loss = self.cross_entropy_loss(logits[batch.mask], batch.y[batch.mask])
         self.log('train_loss', loss)
         self.log('train_accuracy', accuracy(logits[batch.mask], batch.y[batch.mask]))
         return loss
   
     def validation_step(self, batch, batch_idx):
-        logits = self(batch)[-1]
+        logits = self(batch).get_logits(average=True)
         loss = self.cross_entropy_loss(logits[batch.mask], batch.y[batch.mask])
         self.log('val_loss', loss)
         self.log('val_accuracy', accuracy(logits[batch.mask], batch.y[batch.mask]))
+
+
+class Ensemble(pl.LightningModule):
+    """ Wrapper class for a model ensemble.
+    
+    Parameteres:
+    ------------
+    members : list
+        List of torch modules that output predictions.
+    num_samples : int
+        How many samples to draw from each member.
+    """
+
+    def __init__(self, members, num_samples=1):
+        super().__init__()
+        self.num_samples = num_samples
+        self.members = nn.ModuleList(list(members))
+
+    def forward(self, *args, **kwargs):
+        return Prediction.aggregate([Prediction.aggregate(member(*args, **kwargs) for member in self.members) for _ in range(self.num_samples)])
+
+    def configure_optimizers(self):  
+        raise RuntimeError(f'Ensemble members should be trained by themselves.')
+
+    def training_step(self, batch, batch_idx):
+        raise RuntimeError(f'Ensemble members should be trained by themselves.')
+  
+    def validation_step(self, batch, batch_idx):
+        logits = self(batch).get_logits(average=True)
+        loss = F.cross_entropy(logits[batch.mask], batch.y[batch.mask])
+        self.log('val_loss', loss)
+        self.log('val_accuracy', accuracy(logits[batch.mask], batch.y[batch.mask]))
+

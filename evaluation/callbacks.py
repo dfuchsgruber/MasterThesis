@@ -3,19 +3,36 @@ import torch.nn.functional as F
 import numpy as np
 from util import get_k_hop_neighbourhood
 
-def make_callback_get_softmax_energy(cpu=True, mask=True, layer=-1, temperature=1.0):
-    """ Calculates the softmax entropy for each vertex's predictions. """
+def make_callback_get_features(layer=-2, mask=True, cpu=True, ensemble_average=True):
+    """ Creates callback that gets features from the second to last layer. """
     def callback(data, output):
-        logits = make_callback_get_predictions(layer=layer, softmax=False, mask=mask, cpu=cpu)(data, output)
-        return -temperature * torch.logsumexp(logits / temperature, dim=-1)
+        result = output.get_features(layer, average=ensemble_average) # N, d, [ensemble_size]
+        if mask:
+            result = result[data.mask]
+        if cpu:
+            result = result.cpu()
+        return result
     return callback
 
-def make_callback_get_softmax_entropy(cpu=True, mask=True, layer=-1):
-    """ Calculates the softmax entropy for each vertex's predictions. """
+def make_callback_get_predictions(layer=-1, mask=True, cpu=True, ensemble_average=True):
+    """ Creates a callback that gets predicted scores from a model ensemble. """
     def callback(data, output):
-        probs = make_callback_get_predictions(layer=layer, softmax=True, mask=mask, cpu=cpu)(data, output)
-        probs[probs > 0] *= torch.log(probs[probs > 0])
-        return -probs.sum(axis=1)
+        logits = make_callback_get_logits(layer=layer, mask=mask, cpu=cpu, ensemble_average=False)(data, output) # N, classes, ensemble
+        scores = F.softmax(logits, dim=1)
+        if ensemble_average:
+            scores = scores.mean(dim=-1)
+        return scores
+    return callback
+
+def make_callback_get_logits(layer=-1, mask=True, cpu=True, ensemble_average=False):
+    """ Creates a callback that gets logits from a model ensemble. """
+    def callback(data, output):
+        pred = output.get_logits(average=ensemble_average)
+        if mask:
+            pred = pred[data.mask]
+        if cpu:
+            pred = pred.cpu()
+        return pred
     return callback
 
 def make_callback_get_data(cpu=True):
@@ -24,30 +41,6 @@ def make_callback_get_data(cpu=True):
         if cpu:
             data = data.cpu()
         return data
-    return callback
-
-def make_callback_get_features(layer=-2, mask=True, cpu=True):
-    """ Creates callback that gets features from the second to last layer. """
-    def callback(data, output):
-        result = output[layer]
-        if mask:
-            result = result[data.mask]
-        if cpu:
-            result = result.cpu()
-        return result
-    return callback
-
-def make_callback_get_predictions(layer=-1, softmax=True, mask=True, cpu=True):
-    """ Creates a callback that gets predictions from a model layer. """
-    def callback(data, output):
-        pred = output[layer]
-        if softmax:
-            pred = F.softmax(pred, 1)
-        if mask:
-            pred = pred[data.mask]
-        if cpu:
-            pred = pred.cpu()
-        return pred
     return callback
 
 def make_callback_get_ground_truth(mask=True, cpu=True):
@@ -67,7 +60,7 @@ def make_callback_is_ground_truth_in_labels(labels, mask=True, cpu=True):
     def callback(data, output):
         is_train_label = torch.zeros_like(data.y).bool()
         for label in labels:
-            is_train_label[data.y == data.label_to_idx[label]] = True
+            is_train_label[data.y == data.label_to_idx.get(label, -1)] = True
         if mask:
             is_train_label = is_train_label[data.mask]
         if cpu:
