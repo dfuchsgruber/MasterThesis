@@ -33,8 +33,8 @@ def local_lipschitz_bounds(perturbations):
 
 
 @torch.no_grad()
-def logit_space_bounds(model, dataset):
-    """ Gets bounds for the logit space in each dimension given a certain dataset. 
+def feature_space_bounds(model, dataset):
+    """ Gets bounds for the feature space in each dimension given a certain dataset. 
     
     Parameters:
     -----------
@@ -46,22 +46,22 @@ def logit_space_bounds(model, dataset):
     Returns:
     --------
     min : torch.tensor, shape [num_classes]
-        Minimal values in logit space.
+        Minimal values in feature space.
     max : torch.tensor, shape [num_classes]
-        Maximal values in logit space
+        Maximal values in feature space
     """
-    logits = model(dataset)[-1][dataset.mask]
-    mins, maxs = logits.min(dim=0)[0], logits.max(dim=0)[0]
+    features = model(dataset).get_features(-2, average=True)[dataset.mask]
+    mins, maxs = features.min(dim=0)[0], features.max(dim=0)[0]
     for idx in range(1, len(dataset)):
-        logits = model(dataset[idx])[-1][dataset[idx].mask]
-        mins = torch.min(mins, logits.min(dim=0)[0])
-        maxs = torch.max(maxs, logits.max(dim=0)[0])
+        features = model(dataset[idx]).get_features(-2)[dataset[idx].mask]
+        mins = torch.min(mins, features.min(dim=0)[0])
+        maxs = torch.max(maxs, features.max(dim=0)[0])
     return mins, maxs
 
 
 @torch.no_grad()
 def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50), num_perturbations_per_sample=10, seed=None):
-    """ Locally perturbs data and see how much the logits are perturbed. 
+    """ Locally perturbs data and see how much the features are perturbed. 
     
     Parameters:
     -----------
@@ -83,8 +83,8 @@ def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50),
     """
     if seed is not None:
         torch.manual_seed(seed)
-    logits = model(dataset)[-1]
-    logits = logits[dataset.mask]
+    h = model(dataset).get_features(-2)
+    h = h[dataset.mask]
     result = {}
     for eps in perturbations:
         results_eps = []
@@ -94,8 +94,8 @@ def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50),
             x_perturbed = dataset.x
             x_perturbed[dataset.mask] += noise
             data = Data(x=x_perturbed, edge_index=dataset.edge_index)
-            logits_perturbed = model(data)[-1][dataset.mask]
-            results_eps.append((logits - logits_perturbed).norm(dim=1).detach().cpu())
+            h_perturbed = model(data).get_features(-2)[dataset.mask]
+            results_eps.append((h - h_perturbed).norm(dim=1).detach().cpu())
             
         result[eps] = torch.cat(results_eps)
     return result
@@ -160,12 +160,12 @@ def permutation_perturbations(model, dataset, num_permutations, num_perturbation
     rng = np.random.RandomState(seed)
     perturbations = np.sort(np.unique(np.linspace(1, dataset.x.size(1), num_permutations).astype(int))).tolist()
 
-    h = model(dataset)[-2].cpu()
+    h = model(dataset).get_features(-2).cpu()
     input_perturbations, output_perturbations = [], []
     for num_permutations in perturbations:
         for _ in range(num_perturbations_per_sample):
             x_perturbed = permute_features(dataset.x, num_permutations, rng=rng, per_sample=per_sample)
-            h_perturbed = model(Data(x=x_perturbed, edge_index=dataset.edge_index))[-2].cpu()
+            h_perturbed = model(Data(x=x_perturbed, edge_index=dataset.edge_index)).get_features(-2).cpu()
             input_perturbations.append((x_perturbed - dataset.x).norm(dim=1).cpu())
             output_perturbations.append((h_perturbed - h).norm(dim=1).cpu())
     input_perturbations = torch.cat(input_perturbations).numpy() # N * len(perturbations) * num_perturbations_per_sample

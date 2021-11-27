@@ -730,7 +730,7 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
         
         receptive_field_size = len(kwargs['config']['model']['hidden_sizes']) + 1
         callbacks = [
-            make_callback_get_softmax_entropy(mask=False), 
+            make_callback_get_predictions(mask=False, ensemble_average=False), # Average the prediction scores over the ensemble
             make_callback_get_data(),
         ]
         for k in range(1, receptive_field_size + 1):
@@ -739,9 +739,13 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
                 make_callback_count_neighbours(k, mask=False),
             ]
         results = run_model_on_datasets(kwargs['model'], [get_data_loader(data, kwargs['data_loaders']) for data in (self.data_before, self.data_after)], gpus=self.gpus, callbacks=callbacks)
-        entropy, data, num_nbs_in_train_labels, num_nbs = results[0], results[1], results[2::2], results[3::2]
+        scores, data, num_nbs_in_train_labels, num_nbs = results[0], results[1], results[2::2], results[3::2]
+        entropy = [
+            -(score * torch.log2(score + ENTROPY_EPS)).sum(1).mean(-1) # Average over ensemble axis
+            for score in scores # Expected entropy per dataset
+        ]
 
-        idx_before, idx_after = vertex_intersection(data[0], data[1])
+        idx_before, idx_after = vertex_intersection(data[0], data[1]) 
         shift = -(entropy[0][idx_before] - entropy[1][idx_after])
         
         # Log the entropy shift by "in mask / not in mask"
