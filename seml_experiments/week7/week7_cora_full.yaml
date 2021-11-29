@@ -47,7 +47,7 @@ fixed:
   model.model_type: gcn
   model.freeze_residual_projection: false
   
-  evaluation.ignore_exceptions: false
+  evaluation.ignore_exceptions: true
   evaluation.pipeline:
   
     - type: EvaluateEmpircalLowerLipschitzBounds

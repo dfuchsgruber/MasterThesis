@@ -1,7 +1,7 @@
 seml:
   executable: training_semi_supervised_node_classification.py
-  name: week7_cora_full_ensemble
-  output_dir: /nfs/students/fuchsgru/seml_output/week7_cora_full_ensemble
+  name: week8_cora_full
+  output_dir: /nfs/students/fuchsgru/seml_output/week8
   project_root_dir: ../..
 
 slurm:
@@ -10,13 +10,12 @@ slurm:
     gres: gpu:1       # num GPUs
     mem: 16G          # memory
     cpus-per-task: 2  # num cores
-    time: 0-16:00     # max time, D-HH:MM
+    time: 0-08:00     # max time, D-HH:MM
 
 
 ###### BEGIN PARAMETER CONFIGURATION ######
 
 fixed:
-  run.name: gcn_r:{0}_sn:{1}_ro:{2}
   run.args:
     - model:residual
     - model:use_spectral_norm
@@ -33,20 +32,19 @@ fixed:
   # Select a subgraph of cora_full that contains all AI and OS papers
   data.base_labels: ['Artificial_Intelligence/NLP', 'Artificial_Intelligence/Data_Mining','Artificial_Intelligence/Speech', 'Artificial_Intelligence/Knowledge_Representation','Artificial_Intelligence/Theorem_Proving', 'Artificial_Intelligence/Games_and_Search','Artificial_Intelligence/Vision_and_Pattern_Recognition', 'Artificial_Intelligence/Planning','Artificial_Intelligence/Agents','Artificial_Intelligence/Robotics', 'Artificial_Intelligence/Expert_Systems','Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
   data.train_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
-  data.num_dataset_splits : 3
+  data.num_dataset_splits : 5
   data.train_portion : 20
   data.val_portion : 20
   data.test_portion : 0.6
   data.test_portion_fixed : 0.2
   data.split_type: uniform
 
-  model.num_initializations : 3
+  model.num_initializations : 5
   model.use_bias: true
   model.activation: leaky_relu
   model.leaky_relu_slope: 0.01
   model.model_type: gcn
   model.freeze_residual_projection: false
-  model.num_ensemble_members: 10
   
   evaluation.ignore_exceptions: true
   evaluation.pipeline:
@@ -101,7 +99,7 @@ fixed:
       dimensionality_reductions:
         none: {}
         isomap:
-          number_components: [24, 28,]
+          number_components: [24, 28, 32]
       log_plots: true
       separate_distributions_by : 'neighbourhood'
       separate_distributions_tolerance : 0.1
@@ -134,11 +132,30 @@ fixed:
       separate_distributions_tolerance : 0.1
       kind: leave_out_classes
 
+    - type: EvaluateSoftmaxEntropy
+      name: no-edges
+      evaluate_on: ['val']
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave_out_classes
+      model_kwargs_evaluate:
+        remove_edges: true
+
     - type: EvaluateLogitEnergy
       evaluate_on: ['val']
       separate_distributions_by : 'neighbourhood'
       separate_distributions_tolerance : 0.1
       kind: leave_out_classes
+
+    - type: EvaluateLogitEnergy
+      name: no-edges
+      evaluate_on: ['val']
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave_out_classes
+      model_kwargs_evaluate:
+        remove_edges: true
+
 
   training.learning_rate: 0.001
 
@@ -151,21 +168,35 @@ grid:
     type: choice
     options: [true, false]
 
-  data.val_labels:
-    type: choice
-    options:
-      - ['Artificial_Intelligence/NLP', 'Artificial_Intelligence/Data_Mining','Artificial_Intelligence/Speech', 'Artificial_Intelligence/Knowledge_Representation','Artificial_Intelligence/Theorem_Proving', 'Artificial_Intelligence/Games_and_Search','Artificial_Intelligence/Vision_and_Pattern_Recognition', 'Artificial_Intelligence/Planning','Artificial_Intelligence/Agents','Artificial_Intelligence/Robotics', 'Artificial_Intelligence/Expert_Systems','Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning'] 
-      - ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
+  residual-ai:
+    fixed:
+      model.residual: true
+      model.weight_scale: 0.9
+      model.hidden_sizes: [64, 32]
+      data.val_labels: ['Artificial_Intelligence/NLP', 'Artificial_Intelligence/Data_Mining','Artificial_Intelligence/Speech', 'Artificial_Intelligence/Knowledge_Representation','Artificial_Intelligence/Theorem_Proving', 'Artificial_Intelligence/Games_and_Search','Artificial_Intelligence/Vision_and_Pattern_Recognition', 'Artificial_Intelligence/Planning','Artificial_Intelligence/Agents','Artificial_Intelligence/Robotics', 'Artificial_Intelligence/Expert_Systems','Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
+      run.name: gcn_ai_r:{0}_sn:{1}_ro:{2}
 
-residual:
-  fixed:
-    model.residual: true
-    model.weight_scale: 0.9
-    model.hidden_sizes: [64, 32]
+  residual-os:
+    fixed:
+      model.residual: true
+      model.weight_scale: 0.9
+      model.hidden_sizes: [64, 32]
+      data.val_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
+      run.name: gcn_os_r:{0}_sn:{1}_ro:{2}
 
-no-residual:
-  fixed:
-    model.residual: false
-    model.weight_scale: 2.0
-    model.hidden_sizes: [64, 64]
+  no-residual-ai:
+    fixed:
+      model.residual: false
+      model.weight_scale: 2.0
+      model.hidden_sizes: [64, 64]
+      data.val_labels: ['Artificial_Intelligence/NLP', 'Artificial_Intelligence/Data_Mining','Artificial_Intelligence/Speech', 'Artificial_Intelligence/Knowledge_Representation','Artificial_Intelligence/Theorem_Proving', 'Artificial_Intelligence/Games_and_Search','Artificial_Intelligence/Vision_and_Pattern_Recognition', 'Artificial_Intelligence/Planning','Artificial_Intelligence/Agents','Artificial_Intelligence/Robotics', 'Artificial_Intelligence/Expert_Systems','Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
+      run.name: gcn_os_r:{0}_sn:{1}_ro:{2}
+
+  no-residual-os:
+    fixed:
+      model.residual: false
+      model.weight_scale: 2.0
+      model.hidden_sizes: [64, 64]
+      data.val_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
+      run.name: gcn_os_r:{0}_sn:{1}_ro:{2}
 

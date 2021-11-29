@@ -60,7 +60,7 @@ def feature_space_bounds(model, dataset):
 
 
 @torch.no_grad()
-def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50), num_perturbations_per_sample=10, seed=None):
+def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50), num_perturbations_per_sample=10, seed=None, model_kwargs={}):
     """ Locally perturbs data and see how much the features are perturbed. 
     
     Parameters:
@@ -75,6 +75,8 @@ def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50),
         How many random perturbations to use per sample and per noise magnitude.
     seed : int or None
         If given, seeds the rng and makes the perturbations deterministic.
+    model_kwargs : dict
+        Keyword arguments passed to the model.
     
     Returns:
     --------
@@ -83,7 +85,7 @@ def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50),
     """
     if seed is not None:
         torch.manual_seed(seed)
-    h = model(dataset).get_features(-2)
+    h = model(dataset, **model_kwargs).get_features(-2)
     h = h[dataset.mask]
     result = {}
     for eps in perturbations:
@@ -94,7 +96,7 @@ def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50),
             x_perturbed = dataset.x
             x_perturbed[dataset.mask] += noise
             data = Data(x=x_perturbed, edge_index=dataset.edge_index)
-            h_perturbed = model(data).get_features(-2)[dataset.mask]
+            h_perturbed = model(data, **model_kwargs).get_features(-2)[dataset.mask]
             results_eps.append((h - h_perturbed).norm(dim=1).detach().cpu())
             
         result[eps] = torch.cat(results_eps)
@@ -131,7 +133,7 @@ def permute_features(x, num_permutations, per_sample=True, rng=None):
     
 
 @torch.no_grad()
-def permutation_perturbations(model, dataset, num_permutations, num_perturbations_per_sample=10, seed=None, per_sample=True):
+def permutation_perturbations(model, dataset, num_permutations, num_perturbations_per_sample=10, seed=None, per_sample=True, model_kwargs={}):
     """ Locally perturbs data by permuting certain indices and see how much the logits are perturbed. 
     
     Parameters:
@@ -149,7 +151,9 @@ def permutation_perturbations(model, dataset, num_permutations, num_perturbation
     per_sample : bool
         If `True`, then the columns to be permuted are re-rolled for each row.
         If `False`, then the columns to be permuted are globally selected for all rows.
-    
+    model_kwargs : dict
+        Keyword arguments passed to the model call.
+
     Returns:
     --------
     perturbations : dict
@@ -160,12 +164,12 @@ def permutation_perturbations(model, dataset, num_permutations, num_perturbation
     rng = np.random.RandomState(seed)
     perturbations = np.sort(np.unique(np.linspace(1, dataset.x.size(1), num_permutations).astype(int))).tolist()
 
-    h = model(dataset).get_features(-2).cpu()
+    h = model(dataset, **model_kwargs).get_features(-2).cpu()
     input_perturbations, output_perturbations = [], []
     for num_permutations in perturbations:
         for _ in range(num_perturbations_per_sample):
             x_perturbed = permute_features(dataset.x, num_permutations, rng=rng, per_sample=per_sample)
-            h_perturbed = model(Data(x=x_perturbed, edge_index=dataset.edge_index)).get_features(-2).cpu()
+            h_perturbed = model(Data(x=x_perturbed, edge_index=dataset.edge_index), **model_kwargs).get_features(-2).cpu()
             input_perturbations.append((x_perturbed - dataset.x).norm(dim=1).cpu())
             output_perturbations.append((h_perturbed - h).norm(dim=1).cpu())
     input_perturbations = torch.cat(input_perturbations).numpy() # N * len(perturbations) * num_perturbations_per_sample

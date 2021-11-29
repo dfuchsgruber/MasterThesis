@@ -3,6 +3,7 @@ import os, sys
 import torch
 import numpy as np
 import networkx as nx
+from collections import Mapping
 
 @contextmanager
 def suppress_stdout(supress=True):
@@ -156,6 +157,29 @@ def get_k_hop_neighbourhood(edge_list, k_max, k_min = None):
         src : tuple(n for n, path in nx.single_source_shortest_path(G, src, cutoff=k_max).items() if len(path) <= k_max + 1 and len(path) >= k_min + 1) 
         for src in G.nodes
     }
+
+def dict_to_tuple(d):
+    """ Creates a nested tuple from a dict (to make it immutable and hashable) 
+    
+    Parameters:
+    -----------
+    d : dict
+        The dict to convert
+
+    Returns:
+    --------
+    t : tuple
+        The deep tuple representation of `d`.
+    """
+    elements = []
+    for k, v in d.items():
+        if isinstance(v, Mapping):
+            v = dict_to_tuple(v)
+        elif isinstace(v, Iterable):
+            v = tuple(dict_to_tuple(e) for e in v)
+        elements.append((k, v))
+    return tuple(elements)
+
 
 # edge_list = torch.tensor([[0, 1, 2, 3, 5], [8, 3, 3, 3, 4]]).long()
 # print(get_k_hop_neighbourhood(edge_list, 0))

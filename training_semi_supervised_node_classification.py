@@ -25,6 +25,7 @@ from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from evaluation.pipeline import Pipeline
 from evaluation.logging import finish as finish_logging, build_table
+from model_registry import ModelRegistry
 
 NAME_SPLIT, NAME_INIT = 'split', 'init'
 SPLIT_INIT_GROUP = 'split_and_init'
@@ -47,11 +48,14 @@ def config():
 
 class ExperimentWrapper:
 
-    def __init__(self, init_all=True, collection_name=None, run_id=None):
+    def __init__(self, init_all=True, collection_name=None, run_id=None, model_registry=None):
         if init_all:
             self.init_all()
         self.collection_name = collection_name
         self.run_id = run_id
+        if model_registry is None:
+            model_registry = ModelRegistry()
+        self.model_registry = model_registry
 
     # With the prefix option we can "filter" the configuration for the sub-dictionary under "data".
     @ex.capture(prefix="data")
@@ -194,9 +198,27 @@ class ExperimentWrapper:
                                             progress_bar_refresh_rate=0,
                                             gpus=gpus,
                                             )
-                        trainer.fit(model, data_loaders[data_constants.TRAIN], data_loaders[data_constants.VAL_REDUCED])
+                        registry_config = {
+                            'model' : config['model'],
+                            'data' : config['data'],
+                            'training' : config['training'],
+                            'split_idx' : split_idx,
+                            'model_seed' : int(seed),
+                            'ensemble_idx' : ensemble_idx,
+                            'reinitialization' : reinitialization,
+                        }
+                        best_model_path = self.model_registry[registry_config]
+                        if best_model_path is None:
+                            trainer.fit(model, data_loaders[data_constants.TRAIN], data_loaders[data_constants.VAL_REDUCED])
+                            best_model_path = checkpoint_callback.best_model_path
+                            self.model_registry[registry_config] = best_model_path
+                        else:
+                            print(f'Loading pre-trained model from {best_model_path}')
+
+                        model = model.load_from_checkpoint(best_model_path)
+                        model.eval()
                         val_metrics = {
-                            name : trainer.validate(None, data_loaders[name], ckpt_path='best')
+                            name : trainer.validate(model, data_loaders[name], ckpt_path=best_model_path)
                             for name in (data_constants.VAL_TRAIN_LABELS, data_constants.VAL_REDUCED)
                         }
                         for name, metrics in val_metrics.items():
@@ -206,10 +228,8 @@ class ExperimentWrapper:
                                 for metric, value in val_metric.items():
                                     result[f'{metric}-{name}-{ensemble_idx}'].append(value)
 
-                    # Manually load best model
-                    model = model.load_from_checkpoint(checkpoint_callback.best_model_path)
-                    model.eval()
-                    ensembles.append(model)
+                    # Add the model to the ensemble
+                    ensembles.append(model.eval())
 
                 model = Ensemble(ensembles, self.model_config.get('num_samples', 1)) # In case of non-ensemble training, an ensemble of 1 model behaves like 1 model
 

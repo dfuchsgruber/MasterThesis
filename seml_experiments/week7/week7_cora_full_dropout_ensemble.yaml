@@ -50,7 +50,7 @@ fixed:
   model.dropout: 0.5
   model.drop_edge: 0.5
   
-  evaluation.ignore_exceptions: false
+  evaluation.ignore_exceptions: true
   evaluation.pipeline:
   
     - type: EvaluateEmpircalLowerLipschitzBounds
@@ -90,45 +90,6 @@ fixed:
     - type: LogInductiveSoftmaxEntropyShift
       data_before: 'train'
       data_after: 'val'
-
-    - type: FitFeatureDensityGrid
-      fit_to: ['train']
-      fit_to_ground_truth_labels: ['train']
-      evaluate_on: ['val']
-      density_types:
-        GaussianPerClass:
-          diagonal_covariance: [false]
-        GaussianMixture:
-          number_components: [7]
-      dimensionality_reductions:
-        none: {}
-        isomap:
-          number_components: [24, 28,]
-      log_plots: true
-      separate_distributions_by : 'neighbourhood'
-      separate_distributions_tolerance : 0.1
-      kind: leave_out_classes
-
-    - type: FitFeatureDensityGrid
-      name: no-edges
-      fit_to: ['train']
-      fit_to_ground_truth_labels: ['train']
-      evaluate_on: ['val']
-      density_types:
-        GaussianPerClass:
-          diagonal_covariance: [false]
-        GaussianMixture:
-          number_components: [7]
-      dimensionality_reductions:
-        none: {}
-        isomap:
-          number_components: [24, 28, 32]
-      log_plots: true
-      separate_distributions_by : 'neighbourhood'
-      separate_distributions_tolerance : 0.1
-      kind: leave_out_classes
-      model_kwargs_evaluate:
-        remove_edges: true
 
     - type: EvaluateSoftmaxEntropy
       evaluate_on: ['val']
