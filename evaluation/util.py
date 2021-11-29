@@ -125,6 +125,30 @@ def count_neighbours_with_label(data_loader, labels, k=1, mask=True):
     return count, total
 
 
+def get_distribution_labels_perturbations(data_loaders):
+    """ Gets information about which vertices are perturbed.
+    
+    Parameters:
+    -----------
+    data_loaders : list
+        A list of data-loaders to get the information of.
+
+    Returns:
+    --------
+    distribution_labels : torch.Tensor, [N]
+        Each vertex in the dataset with its distribution label (according to `evaluation.constants`)
+    """
+    callbacks = [
+        evaluation.callbacks.make_callback_get_perturbation_mask(mask=mask, cpu=True)
+    ]
+    results = run_model_on_datasets(none, data_loaders, callbacks=callbacks, run_model=False)
+    is_perturbed = results[0]
+    is_perturbed = torch.cat(is_perturbed, dim=0)
+    distribution_labels = torch.empty_like(is_perturbed).long()
+    distribution_labels[is_perturbed] = evaluation.constants.ID_CLASS_NO_OOD_CLASS_NBS
+    distribution_labels[~is_perturbed] = evaluation.constants.OOD_CLASS_NO_ID_CLASS_NBS
+    return distribution_labels
+
 def get_distribution_labels_leave_out_classes(data_loaders, k_max, train_labels, mask=True, threshold=0.0):
     """ Gets information about which vertices are from an out-of-distribution class and how many of those are in neighbourhoods.
     

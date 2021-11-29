@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import evaluation.lipschitz
 import plot.perturbations
 import matplotlib.pyplot as plt
-from evaluation.util import split_labels_into_id_and_ood, get_data_loader, run_model_on_datasets, count_neighbours_with_label, get_distribution_labels_leave_out_classes, separate_distributions_leave_out_classes
+from evaluation.util import split_labels_into_id_and_ood, get_data_loader, run_model_on_datasets, count_neighbours_with_label, get_distribution_labels_leave_out_classes, separate_distributions_leave_out_classes, get_distribution_labels_perturbations
 import evaluation.constants as evaluation_constants
 from evaluation.callbacks import *
 from plot.density import plot_2d_log_density
@@ -22,7 +22,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score, precision_re
 import os.path as osp
 from data.util import label_binarize, data_get_summary, labels_in_dataset, vertex_intersection, labels_to_idx, graph_select_labels
 from data.base import SingleGraphDataset
-from data.transform import RemoveEdgesTransform
+from data.transform import RemoveEdgesTransform, PerturbationTransform
 from warnings import warn
 from itertools import product
 from util import format_name, get_k_hop_neighbourhood
@@ -34,6 +34,7 @@ from torch_geometric.transforms import Compose
 _ID_LABEL, _OOD_LABEL = 1, 0
 FEATURE_SHIFT_EPS = 1e-10 # Zero feature shift is bad in log space
 ENTROPY_EPS = 1e-20 # For entropy of zero classes
+VAR_EPS = 1e-12
 
 class PipelineMember:
     """ Superclass for all pipeline members. """
@@ -182,6 +183,32 @@ class OODSeparation(PipelineMember):
             'OOD kind' : self.kind,
         }
 
+    def _get_distribution_labels_perturbations(self, **kwargs):
+        """ Gets labels for id vs ood where ood data is left out classes.
+        
+        Returns:
+        --------
+        auroc_labels : torch.Tensor, shape [N]
+            Labels per sample assigning them to a certain distribution, used for auroc calculation.
+        auroc_mask : torch.Tensor, shape [N]
+            Which samples should be used for AUROC calculation.
+        distribution_labels : torch.Tensor, shape [N]
+            Labels for different types of distributions.
+        distribution_label_names : dict
+            Mapping that names all the labels in `distribution_labels`.
+        """
+        distribution_labels = get_distribution_labels_perturbations(
+            [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
+        )
+        auroc_mask = torch.ones_like(distribution_labels).bool()
+        auroc_labels = torch.zeros_like(distribution_labels).bool()
+        auroc_labels[distribution_labels == evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS] = True
+        distribution_label_names = {
+            evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS : f'Perturbed', 
+            evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS : f'Unperturbed', 
+        }
+        return auroc_labels, auroc_mask, distribution_labels, distribution_label_names
+
     def _get_distribution_labels_leave_out_classes(self, **kwargs):
         """ Gets labels for id vs ood where ood data is left out classes.
         
@@ -235,6 +262,8 @@ class OODSeparation(PipelineMember):
         """
         if self.kind.lower() in ('leave-out-classes', 'loc', 'leave_out_classes'):
             return self._get_distribution_labels_leave_out_classes(**kwargs)
+        elif self.kind.lower() in ('perturbations', 'perturbation', 'noise'):
+            return self._get_distribution_labels_perturbations(**kwargs)
         else:
             raise RuntimeError(f'Could not separate distribution labels (id vs ood) by unknown type {self.kind}.')
 
@@ -406,12 +435,19 @@ class EvaluateSoftmaxEntropy(OODDetection):
         avg_scores = scores.mean(-1) # Expectations of predictions in all ensemble members
         predictive_entropy = -(avg_scores * torch.log2(avg_scores + ENTROPY_EPS)).sum(1)
 
+        max_scores, argmax_scores = scores.mean(-1).max(-1)
+
         auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
         self.ood_detection(-predictive_entropy, labels, 'total-predictive-entropy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+        self.ood_detection(max_scores, labels, 'max-score', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
         if scores.size()[-1] > 1: # Some ensembling is used (ensembles, dropout, etc.), so epistemic and aleatoric estimates can be disentangled
             self.ood_detection(-expected_entropy, labels, 'expected-softmax-entropy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
             self.ood_detection(-(predictive_entropy - expected_entropy), labels, 'mutual-information', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
-        
+            # Also use the empirical variance of the predicted class as proxy
+            var = torch.var(scores, dim=-1) # Variance across ensemble, shape N x num_classes
+            var_predicted_class = var[torch.arange(argmax_scores.size(0)), argmax_scores]
+            self.ood_detection(1 / (var_predicted_class + VAR_EPS), labels, 'predicted-class-variance', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+
         return args, kwargs
 
 class FeatureDensity(OODDetection):
@@ -815,6 +851,46 @@ class SubsetDataByLabel(PipelineMember):
         kwargs['data_loaders'][self.subset_name] = DataLoader(data, batch_size=1, shuffle=False)
         return args, kwargs
 
+class PerturbData(PipelineMember):
+    """ Pipeline member that creates a dataset with perturbed features. """
+
+    def __init__(self, base_data=data_constants.VAL_REDUCED, dataset_name='unnamed-perturbation-dataset', 
+                    perturbation_type='bernoulli', budget=0.1, parameters={}, perturb_only_in_mask=True, **kwargs):
+        super().__init__(**kwargs)
+        self.base_data = base_data
+        self.dataset_name = dataset_name
+        self.perturbation_type = perturbation_type
+        self.budget = budget
+        self.parameters = parameters
+        self.perturb_only_in_mask = perturb_only_in_mask
+
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Based on' : self.base_data,
+            'Dataset name' : self.dataset,
+            'Type' : self.perturbation_type,
+            'Budget' : self.budget,
+            'Perturb vertices in mask only' : self.perturb_only_in_mask,
+            'Parameters' : self.parameters,
+        }
+
+    @torch.no_grad()
+    def call(self, *args, **kwargs)
+        transform = PerturbationTransform(
+            noise_type=self.perturbation_type,
+            perturb_only_in_mask=self.perturb_only_in_mask,
+            budget=self.budget,
+            **self.parameteres,
+        )
+        base_loader = get_data_loader(self.base_data, kwargs['data_loaders'])
+        if len(base_loader) != 1:
+            raise RuntimeError(f'Perturbing is only supported for single graph data.')
+        data = base_loader.dataset[0]
+        data = SingleGraphDataset(data.x.clone(), data.edge_index.clone(), data.y.clone(), data.vertex_to_idx.copy(), data.label_to_idx.copy(), data.mask.clone(), transform=transform)
+        kwargs['data_loaders'][self.subset_name] = DataLoader(Dataset(data), batch_size=1, shuffle=False)
+        return args, kwargs
+
 pipeline_members = [
     EvaluateEmpircalLowerLipschitzBounds,
     LogFeatures,
@@ -827,6 +903,7 @@ pipeline_members = [
     EvaluateSoftmaxEntropy,
     FitFeatureDensityGrid,
     SubsetDataByLabel,
+    PerturbData,
 ]
 
 

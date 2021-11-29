@@ -68,7 +68,7 @@ ex.init_dataset(dataset='cora_full', num_dataset_splits=num_splits, train_portio
 
 ex.init_model(model_type='gcn', hidden_sizes=[64,32], num_initializations=num_inits, weight_scale=0.9, 
     use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
-    residual=True, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1,
+    residual=True, freeze_residual_projection=False, num_ensemble_members=1, num_samples=2,
     dropout=0.5, drop_edge=0.5,
     )
 ex.init_run(name='model_no_remove_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
@@ -114,22 +114,22 @@ ex.init_evaluation(
     #     'type' : 'PrintDatasetSummary',
     #     'evaluate_on' : ['train', 'val', 'val-reduced', 'val-train-labels', 'test', 'test-reduced', 'test-train-labels']
     # },
-    # {
-    #     'type' : 'EvaluateSoftmaxEntropy',
-    #     'evaluate_on' : ['val'],
-    #     'separate_distributions_by' : 'neighbourhood',
-    #     'separate_distributions_tolerance' : 0.1,
-    #     'kind' : 'leave_out_classes',
-    # },
-    # {
-    #     'type' : 'EvaluateSoftmaxEntropy',
-    #     'name' : 'no-edges',
-    #     'evaluate_on' : ['val'],
-    #     'separate_distributions_by' : 'neighbourhood',
-    #     'separate_distributions_tolerance' : 0.1,
-    #     'kind' : 'leave_out_classes',
-    #     'model_kwargs_evaluate' : {'remove_edges' : True},
-    # },
+    {
+        'type' : 'EvaluateSoftmaxEntropy',
+        'evaluate_on' : ['val'],
+        'separate_distributions_by' : 'neighbourhood',
+        'separate_distributions_tolerance' : 0.1,
+        'kind' : 'leave_out_classes',
+    },
+    {
+        'type' : 'EvaluateSoftmaxEntropy',
+        'name' : 'no-edges',
+        'evaluate_on' : ['val'],
+        'separate_distributions_by' : 'neighbourhood',
+        'separate_distributions_tolerance' : 0.1,
+        'kind' : 'leave_out_classes',
+        'model_kwargs_evaluate' : {'remove_edges' : True},
+    },
     # {
     #     'type' : 'EvaluateLogitEnergy',
     #     'evaluate_on' : ['val'],

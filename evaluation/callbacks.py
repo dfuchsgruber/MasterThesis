@@ -97,3 +97,15 @@ def make_callback_count_neighbours(k, mask=True, cpu=True):
             result = result.cpu()
         return result
     return callback
+
+
+def make_callback_get_perturbation_mask(mask=True, cpu=True):
+    """ Makes a callback that gets the perturbation masks in the datasets. """
+    def callback(data, output):
+        perturbation_mask = data.is_perturbed
+        if mask:
+            perturbation_mask[data.mask]
+        if cpu:
+            perturbation_mask = perturbation_mask.cpu()
+        return perturbation_mask
+    return callback
