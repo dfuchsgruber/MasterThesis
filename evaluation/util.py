@@ -139,14 +139,13 @@ def get_distribution_labels_perturbations(data_loaders):
         Each vertex in the dataset with its distribution label (according to `evaluation.constants`)
     """
     callbacks = [
-        evaluation.callbacks.make_callback_get_perturbation_mask(mask=mask, cpu=True)
+        evaluation.callbacks.make_callback_get_perturbation_mask(mask=True, cpu=True),
     ]
-    results = run_model_on_datasets(none, data_loaders, callbacks=callbacks, run_model=False)
-    is_perturbed = results[0]
-    is_perturbed = torch.cat(is_perturbed, dim=0)
+    results = run_model_on_datasets(None, data_loaders, callbacks=callbacks, run_model=False)
+    is_perturbed = torch.cat(results[0], dim=0)
     distribution_labels = torch.empty_like(is_perturbed).long()
-    distribution_labels[is_perturbed] = evaluation.constants.ID_CLASS_NO_OOD_CLASS_NBS
-    distribution_labels[~is_perturbed] = evaluation.constants.OOD_CLASS_NO_ID_CLASS_NBS
+    distribution_labels[~is_perturbed] = evaluation.constants.ID_CLASS_NO_OOD_CLASS_NBS
+    distribution_labels[is_perturbed] = evaluation.constants.OOD_CLASS_NO_ID_CLASS_NBS
     return distribution_labels
 
 def get_distribution_labels_leave_out_classes(data_loaders, k_max, train_labels, mask=True, threshold=0.0):

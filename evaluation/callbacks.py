@@ -43,6 +43,17 @@ def make_callback_get_data(cpu=True):
         return data
     return callback
 
+def make_callback_get_data_features(mask=True, cpu=True):
+    """ Creates a callback that gets the feature tensor of the input data. """
+    def callback(data, output):
+        x = data.x
+        if mask:
+            x = x[data.mask]
+        if cpu:
+            x = x.cpu()
+        return x
+    return callback
+
 def make_callback_get_ground_truth(mask=True, cpu=True):
     """ Creates a callback that gets the ground truth. """
     def callback(data, output):
@@ -104,7 +115,7 @@ def make_callback_get_perturbation_mask(mask=True, cpu=True):
     def callback(data, output):
         perturbation_mask = data.is_perturbed
         if mask:
-            perturbation_mask[data.mask]
+            perturbation_mask = perturbation_mask[data.mask]
         if cpu:
             perturbation_mask = perturbation_mask.cpu()
         return perturbation_mask

@@ -7,18 +7,18 @@ class Prediction:
     """ Summarizes the predictions of a model ensemble. Is also used for single models. """
 
     @staticmethod
-    def aggregate(predictions):
-        """ Aggregates several predictions into one. 
+    def collate(predictions):
+        """ Collates several predictions into one. 
         
         Parameters:
         -----------
         predictions : list
-            The predictions to aggregate
+            The predictions to collate
 
         Returns:
         --------
         agg : Prediction
-            The aggregated prediction.
+            The collated prediction.
         """
         agg = Prediction(None)
         for pred in predictions:

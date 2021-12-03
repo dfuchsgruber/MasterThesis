@@ -1,6 +1,6 @@
 seml:
   executable: training_semi_supervised_node_classification.py
-  name: week8_cora_full
+  name: week8_cora_full_dropout
   output_dir: /nfs/students/fuchsgru/seml_output/week8
   project_root_dir: ../..
 
@@ -45,6 +45,9 @@ fixed:
   model.leaky_relu_slope: 0.01
   model.model_type: gcn
   model.freeze_residual_projection: false
+  model.num_samples: 10
+  model.dropout: 0.5
+  model.drop_edge: 0.5
   
   evaluation.ignore_exceptions: true
   evaluation.pipeline:
@@ -279,120 +282,6 @@ fixed:
     - type: LogInductiveSoftmaxEntropyShift
       data_before: 'train'
       data_after: 'val'
-
-    # Feature densities for all ood types, with and without edges
-
-    - type: FitFeatureDensityGrid
-      fit_to: ['train']
-      fit_to_ground_truth_labels: ['train']
-      evaluate_on: ['val']
-      density_types:
-        GaussianPerClass:
-          diagonal_covariance: [false]
-        GaussianMixture:
-          number_components: [7]
-      dimensionality_reductions:
-        none: {}
-        isomap:
-          number_components: [24, 28, 32]
-      log_plots: true
-      separate_distributions_by : 'neighbourhood'
-      separate_distributions_tolerance : 0.1
-      kind: leave-out-classes
-      name: loc
-
-    - type: FitFeatureDensityGrid
-      fit_to: ['train']
-      fit_to_ground_truth_labels: ['train']
-      evaluate_on: ['val']
-      density_types:
-        GaussianPerClass:
-          diagonal_covariance: [false]
-        GaussianMixture:
-          number_components: [7]
-      dimensionality_reductions:
-        none: {}
-        isomap:
-          number_components: [24, 28, 32]
-      log_plots: true
-      separate_distributions_by : 'neighbourhood'
-      separate_distributions_tolerance : 0.1
-      kind: leave-out-classes
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: loc-no-edges
-
-        - type: FitFeatureDensityGrid
-      fit_to: ['train']
-      fit_to_ground_truth_labels: ['train']
-      evaluate_on: ['val-reduced-bernoulli']
-      density_types:
-        GaussianPerClass:
-          diagonal_covariance: [false]
-        GaussianMixture:
-          number_components: [7]
-      dimensionality_reductions:
-        none: {}
-        isomap:
-          number_components: [24, 28, 32]
-      log_plots: true
-      kind: 'perturbations'
-      name: bernoulli
-
-    - type: FitFeatureDensityGrid
-      fit_to: ['train']
-      fit_to_ground_truth_labels: ['train']
-      evaluate_on: ['val-reduced-bernoulli']
-      density_types:
-        GaussianPerClass:
-          diagonal_covariance: [false]
-        GaussianMixture:
-          number_components: [7]
-      dimensionality_reductions:
-        none: {}
-        isomap:
-          number_components: [24, 28, 32]
-      log_plots: true
-      kind: 'perturbations'
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: bernoulli-no-edges
-    
-    - type: FitFeatureDensityGrid
-      fit_to: ['train']
-      fit_to_ground_truth_labels: ['train']
-      evaluate_on: ['val-reduced-normal']
-      density_types:
-        GaussianPerClass:
-          diagonal_covariance: [false]
-        GaussianMixture:
-          number_components: [7]
-      dimensionality_reductions:
-        none: {}
-        isomap:
-          number_components: [24, 28, 32]
-      log_plots: true
-      kind: 'perturbations'
-      name: normal
-
-    - type: FitFeatureDensityGrid
-      fit_to: ['train']
-      fit_to_ground_truth_labels: ['train']
-      evaluate_on: ['val-reduced-normal']
-      density_types:
-        GaussianPerClass:
-          diagonal_covariance: [false]
-        GaussianMixture:
-          number_components: [7]
-      dimensionality_reductions:
-        none: {}
-        isomap:
-          number_components: [24, 28, 32]
-      log_plots: true
-      kind: 'perturbations'
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: normal-no-edges
 
   training.learning_rate: 0.001
 

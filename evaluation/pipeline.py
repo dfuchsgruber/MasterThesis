@@ -10,6 +10,7 @@ from evaluation.callbacks import *
 from plot.density import plot_2d_log_density
 from plot.features import plot_2d_features
 from plot.util import plot_histogram, plot_histograms, plot_2d_histogram
+from plot.calibration import plot_calibration
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from model.density import get_density_model
 from model.dimensionality_reduction import DimensionalityReduction
@@ -30,11 +31,13 @@ from copy import deepcopy
 import traceback
 import data.constants as data_constants
 from torch_geometric.transforms import Compose
+from metrics import expected_calibration_error
 
 _ID_LABEL, _OOD_LABEL = 1, 0
 FEATURE_SHIFT_EPS = 1e-10 # Zero feature shift is bad in log space
 ENTROPY_EPS = 1e-20 # For entropy of zero classes
 VAR_EPS = 1e-12
+ECE_EPS = 1e-12
 
 class PipelineMember:
     """ Superclass for all pipeline members. """
@@ -854,6 +857,8 @@ class SubsetDataByLabel(PipelineMember):
 class PerturbData(PipelineMember):
     """ Pipeline member that creates a dataset with perturbed features. """
 
+    name = 'PerturbData'
+
     def __init__(self, base_data=data_constants.VAL_REDUCED, dataset_name='unnamed-perturbation-dataset', 
                     perturbation_type='bernoulli', budget=0.1, parameters={}, perturb_only_in_mask=True, **kwargs):
         super().__init__(**kwargs)
@@ -868,7 +873,7 @@ class PerturbData(PipelineMember):
     def configuration(self):
         return super().configuration | {
             'Based on' : self.base_data,
-            'Dataset name' : self.dataset,
+            'Dataset name' : self.dataset_name,
             'Type' : self.perturbation_type,
             'Budget' : self.budget,
             'Perturb vertices in mask only' : self.perturb_only_in_mask,
@@ -876,20 +881,113 @@ class PerturbData(PipelineMember):
         }
 
     @torch.no_grad()
-    def call(self, *args, **kwargs)
-        transform = PerturbationTransform(
-            noise_type=self.perturbation_type,
-            perturb_only_in_mask=self.perturb_only_in_mask,
-            budget=self.budget,
-            **self.parameteres,
-        )
+    def __call__(self, *args, **kwargs):
         base_loader = get_data_loader(self.base_data, kwargs['data_loaders'])
         if len(base_loader) != 1:
             raise RuntimeError(f'Perturbing is only supported for single graph data.')
-        data = base_loader.dataset[0]
-        data = SingleGraphDataset(data.x.clone(), data.edge_index.clone(), data.y.clone(), data.vertex_to_idx.copy(), data.label_to_idx.copy(), data.mask.clone(), transform=transform)
-        kwargs['data_loaders'][self.subset_name] = DataLoader(Dataset(data), batch_size=1, shuffle=False)
+        data, is_perturbed = PerturbationTransform(
+            noise_type=self.perturbation_type,
+            perturb_only_in_mask=self.perturb_only_in_mask,
+            budget=self.budget,
+            **self.parameters,
+        )(base_loader.dataset[0])
+        dataset = SingleGraphDataset(
+            data.x.numpy(), 
+            data.edge_index.numpy(), 
+            data.y.numpy(), 
+            data.vertex_to_idx, 
+            data.label_to_idx, 
+            data.mask.numpy(), 
+            is_perturbed=is_perturbed.numpy())
+        kwargs['data_loaders'][self.dataset_name] = DataLoader(dataset, batch_size=1, shuffle=False)
         return args, kwargs
+
+class EvaluateAccuracy(OODSeparation):
+    """ Pipeline member to evaluate the accuracy of the model on a dataset. Note: The dataset should follow the train labels. """
+
+    name = 'EvaluateAccuracy'
+
+    def __init__(self, evaluate_on=[data_constants.VAL_TRAIN_LABELS], evaluate_on_id_only=True, gpus=0, **kwargs):
+        super().__init__(evaluate_on=evaluate_on, **kwargs)
+        self.gpus = gpus
+
+    @property
+    def configuration(self):
+        return super().configuration
+    
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+        
+        predictions, labels, mask = run_model_on_datasets(
+            kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], 
+            gpus=self.gpus, model_kwargs=self.model_kwargs_evaluate,
+            callbacks = [
+                evaluation.callbacks.make_callback_get_predictions(),
+                evaluation.callbacks.make_callback_get_ground_truth(),
+                evaluation.callbacks.make_callback_is_ground_truth_in_labels(kwargs['config']['data']['train_labels']),
+
+            ])
+        mask, predictions, labels = torch.cat(mask, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
+        is_id, is_id_mask, _, _ = self.get_distribution_labels(**kwargs)
+
+        # Accuracy should only be computed for classes the model can actually predict
+        predictions, labels, is_id_mask, is_id = predictions[mask], labels[mask], is_id_mask[mask], is_id[mask]
+
+        _, hard = predictions.max(dim=-1)
+        acc = (hard == labels).float().mean()
+        acc_id = (hard == labels)[(is_id == 1) & is_id_mask].float().mean()
+        acc_ood = (hard == labels)[(is_id == 0) & is_id_mask].float().mean()
+
+        dataset_names = '-'.join(self.evaluate_on)
+        kwargs['metrics'][f'accuracy_{dataset_names}{self.suffix}'] = acc.item()
+        kwargs['metrics'][f'accuracy_id_{dataset_names}{self.suffix}'] = acc_id.item()
+        kwargs['metrics'][f'accuracy_ood_{dataset_names}{self.suffix}'] = acc_ood.item()
+        pipeline_log(f'Evaluated accuracy for {self.evaluate_on}.')
+
+        return args, kwargs
+
+
+class EvaluateCalibration(PipelineMember):
+    """ Evaluates the calibration of a model. """
+
+    name = 'EvaluateCalibration'
+
+    def __init__(self, evaluate_on=[data_constants.VAL_TRAIN_LABELS], bins=10, gpus=0, **kwargs):
+        super().__init__(**kwargs)
+        self.evaluate_on = evaluate_on
+        self.gpus = gpus
+        self.bins = bins
+
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Evaluate on' : self.evaluate_on,
+            'Bins' : self.bins,
+        }
+
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+        
+        pred, gnd = run_model_on_datasets(kwargs['model'], [get_data_loader(dataset, kwargs['data_loaders']) for dataset in self.evaluate_on], gpus=self.gpus,
+            callbacks = [
+                make_callback_get_predictions(),
+                make_callback_get_ground_truth(),
+            ])
+        scores, gnd = torch.cat(pred, dim=0), torch.cat(gnd, dim=0)
+        ece = expected_calibration_error(scores, gnd, bins=self.bins, eps=ECE_EPS)
+
+        dataset_names = '-'.join(self.evaluate_on)
+        kwargs['metrics'][f'ece_{dataset_names}{self.suffix}'] = ece
+        log_metrics(kwargs['logs'], {f'ece_{dataset_names}{self.suffix}' : ece}, f'calibration')
+
+        if self.log_plots:
+            fig, ax = plot_calibration(scores, gnd, bins=self.bins, eps=ECE_EPS)
+            log_figure(kwargs['logs'], fig, f'calibration_{dataset_names}{self.suffix}', f'calibration', save_artifact=kwargs['artifact_directory'])
+            plt.close(fig)
+        
+        pipeline_log(f'Logged calibration for {self.evaluate_on}')
+        return args, kwargs
+
 
 pipeline_members = [
     EvaluateEmpircalLowerLipschitzBounds,
@@ -904,6 +1002,8 @@ pipeline_members = [
     FitFeatureDensityGrid,
     SubsetDataByLabel,
     PerturbData,
+    EvaluateAccuracy,
+    EvaluateCalibration,
 ]
 
 

@@ -50,15 +50,22 @@ class Ensemble(pl.LightningModule):
         List of torch modules that output predictions.
     num_samples : int
         How many samples to draw from each member.
+    sample_during_training : bool
+        If multiple samples will be drawn and averaged even during training (also averages gradients). Defaults to False.
     """
 
-    def __init__(self, members, num_samples=1):
+    def __init__(self, members, num_samples=1, sample_during_training=False):
         super().__init__()
         self.num_samples = num_samples
         self.members = nn.ModuleList(list(members))
+        self.sample_during_training = sample_during_training
 
     def forward(self, *args, **kwargs):
-        return Prediction.aggregate([Prediction.aggregate(member(*args, **kwargs) for member in self.members) for _ in range(self.num_samples)])
+        if self.training and not self.sample_during_training:
+            num_samples = 1 # Don't sample during training
+        else:
+            num_samples = self.num_samples
+        return Prediction.collate([Prediction.collate(member(*args, **kwargs) for member in self.members) for _ in range(num_samples)])
 
     def configure_optimizers(self):  
         raise RuntimeError(f'Ensemble members should be trained by themselves.')

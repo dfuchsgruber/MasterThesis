@@ -181,5 +181,49 @@ def dict_to_tuple(d):
     return tuple(elements)
 
 
+def calibration_curve(probs, y_true, bins=10, eps=1e-12):
+    """ Calculates the calibration curve for predictions.
+    
+    Parameters:
+    -----------
+    probs : torch.Tensor, shape [n, num_classes]
+        Predicted probabilities.
+    y_true : torch.Tensor, shape [n]
+        True class labels.
+    bins : int
+        The number of bins to use.
+    eps : float 
+        Epsilon to prevent division by zero.
+    
+    Returns:
+    --------
+    bin_edges : ndarray, shape [bins + 1]
+        Edges for the bins
+    bin_confidence : ndarray, shape [bins]
+        Average confidence per bin
+    bin_accuracy : ndarray, shape [bins]
+        Average accuracy per bin
+    bin_weight : ndarray, shape [bins]
+        Bin weights (i.e. fraction of samples that is in each bin)
+    """
+    n, c = probs.size()
+    max_prob, hard = probs.detach().cpu().max(dim=-1)
+    y_true_one_hot = np.eye(c)[y_true.detach().cpu().numpy()]
+    
+    bin_edges = np.linspace(0., 1., bins + 1)
+    bin_width = 1 / bins
+    digitized = np.digitize(max_prob.numpy(), bin_edges)
+    digitized = np.maximum(np.minimum(digitized, bins), 1) - 1 # Push values outside the bins into the rightmost and leftmost bins
+    
+    bins_sum = np.bincount(digitized, minlength=bins, weights=max_prob.numpy())
+    bins_size = np.bincount(digitized, minlength=bins)
+    is_correct = y_true_one_hot[range(n), hard]
+    
+    bin_confidence = bins_sum / (bins_size + eps)
+    bin_accuracy = np.bincount(digitized, minlength=bins, weights=is_correct) / (bins_size + eps)
+    bin_weight = bins_size / bins_size.sum()
+    
+    return bin_edges, bin_confidence, bin_accuracy, bin_weight
+
 # edge_list = torch.tensor([[0, 1, 2, 3, 5], [8, 3, 3, 3, 4]]).long()
 # print(get_k_hop_neighbourhood(edge_list, 0))

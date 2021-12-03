@@ -30,7 +30,7 @@ from data.util import label_binarize, data_get_summary
 #                     split_type='stratified',
 #                     )
 
-num_splits, num_inits = 1, 2
+num_splits, num_inits = 1, 1
 
 
 ex = ExperimentWrapper(init_all=False, collection_name='model-test', run_id='gcn_64_32_residual')
@@ -66,10 +66,10 @@ ex.init_dataset(dataset='cora_full', num_dataset_splits=num_splits, train_portio
                     val_labels = ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance'],
                     )
 
-ex.init_model(model_type='gcn', hidden_sizes=[64,32], num_initializations=num_inits, weight_scale=0.9, 
-    use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
-    residual=True, freeze_residual_projection=False, num_ensemble_members=1, num_samples=2,
-    dropout=0.5, drop_edge=0.5,
+ex.init_model(model_type='gcn', hidden_sizes=[64,32], num_initializations=num_inits, weight_scale=2.0, 
+    use_spectral_norm=False, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
+    residual=True, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1,
+    #dropout=0.5, drop_edge=0.5,
     )
 ex.init_run(name='model_no_remove_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
     'model:model_type', 'model:hidden_sizes', 'model:weight_scale',
@@ -77,13 +77,13 @@ ex.init_run(name='model_no_remove_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
 ex.init_evaluation(
     print_pipeline=True,
     pipeline=[
-    {
-        'type' : 'FitFeatureSpacePCAIDvsOOD',
-        'fit_to' : ['train'],
-        'separate_distributions_by' : 'neighbourhood',
-        'separate_distributions_tolerance' : 0.1,
-        'kind' : 'leave_out_classes',
-    },
+    # {
+    #     'type' : 'FitFeatureSpacePCAIDvsOOD',
+    #     'fit_to' : ['train'],
+    #     'separate_distributions_by' : 'neighbourhood',
+    #     'separate_distributions_tolerance' : 0.1,
+    #     'kind' : 'leave_out_classes',
+    # },
     # {
     #     'type' : 'EvaluateEmpircalLowerLipschitzBounds',
     #     'num_perturbations' : 2,
@@ -110,6 +110,78 @@ ex.init_evaluation(
     #     'num_components' : 2,
     #     'name' : '2d-pca',
     # },
+    {
+        'type' : 'PerturbData',
+        'base_data' : 'val-reduced',
+        'dataset_name' : 'val-reduced-bernoulli',
+        'perturbation_type' : 'bernoulli',
+        'budget' : 0.1,
+        'parameters' : {
+            'p' : 0.5,
+        },
+        'perturb_in_mask_only' : True,
+    },
+    {
+        'type' : 'PerturbData',
+        'base_data' : 'val-reduced',
+        'dataset_name' : 'val-reduced-normal',
+        'perturbation_type' : 'normal',
+        'budget' : 0.1,
+        'parameters' : {
+            'scale' : 1.0,
+        },
+        'perturb_in_mask_only' : True,
+    },
+    {
+        'type' : 'EvaluateAccuracy',
+        'evaluate_on' : ['val-reduced'],
+        'model_kwargs' : {'remove_edges' : True},
+        'name' : 'no-edges',
+    },
+    {
+        'type' : 'EvaluateAccuracy',
+        'evaluate_on' : ['val-reduced-normal'],
+        'kind' : 'perturbations',
+    },
+    {
+        'type' : 'EvaluateAccuracy',
+        'evaluate_on' : ['val-reduced-normal'],
+        'kind' : 'perturbations',
+        'model_kwargs' : {'remove_edges' : True},
+        'name' : 'no-edges',
+    },
+    {
+        'type' : 'EvaluateCalibration',
+        'evaluate_on' : ['val-reduced'],
+
+    },
+    # {
+    #     'type' : 'EvaluateAccuracy',
+    #     'evaluate_on' : ['val-reduced'],
+    #     'model_kwargs' : {'remove_edges' : True},
+    #     'name' : 'no-edges',
+    # },
+    # {
+    #     'type' : 'EvaluateAccuracy',
+    #     'evaluate_on' : ['val-reduced-ber'],
+    # },
+    # {
+    #     'type' : 'EvaluateAccuracy',
+    #     'evaluate_on' : ['val'],
+    #     'separate_distributions_by' : 'neighbourhood',
+    #     'separate_distributions_tolerance' : 0.1,
+    #     'kind' : 'leave_out_classes',
+    #     'name' : 'loc',
+    # },
+    # {
+    #     'type' : 'PrintDatasetSummary',
+    #     'evaluate_on' : ['train', 'val-reduced', 'val-reduced-ber'],
+    # },
+    # {
+    #     'type' : 'EvaluateSoftmaxEntropy',
+    #     'evaluate_on' : ['val-reduced-ber'],
+    #     'kind' : 'perturbations',
+    # },
     # {
     #     'type' : 'PrintDatasetSummary',
     #     'evaluate_on' : ['train', 'val', 'val-reduced', 'val-train-labels', 'test', 'test-reduced', 'test-train-labels']
@@ -120,14 +192,28 @@ ex.init_evaluation(
         'separate_distributions_by' : 'neighbourhood',
         'separate_distributions_tolerance' : 0.1,
         'kind' : 'leave_out_classes',
+        'name' : 'loc'
     },
     {
         'type' : 'EvaluateSoftmaxEntropy',
-        'name' : 'no-edges',
+        'name' : 'loc-no-edges',
         'evaluate_on' : ['val'],
         'separate_distributions_by' : 'neighbourhood',
         'separate_distributions_tolerance' : 0.1,
         'kind' : 'leave_out_classes',
+        'model_kwargs_evaluate' : {'remove_edges' : True},
+    },
+    {
+        'type' : 'EvaluateSoftmaxEntropy',
+        'evaluate_on' : ['val-reduced-normal'],
+        'kind' : 'perturbations',
+        'name' : 'normal'
+    },
+    {
+        'type' : 'EvaluateSoftmaxEntropy',
+        'name' : 'normal-no-edges',
+        'evaluate_on' : ['val-reduced-normal'],
+        'kind' : 'perturbations',
         'model_kwargs_evaluate' : {'remove_edges' : True},
     },
     # {
@@ -156,28 +242,96 @@ ex.init_evaluation(
     #     'data_before' : 'train',
     #     'data_after' : 'val',
     # },
-    # {
-    #     'type' : 'FitFeatureDensityGrid',
-    #     'fit_to' : ['train'],
-    #     'fit_to_ground_truth_labels' : ['train'],
-    #     'evaluate_on' : ['val'],
-    #     'density_types' : {
-    #         'GaussianPerClass' : {
-    #             'diagonal_covariance' : [True],
-    #         },
-    #     },
-    #     'dimensionality_reductions' : {
-    #         'isomap' : {
-    #             'number_components' : [24],
-    #         },
-    #         'none' : {
-    #         }
-    #     },
-    #     'separate_distributions_by' : 'neighbourhood',
-    #     'separate_distributions_tolerance' : 0.1,
-    #     'kind' : 'leave_out_classes',
-    #     'log_plots' : True,
-    # },
+    {
+        'type' : 'FitFeatureDensityGrid',
+        'fit_to' : ['train'],
+        'fit_to_ground_truth_labels' : ['train'],
+        'evaluate_on' : ['val'],
+        'density_types' : {
+            'GaussianPerClass' : {
+                'diagonal_covariance' : [True],
+            },
+        },
+        'dimensionality_reductions' : {
+            'isomap' : {
+                'number_components' : [24],
+            },
+            'none' : {
+            }
+        },
+        'separate_distributions_by' : 'neighbourhood',
+        'separate_distributions_tolerance' : 0.1,
+        'kind' : 'leave_out_classes',
+        'log_plots' : True,
+        'name' : 'loc',
+    },
+    {
+        'type' : 'FitFeatureDensityGrid',
+        'fit_to' : ['train'],
+        'fit_to_ground_truth_labels' : ['train'],
+        'evaluate_on' : ['val'],
+        'density_types' : {
+            'GaussianPerClass' : {
+                'diagonal_covariance' : [True],
+            },
+        },
+        'dimensionality_reductions' : {
+            'isomap' : {
+                'number_components' : [24],
+            },
+            'none' : {
+            }
+        },
+        'separate_distributions_by' : 'neighbourhood',
+        'separate_distributions_tolerance' : 0.1,
+        'kind' : 'leave_out_classes',
+        'log_plots' : True,
+        'model_kwargs_evaluate' : {'remove_edges' : True},
+        'name' : 'loc-no-edges',
+    },
+    {
+        'type' : 'FitFeatureDensityGrid',
+        'fit_to' : ['train'],
+        'fit_to_ground_truth_labels' : ['train'],
+        'evaluate_on' : ['val-reduced-normal'],
+        'density_types' : {
+            'GaussianPerClass' : {
+                'diagonal_covariance' : [True],
+            },
+        },
+        'dimensionality_reductions' : {
+            'isomap' : {
+                'number_components' : [24],
+            },
+            'none' : {
+            }
+        },
+        'kind' : 'perturbations',
+        'log_plots' : True,
+        'name' : 'normal',
+    },
+    {
+        'type' : 'FitFeatureDensityGrid',
+        'fit_to' : ['train'],
+        'fit_to_ground_truth_labels' : ['train'],
+        'evaluate_on' : ['val-reduced-normal'],
+        'density_types' : {
+            'GaussianPerClass' : {
+                'diagonal_covariance' : [True],
+            },
+        },
+        'dimensionality_reductions' : {
+            'isomap' : {
+                'number_components' : [24],
+            },
+            'none' : {
+            }
+        },
+        'kind' : 'perturbations',
+        'log_plots' : True,
+        'model_kwargs_evaluate' : {'remove_edges' : True},
+        'name' : 'normal-no-edges',
+    },
     # {
     #     'type' : 'FitFeatureDensityGrid',
     #     'name' : 'no-edges',
@@ -206,12 +360,12 @@ ex.init_evaluation(
     ignore_exceptions=False,
 )
 
-results_path = (ex.train(max_epochs=1, learning_rate=0.001, early_stopping={
+results_path = (ex.train(max_epochs=1000, learning_rate=0.001, early_stopping={
     'monitor' : 'val_loss',
     'mode' : 'min',
     'patience' : 50,
     'min_delta' : 1e-3,
-}, gpus=1, suppress_stdout=False))
+}, gpus=0, suppress_stdout=False))
 
 with open(results_path) as f:
     print(json.load(f))

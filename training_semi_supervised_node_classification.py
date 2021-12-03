@@ -10,6 +10,7 @@ import json
 from collections import defaultdict
 import warnings
 import matplotlib.pyplot as plt
+import configuration
 
 from util import format_name
 from util import suppress_stdout as context_supress_stdout
@@ -130,22 +131,25 @@ class ExperimentWrapper:
 
     @ex.capture(prefix="training")
     def train(self, max_epochs, learning_rate, early_stopping, gpus, suppress_stdout=True):
-                
+        
+        training_config = {
+            'max_epochs' : max_epochs,
+            'learning_rate' : learning_rate,
+            'early_stopping' : early_stopping,
+            'gpus' : gpus,
+        }
+
         # Data loading
         data_list, dataset_fixed = load_data_from_configuration(self.data_config)
 
         # Setup config and name of the run(s)
-        config = {
+        config = configuration.get_experiment_configuration({
             'model' : self.model_config,
             'data' : self.data_config,
             'evaluation' : self.evaluation_config,
-            'training' : {
-                'max_epochs' : max_epochs,
-                'learning_rate' : learning_rate,
-                'early_stopping' : early_stopping,
-                'gpus' : gpus,
-                }
-            }
+            'training' : training_config,
+        })
+        
         run_name = format_name(self.run_name_format, self.run_name_format_args, config)
         # One global logger for all splits and initializations
         logger = WandbLogger(save_dir=osp.join('/nfs/students/fuchsgru/wandb'), project=str(self.collection_name), name=f'{run_name}')
@@ -198,10 +202,7 @@ class ExperimentWrapper:
                                             progress_bar_refresh_rate=0,
                                             gpus=gpus,
                                             )
-                        registry_config = {
-                            'model' : config['model'],
-                            'data' : config['data'],
-                            'training' : config['training'],
+                        registry_config = config | {
                             'split_idx' : split_idx,
                             'model_seed' : int(seed),
                             'ensemble_idx' : ensemble_idx,
@@ -217,21 +218,24 @@ class ExperimentWrapper:
 
                         model = model.load_from_checkpoint(best_model_path)
                         model.eval()
-                        val_metrics = {
-                            name : trainer.validate(model, data_loaders[name], ckpt_path=best_model_path)
-                            for name in (data_constants.VAL_TRAIN_LABELS, data_constants.VAL_REDUCED)
-                        }
-                        for name, metrics in val_metrics.items():
-                            with open(osp.join(artifact_dir, f'metrics-{name}.json'), 'w+') as f:
-                                json.dump(val_metrics, f)
-                            for val_metric in metrics:
-                                for metric, value in val_metric.items():
-                                    result[f'{metric}-{name}-{ensemble_idx}'].append(value)
+                        
 
                     # Add the model to the ensemble
                     ensembles.append(model.eval())
 
                 model = Ensemble(ensembles, self.model_config.get('num_samples', 1)) # In case of non-ensemble training, an ensemble of 1 model behaves like 1 model
+                model.eval()
+                val_metrics = {
+                    name : trainer.validate(model, data_loaders[name], ckpt_path=best_model_path)
+                    for name in (data_constants.VAL_TRAIN_LABELS, data_constants.VAL_REDUCED)
+                }
+                for name, metrics in val_metrics.items():
+                    with open(osp.join(artifact_dir, f'metrics-{name}.json'), 'w+') as f:
+                        json.dump(val_metrics, f)
+                    for val_metric in metrics:
+                        for metric, value in val_metric.items():
+                            result[f'{metric}-{name}-{ensemble_idx}'].append(value)
+
 
                 # Build evaluation pipeline
                 pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus, 
@@ -249,7 +253,7 @@ class ExperimentWrapper:
                 }
                 pipeline_metrics = {} # Metrics logged by the pipeline
                 pipeline(
-                    model=model,
+                    model=model.eval(),
                     data_loaders = data_loaders,
                     logger=logger,
                     config=config,

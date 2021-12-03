@@ -28,9 +28,11 @@ class SingleGraphDataset(Dataset):
         Vertices masked by this dataset.
     transform : torch_geometric.transform.BaseTransform or None
         Transformation to apply to the dataset. If `None` is given, the identity transformation is used.
+    is_perturbed : ndarray, shape [N] or None
+        If given, a mask to identify veritces with alternated features.
     """
 
-    def __init__(self, x, edge_index, y, vertex_to_idx, label_to_idx, mask, transform=None):
+    def __init__(self, x, edge_index, y, vertex_to_idx, label_to_idx, mask, transform=None, is_perturbed=None):
 
         if transform is None:
             transform = Compose([])
@@ -40,10 +42,14 @@ class SingleGraphDataset(Dataset):
             y=torch.tensor(y).long(), mask=torch.tensor(mask).bool())
         self._data.vertex_to_idx = vertex_to_idx
         self._data.label_to_idx = label_to_idx
+        self._is_perturbed = is_perturbed
     
     def __len__(self):
         return 1
     
     def __getitem__(self, idx):
         assert idx == 0, f'ŚingleGraphDataset only has a single graph! (Trying to index with {idx}...)'
-        return self.transform(self._data.clone()) # This way we can apply in-place transforms
+        data = self._data.clone() # Allows for in-place transformations
+        if self._is_perturbed is not None:
+            data.is_perturbed = torch.tensor(self._is_perturbed).bool()
+        return self.transform(data) # This way we can apply in-place transforms
