@@ -71,10 +71,10 @@ fixed:
     # Evaluate accuracy for all ood settings with and without edges
 
     - type: EvaluateAccuracy
-      evaluate_on: ['val_reduced']
+      evaluate_on: ['val-reduced']
 
     - type: EvaluateAccuracy
-      evaluate_on: ['val_reduced']
+      evaluate_on: ['val-reduced']
       model_kwargs:
         remove_edges: true
       name: 'no-edges'
@@ -96,28 +96,38 @@ fixed:
       name: 'loc-no-edges'
 
     - type: EvaluateAccuracy
-      evaluate_on: ['val_reduced-bernoulli']
+      evaluate_on: ['val-reduced-bernoulli']
       kind: 'perturbations'
       name: 'bernoulli'
 
     - type: EvaluateAccuracy
-      evaluate_on: ['val_reduced-bernoulli']
+      evaluate_on: ['val-reduced-bernoulli']
       kind: 'perturbations'
       model_kwargs:
         remove_edges: true
       name: 'bernoulli-no-edges'
 
     - type: EvaluateAccuracy
-      evaluate_on: ['val_reduced-normal']
+      evaluate_on: ['val-reduced-normal']
       kind: 'perturbations'
       name: 'normal'
 
     - type: EvaluateAccuracy
-      evaluate_on: ['val_reduced-normal']
+      evaluate_on: ['val-reduced-normal']
       kind: 'perturbations'
       model_kwargs:
         remove_edges: true
       name: 'normal-no-edges'
+
+    # Evaluate calibration with and without edges
+    - type: EvaluateCalibration
+      evaluate_on: ['val-reduced']
+
+    - type: EvaluateCalibration
+      evaluate_on: ['val-reduced']
+      model_kwargs:
+        remove_edges: true
+      name: 'no_edges'
 
     # Lipschitz constants of the model
 

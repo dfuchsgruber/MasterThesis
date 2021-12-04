@@ -52,15 +52,20 @@ class ResidualBlock(nn.Module):
         return x + h
 
 def _make_convolutions(input_dim, num_classes, hidden_dims, make_conv, *args, residual=False, 
-        use_spectral_norm=False, weight_scale=1.0, freeze_residual_projection=False, orthogonalize_residual_projection=False, **kwargs):
+        use_spectral_norm=False, weight_scale=1.0, freeze_residual_projection=False, orthogonalize_residual_projection=False, use_spectral_norm_on_last_layer=True, **kwargs):
     """ Makes convolutions from a class and a set of input, hidden and output dimensions. """
     all_dims = [input_dim] + list(hidden_dims) + [num_classes]
     convs = []
-    for in_dim, out_dim in zip(all_dims[:-1], all_dims[1:]):
-        conv = make_conv(in_dim, out_dim, *args, use_spectral_norm=use_spectral_norm, 
+    dims = list(zip(all_dims[:-1], all_dims[1:]))
+    for idx, (in_dim, out_dim) in enumerate(dims):
+        if idx == len(dims) - 1 and not use_spectral_norm_on_last_layer:
+            sn = False
+        else:
+            sn = use_spectral_norm
+        conv = make_conv(in_dim, out_dim, *args, use_spectral_norm=sn, 
             weight_scale=weight_scale, **kwargs)
         if residual:
-            conv = ResidualBlock(in_dim, out_dim, conv, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale,
+            conv = ResidualBlock(in_dim, out_dim, conv, use_spectral_norm=sn, weight_scale=weight_scale,
                 freeze_residual_projection=freeze_residual_projection, orthogonalize_residual_projection=orthogonalize_residual_projection)
         convs.append(conv)
     return nn.ModuleList(convs)
@@ -83,7 +88,7 @@ class GCN(nn.Module):
     def __init__(self, input_dim, num_classes, hidden_dims, activation=F.leaky_relu, 
                     use_bias=True, use_spectral_norm=True, weight_scale=1.0, cached=True,
                     residual=False, freeze_residual_projection=False, orthogonalize_residual_projection=False,
-                    dropout=0.0, drop_edge=0.0):
+                    dropout=0.0, drop_edge=0.0, use_spectral_norm_on_last_layer=True):
         super().__init__()
         self.activation = activation
         self.residual = residual
@@ -94,7 +99,9 @@ class GCN(nn.Module):
                                                 cached=cached, bias=use_bias, use_spectral_norm=use_spectral_norm,
                                                 weight_scale=weight_scale, 
                                                 residual=residual, freeze_residual_projection=freeze_residual_projection, 
-                                                orthogonalize_residual_projection=orthogonalize_residual_projection)
+                                                orthogonalize_residual_projection=orthogonalize_residual_projection,
+                                                use_spectral_norm_on_last_layer=use_spectral_norm_on_last_layer,
+                                                )
 
     @staticmethod
     def _make_conv_with_spectral_norm(input_dim, output_dim, *args, use_spectral_norm=False, weight_scale=1.0, **kwargs):
@@ -271,9 +278,10 @@ def make_model_by_configuration(configuration, input_dim, output_dim):
     if configuration['model_type'] == 'gcn':
         return GCN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
             use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
-            cached=configuration.get('cached', False), residual=configuration.get('residual', False),
-            freeze_residual_projection=configuration.get('freeze_residual_projection', False),
-            drop_edge=configuration.get('drop_edge'), dropout = configuration.get('dropout'),
+            cached=configuration['cached'], residual=configuration['residual'],
+            freeze_residual_projection=configuration['freeze_residual_projection'],
+            drop_edge=configuration['drop_edge'], dropout = configuration['dropout'],
+            use_spectral_norm_on_last_layer = configuration['use_spectral_norm_on_last_layer'],
             )
     # elif configuration['model_type'] == 'gat':
     #     return GAT(input_dim, output_dim, configuration['hidden_sizes'], configuration['num_heads'], make_activation_by_configuration(configuration), 

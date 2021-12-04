@@ -87,7 +87,7 @@ class ExperimentWrapper:
     @ex.capture(prefix="model")
     def init_model(self, model_type: str, hidden_sizes: list, weight_scale: float, num_initializations: int, use_spectral_norm: bool, num_heads=-1, 
         diffusion_iterations=5, teleportation_probability=0.1, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01, normalize=True,
-        residual=False, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1, dropout=0.0, drop_edge=0.0,):
+        residual=False, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1, dropout=0.0, drop_edge=0.0, use_spectral_norm_on_last_layer=True,):
         self.model_config = {
             'hidden_sizes' : hidden_sizes,
             'weight_scale' : weight_scale,
@@ -106,6 +106,7 @@ class ExperimentWrapper:
             'num_samples' : num_samples,
             'dropout' : dropout,
             'drop_edge' : drop_edge,
+            'use_spectral_norm_on_last_layer' : use_spectral_norm_on_last_layer,
         }
         self.model_seeds = model_seeds(num_initializations, model_name=model_type)
 
@@ -138,10 +139,6 @@ class ExperimentWrapper:
             'early_stopping' : early_stopping,
             'gpus' : gpus,
         }
-
-        # Data loading
-        data_list, dataset_fixed = load_data_from_configuration(self.data_config)
-
         # Setup config and name of the run(s)
         config = configuration.get_experiment_configuration({
             'model' : self.model_config,
@@ -149,6 +146,9 @@ class ExperimentWrapper:
             'evaluation' : self.evaluation_config,
             'training' : training_config,
         })
+
+        # Data loading
+        data_list, dataset_fixed = load_data_from_configuration(config['data'])
         
         run_name = format_name(self.run_name_format, self.run_name_format_args, config)
         # One global logger for all splits and initializations
@@ -168,13 +168,13 @@ class ExperimentWrapper:
             for reinitialization, seed in enumerate(self.model_seeds):
                 pl.seed_everything(seed)
                 ensembles = []
-                for ensemble_idx in range(self.model_config.get('num_ensemble_members', 1)):
+                for ensemble_idx in range(config['model']['num_ensemble_members']):
 
                     model = SemiSupervisedNodeClassification(
-                        self.model_config, 
+                        config['model'], 
                         data_get_num_attributes(data_dict[data_constants.TRAIN][0]), 
                         data_get_num_classes(data_dict[data_constants.TRAIN][0]), 
-                        learning_rate=learning_rate
+                        learning_rate=config['training']['learning_rate']
                     )
                     # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
 
@@ -183,24 +183,24 @@ class ExperimentWrapper:
 
                     checkpoint_callback = ModelCheckpoint(
                         artifact_dir,
-                        monitor=early_stopping['monitor'],
-                        mode=early_stopping['mode'],
+                        monitor=config['training']['early_stopping']['monitor'],
+                        mode=config['training']['early_stopping']['mode'],
                         save_top_k=1,
                     )
                     early_stopping_callback = EarlyStopping(
-                        monitor=early_stopping['monitor'],
-                        mode=early_stopping['mode'],
-                        patience=early_stopping['patience'],
-                        min_delta=early_stopping['min_delta'],
+                        monitor=config['training']['early_stopping']['monitor'],
+                        mode=config['training']['early_stopping']['mode'],
+                        patience=config['training']['early_stopping']['patience'],
+                        min_delta=config['training']['early_stopping']['min_delta'],
                     )
 
                     # Model training
                     with context_supress_stdout(supress=suppress_stdout), warnings.catch_warnings():
                         warnings.filterwarnings("ignore")
-                        trainer = pl.Trainer(max_epochs=max_epochs, deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ],
+                        trainer = pl.Trainer(max_epochs=config['training']['max_epochs'], deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ],
                                             logger=logger,
                                             progress_bar_refresh_rate=0,
-                                            gpus=gpus,
+                                            gpus=config['training']['gpus'],
                                             )
                         registry_config = config | {
                             'split_idx' : split_idx,
@@ -238,12 +238,12 @@ class ExperimentWrapper:
 
 
                 # Build evaluation pipeline
-                pipeline = Pipeline(self.evaluation_config['pipeline'], self.evaluation_config, gpus=gpus, 
-                    ignore_exceptions=self.evaluation_config['ignore_exceptions'])
+                pipeline = Pipeline(config['evaluation']['pipeline'], config['evaluation'], gpus=gpus, 
+                    ignore_exceptions=config['evaluation']['ignore_exceptions'])
 
                 # Run evaluation pipeline
                 print(f'Executing pipeline...')
-                if self.evaluation_config['print_pipeline']:
+                if config['evaluation']['print_pipeline']:
                     print(str(pipeline))
                 logs = defaultdict(dict)
                 

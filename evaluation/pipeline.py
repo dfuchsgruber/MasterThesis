@@ -972,7 +972,7 @@ class EvaluateCalibration(PipelineMember):
             callbacks = [
                 make_callback_get_predictions(),
                 make_callback_get_ground_truth(),
-            ])
+            ], model_kwargs=self.model_kwargs_evaluate)
         scores, gnd = torch.cat(pred, dim=0), torch.cat(gnd, dim=0)
         ece = expected_calibration_error(scores, gnd, bins=self.bins, eps=ECE_EPS)
 
@@ -1069,6 +1069,7 @@ class Pipeline:
     def __call__(self, *args, **kwargs):
         for member in self.members:
             try:
+                pipeline_log(f'Running {member.print_name}...')
                 args, kwargs = member(*args, **kwargs)
             except Exception as e:
                 pipeline_log(f'{member.print_name} FAILED. Reason: "{e}"')

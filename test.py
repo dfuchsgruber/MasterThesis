@@ -67,8 +67,9 @@ ex.init_dataset(dataset='cora_full', num_dataset_splits=num_splits, train_portio
                     )
 
 ex.init_model(model_type='gcn', hidden_sizes=[64,32], num_initializations=num_inits, weight_scale=2.0, 
-    use_spectral_norm=False, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
+    use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
     residual=True, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1,
+    use_spectral_norm_on_last_layer=False,
     #dropout=0.5, drop_edge=0.5,
     )
 ex.init_run(name='model_no_remove_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[

@@ -21,6 +21,7 @@ default_configuration = {
         'dropout' : 0.0,
         'drop_edge' : 0.0,
         'use_spectral_norm_on_last_layer' : True,
+        'cached' : False,
     },
     'data' : {
         'dataset' : 'cora_ml',
