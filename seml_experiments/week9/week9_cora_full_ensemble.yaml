@@ -1,0 +1,338 @@
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week9_cora_full_ensemble
+  output_dir: /nfs/students/fuchsgru/seml_output/week9
+  project_root_dir: ../..
+
+slurm:
+  experiments_per_job: 4
+  sbatch_options:
+    gres: gpu:1       # num GPUs
+    mem: 16G          # memory
+    cpus-per-task: 2  # num cores
+    time: 0-16:00     # max time, D-HH:MM
+
+
+###### BEGIN PARAMETER CONFIGURATION ######
+
+fixed:
+  run.args:
+    - model:residual
+    - model:use_spectral_norm
+    - data:train_labels_remove_other
+
+  training.early_stopping.patience: 100
+  training.early_stopping.mode: min
+  training.early_stopping.monitor: val_loss
+  training.early_stopping.min_delta: 1e-3
+  training.max_epochs: 1000
+  training.gpus: 1
+
+  data.dataset: cora_full
+  # Select a subgraph of cora_full that contains all AI and OS papers
+  data.base_labels: ['Artificial_Intelligence/NLP', 'Artificial_Intelligence/Data_Mining','Artificial_Intelligence/Speech', 'Artificial_Intelligence/Knowledge_Representation','Artificial_Intelligence/Theorem_Proving', 'Artificial_Intelligence/Games_and_Search','Artificial_Intelligence/Vision_and_Pattern_Recognition', 'Artificial_Intelligence/Planning','Artificial_Intelligence/Agents','Artificial_Intelligence/Robotics', 'Artificial_Intelligence/Expert_Systems','Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
+  data.corpus_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
+  data.train_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
+  data.num_dataset_splits : 5
+  data.train_portion : 20
+  data.val_portion : 20
+  data.test_portion : 0.6
+  data.test_portion_fixed : 0.2
+  data.split_type: uniform
+  data.type: npz
+
+  model.num_initializations : 2
+  model.use_bias: true
+  model.activation: leaky_relu
+  model.leaky_relu_slope: 0.01
+  model.model_type: gcn
+  model.freeze_residual_projection: false
+  model.num_ensemble_members: 10
+  
+  evaluation.ignore_exceptions: true
+  evaluation.pipeline:
+  
+    - type: PerturbData
+      base_data: 'val-reduced'
+      dataset_name: 'val-reduced-bernoulli'
+      budget: 0.1
+      perturbation_type: 'bernoulli'
+      parameters:
+        p: 0.5
+      perturb_in_mask_only: true
+
+    - type: PerturbData
+      base_data: 'val-reduced'
+      dataset_name: 'val-reduced-normal'
+      budget: 0.1
+      perturbation_type: 'normal'
+      parameters:
+        scale: 1.0
+      perturb_in_mask_only: true
+
+    # Evaluate accuracy for all ood settings with and without edges
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced']
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced']
+      model_kwargs:
+        remove_edges: true
+      name: 'no-edges'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val']
+      kind: 'leave-out-classes'
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      name: 'loc'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val']
+      kind: 'leave-out-classes'
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      model_kwargs:
+        remove_edges: true
+      name: 'loc-no-edges'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      name: 'bernoulli'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      model_kwargs:
+        remove_edges: true
+      name: 'bernoulli-no-edges'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      name: 'normal'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      model_kwargs:
+        remove_edges: true
+      name: 'normal-no-edges'
+
+    # Evaluate calibration with and without edges
+    - type: EvaluateCalibration
+      evaluate_on: ['val-reduced']
+
+    - type: EvaluateCalibration
+      evaluate_on: ['val-reduced']
+      model_kwargs:
+        remove_edges: true
+      name: 'no_edges'
+
+    # Lipschitz constants of the model
+
+    - type: EvaluateEmpircalLowerLipschitzBounds
+      num_perturbations: 20
+      min_perturbation: 0.1
+      max_perturbation: 10.0
+      num_perturbations_per_sample: 5
+      seed: 1337
+      perturbation_type: noise
+      name: noise-perturbations
+
+    - type: EvaluateEmpircalLowerLipschitzBounds
+      num_perturbations: 10
+      min_perturbation: 0.1
+      max_perturbation: 10.0
+      num_perturbations_per_sample: 2
+      seed: 1337
+      perturbation_type: derangement
+      name: derangement-perturbations
+
+    # PCA on Feature Space for ID and OOD data (all ood settings)
+
+    - type: FitFeatureSpacePCAIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val']
+      kind: 'leave-out-classes'
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      name: 'loc'
+
+    - type: FitFeatureSpacePCAIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      name: 'bernoulli'
+
+    - type: FitFeatureSpacePCAIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      name: 'normal'
+
+    - type: FitFeatureSpacePCAIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val']
+      kind: 'leave-out-classes'
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: 'loc-no-edges'
+
+    - type: FitFeatureSpacePCAIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: 'bernoulli-no-edges'
+
+    - type: FitFeatureSpacePCAIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: 'normal-no-edges'
+
+    # Softmax emtropy all ood types, with and without edges
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val']
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave-out-classes
+      name: loc
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val']
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave-out-classes
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      name: bernoulli
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: bernoulli-no-edges
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      name: normal
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges
+
+    # Logit Energy on all odd types (with and without edges)
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val']
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave-out-classes
+      name: loc
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val']
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave-out-classes
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      name: bernoulli
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: bernoulli-no-edges
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      name: normal
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges
+
+    # Features shifts for loc experiments
+
+    - type: LogInductiveFeatureShift
+      data_before: 'train'
+      data_after: 'val'
+
+    - type: LogInductiveSoftmaxEntropyShift
+      data_before: 'train'
+      data_after: 'val'
+
+  training.learning_rate: 0.001
+
+grid:
+  data.train_labels_remove_other:
+    type: choice
+    options: [true, false]
+
+  model.use_spectral_norm: 
+    type: choice
+    options: [true, false]
+
+residual-ai:
+  fixed:
+    model.residual: true
+    model.weight_scale: 0.9
+    model.hidden_sizes: [64, 32]
+    data.val_labels: ['Artificial_Intelligence/NLP', 'Artificial_Intelligence/Data_Mining','Artificial_Intelligence/Speech', 'Artificial_Intelligence/Knowledge_Representation','Artificial_Intelligence/Theorem_Proving', 'Artificial_Intelligence/Games_and_Search','Artificial_Intelligence/Vision_and_Pattern_Recognition', 'Artificial_Intelligence/Planning','Artificial_Intelligence/Agents','Artificial_Intelligence/Robotics', 'Artificial_Intelligence/Expert_Systems','Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
+    run.name: gcn_ai_r:{0}_sn:{1}_ro:{2}
+
+residual-os:
+  fixed:
+    model.residual: true
+    model.weight_scale: 0.9
+    model.hidden_sizes: [64, 32]
+    data.val_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
+    run.name: gcn_os_r:{0}_sn:{1}_ro:{2}
+
+no-residual-ai:
+  fixed:
+    model.residual: false
+    model.weight_scale: 2.0
+    model.hidden_sizes: [64, 64]
+    data.val_labels: ['Artificial_Intelligence/NLP', 'Artificial_Intelligence/Data_Mining','Artificial_Intelligence/Speech', 'Artificial_Intelligence/Knowledge_Representation','Artificial_Intelligence/Theorem_Proving', 'Artificial_Intelligence/Games_and_Search','Artificial_Intelligence/Vision_and_Pattern_Recognition', 'Artificial_Intelligence/Planning','Artificial_Intelligence/Agents','Artificial_Intelligence/Robotics', 'Artificial_Intelligence/Expert_Systems','Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
+    run.name: gcn_ai_r:{0}_sn:{1}_ro:{2}
+
+no-residual-os:
+  fixed:
+    model.residual: false
+    model.weight_scale: 2.0
+    model.hidden_sizes: [64, 64]
+    data.val_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
+    run.name: gcn_os_r:{0}_sn:{1}_ro:{2}
+

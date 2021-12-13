@@ -2,6 +2,7 @@ import numpy as np
 import torch
 
 from data.gust_dataset import GustDataset
+from data.npz import NpzDataset
 from torch_geometric.transforms import BaseTransform, Compose
 from data.transform import MaskTransform, MaskLabelsTransform, RemoveLabelsTransform
 from data.util import stratified_split_with_fixed_test_set_portion, uniform_split_with_fixed_test_set_portion
@@ -86,10 +87,10 @@ def load_data_from_configuration_stratified_split(config):
     data_test_fixed : torch_geometric.data.Dataset
         Fixed test dataset that is consistent among all splits.
     """
-    if config['dataset'].lower() in ('cora_ml', 'citeseer', 'pubmed'):
+    if config['type'].lower() in ('gust',):
         data_list, dataset_fixed = _load_gust_data_from_configuration(config)
     else:
-        raise RuntimeError(f'Unsupported dataset type {config["dataset"]}')
+        raise RuntimeError(f'Unsupported dataset type {config["type"]}')
 
     # _print_datasets_stats(data_list[0])
 
@@ -128,10 +129,16 @@ def load_data_from_configuration_uniform_split(config):
     data_test_fixed : torch_geometric.data.Dataset
         Fixed test dataset that is consistent among all splits.
     """
-    if config['dataset'].lower() in ('cora_ml', 'citeseer', 'pubmed', 'cora_full'):
+    if config['type'].lower() in ('gust',):
         base_data = GustDataset(config['dataset'])[0]
+    elif config['type'].lower() in ('npz',):
+        base_data = NpzDataset(
+            config['dataset'], corpus_labels=config['corpus_labels'], min_token_frequency=config['min_token_frequency'],
+            preprocessing = config['preprocessing'], language_model=config['language_model'],
+        )[0]
     else:
-        raise RuntimeError(f'Unsupported dataset type {config["dataset"]}')
+        raise RuntimeError(f'Unsupported dataset type {config["type"]}')
+
     return uniform_split_with_fixed_test_set_portion(base_data,
         config['num_dataset_splits'],
         num_train = int(config['train_portion']),

@@ -44,7 +44,7 @@ class GustDataset(SingleGraphDataset):
         if sparse_graph.class_names is not None:
             label_to_idx = {label : idx for idx, label in enumerate(sparse_graph.class_names)}
         else:
-            label_to_idx = {f'{idx}' : idx for idx in set(y)}
+            label_to_idx = {f'class_{idx}' : idx for idx in set(y)}
         super().__init__(x, edge_index, y, vertex_to_idx, label_to_idx, np.ones_like(y), transform=transform)
 
 if __name__ == '__main__':

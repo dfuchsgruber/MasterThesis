@@ -32,7 +32,7 @@ class SingleGraphDataset(Dataset):
         If given, a mask to identify veritces with alternated features.
     """
 
-    def __init__(self, x, edge_index, y, vertex_to_idx, label_to_idx, mask, transform=None, is_perturbed=None):
+    def __init__(self, x, edge_index, y, vertex_to_idx, label_to_idx, mask, transform=None, is_perturbed=None, feature_to_idx=None, edge_weight=None):
 
         if transform is None:
             transform = Compose([])
@@ -42,7 +42,13 @@ class SingleGraphDataset(Dataset):
             y=torch.tensor(y).long(), mask=torch.tensor(mask).bool())
         self._data.vertex_to_idx = vertex_to_idx
         self._data.label_to_idx = label_to_idx
+        if feature_to_idx is not None:
+            self._data.feature_to_idx = feature_to_idx
         self._is_perturbed = is_perturbed
+        if edge_weight is not None:
+            self._data.edge_weight = edge_weight
+        else:
+            self._data.edge_weight = torch.ones(self._data.edge_index.size(1))
     
     def __len__(self):
         return 1

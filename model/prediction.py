@@ -42,7 +42,7 @@ class Prediction:
         self.features.append(features)
 
     def __add__(self, other):
-        p = Prediction(self.features)
+        p = Prediction(self.features + other.features)
 
 
     def get_features(self, layer, average=True):

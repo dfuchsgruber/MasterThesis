@@ -26,6 +26,7 @@ def data_get_summary(dataset, prefix='\t'):
     data = dataset[0]
     summary = []
     summary.append(f'{prefix}Number of Vertices : {data.x.size()[0]}')
+    summary.append(f'{prefix}Number of Features : {data.x.size()[1]}')
     summary.append(f'{prefix}Number of Vertices in Mask : {data.x[data.mask].size()[0]}')
     summary.append(f'{prefix}Number of Labels : {len(torch.unique(data.y))}')
     summary.append(f'{prefix}Number of Labels in Mask : {len(torch.unique(data.y[data.mask]))}')
@@ -36,6 +37,7 @@ def data_get_summary(dataset, prefix='\t'):
     vertex_hash = data.x * torch.cos(torch.arange(0, n).repeat(d).view((d, n)).T / 1.5 **(2 * torch.arange(0, d).repeat(n).view((n, d)) / d))
     summary.append(f'{prefix}Vertex hash in mask: {vertex_hash[data.mask].mean()}')
     summary.append(f'{prefix}Vertex hash graph: {vertex_hash.mean()}')
+    summary.append(f'{prefix}Feature range {data.x.min()} - {data.x.max()}')
     
 
     return '\n'.join(summary)
@@ -145,9 +147,9 @@ def labels_to_idx(labels, dataset):
             labels = [dataset.label_to_idx[label] for label in labels]
         elif all(isinstance(label, int) for label in labels):
             raise RuntimeError(f'Using ints to adress labels is deprecated!')
-        if all(isinstance(label, int) for label in labels):
-            return list(labels)
-        else:
+        try:
+            return [int(label) for label in labels]
+        except:
             raise RuntimeError(f'Could not understand the datatype of labels {set(type(label) for label in labels)}')
 
 def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, num_val=20, portion_test_fixed=0.2, train_labels='all', train_labels_remove_other=False, 

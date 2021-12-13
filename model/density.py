@@ -80,39 +80,60 @@ def cov_and_mean(x, rowvar=False, bias=False, ddof=None, aweights=None):
     return c.squeeze(), avg
 
 class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
-    """ Model that estimates features space density fitting a Gaussian per class. """
+    """ Model that estimates features space density fitting a Gaussian per class. 
+    
+    Parameteres:
+    ------------
+    diagonal_covariance : bool
+        If only a diagonal covariance is to be fitted.
+    prior : float
+        Value to add to the diagonal of the covariance of each gaussian.
+    relative : bool
+        If the relative log density log(p(x | c)) - log(p(x)) should be reported.
+    mode : 'weighted' or 'max'
+        Which density to report:
+            - 'weighted' : Report log(sum_c p(x | c) * p(c))
+            - 'max' : Report log(max_c p(x | c))
+    """
 
     name = 'GaussianPerClass'
 
     def __init__(
             self, 
-            dimensionality_reduction={'type' : None}, 
-            diagonal_covariance=False,
+            diagonal_covariance = False,
             prior=0.0,
+            relative = False,
+            mode = 'weighted',
             **kwargs
         ):
         super().__init__()
         self._fitted = False
-        self.dimensionality_reduction = DimensionalityReduction(**dimensionality_reduction)
         self.diagonal_covariance = diagonal_covariance
         self.prior = prior
+        self.relative = relative
+        self.mode = mode.lower()
 
     def __str__(self):
         return '\n'.join([
             self.name,
-            f'\t Dimensionality Reduction : ',
-            str(self.dimensionality_reduction),
             f'\t Diagonal covariance : {self.diagonal_covariance}'
             f'\t Prior: {self.prior}',
         ])
 
     @property
     def compressed_name(self):
+        tags = ['gpc']
         if self.diagonal_covariance:
-            diagonal = 'diag'
+            tags.append('diag')
         else:
-            diagonal = 'full'
-        return f'gpc-{diagonal}'
+            tags.append('full')
+        if self.relative:
+            tags.append('relative')
+        if self.mode == 'weighted':
+            tags.append('weighted')
+        elif self.mode == 'max':
+            tags.append('max')
+        return '-'.join(tags)
 
     def _make_covariance_psd(self, cov, eps=1e-6, tol=1e-6):
         """ If a covariance matrix is not psd (numerical errors), a small value is added to its diagonal to make it psd.
@@ -146,28 +167,34 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
         """
         if self._fitted:
             raise RuntimeError(f'GMM density model was already fitted.')
+
+        features = features.cpu().float()
+        
         self.components = {}
         self.coefs = dict()
         self.means = dict()
         self.covs = dict()
 
-        self.dimensionality_reduction.fit(features, labels)
-        transformed_by_class = self.dimensionality_reduction.transform(features)
-
         for label in range(labels.size(1)):
             if labels[:, label].sum(0) == 0: # No observations of this label, might happen if it was excluded from training
                 continue
 
-            transformed = torch.tensor(transformed_by_class[label]).float()
-            self.covs[label], self.means[label] = cov_and_mean(transformed, aweights=labels[:, label])
-            self.covs[label] += torch.eye(transformed.size(1)) * self.prior
+            self.covs[label], self.means[label] = cov_and_mean(features, aweights=labels[:, label])
+            self.covs[label] += torch.eye(features.size(1)) * self.prior
             self.coefs[label] = labels[:, label].sum(0) / labels.size(0)
 
             if self.diagonal_covariance:
-                self.covs[label] *= torch.eye(transformed.size(1))
+                self.covs[label] *= torch.eye(features.size(1))
 
             self._make_covariance_psd(self.covs[label], eps=1e-8)
+        
+        if self.relative:
+            self.covs['all'], self.means['all'] = cov_and_mean(features)
+            self.covs['all'] += torch.eye(features.size(1)) * self.prior
             
+            if self.diagonal_covariance:
+                self.covs['all'] *= torch.eye(features.size(1))
+
         self._fitted = True
     
     @torch.no_grad()
@@ -185,16 +212,37 @@ class FeatureSpaceDensityGaussianPerClass(torch.nn.Module):
             Log density of the GMM at each feature point.
         """
         if not self._fitted:
-            raise RuntimeError(f'GMM density was not fitted to any data!')
-
-        transformed_by_class = self.dimensionality_reduction.transform(features)
+            raise RuntimeError(f'GPC density was not fitted to any data!')
         
-        log_densities = [] # Per component, weighted with component
-        for label in self.coefs:
-            transformed = torch.tensor(transformed_by_class[label]).float()
-            log_densities.append(MultivariateNormal(self.means[label], covariance_matrix=self.covs[label], validate_args=False).log_prob(transformed))
-        log_densities = torch.stack(log_densities) # shape n_classes, N
-        return torch.logsumexp(log_densities, 0) # Shape N
+        features = features.cpu().float()
+
+        log_densities, weights = [], []
+        # Per component, weighted with component
+        for label, weight in self.coefs.items():
+            log_densities.append(
+                MultivariateNormal(self.means[label], 
+                covariance_matrix=self.covs[label], 
+                validate_args=False).log_prob(
+                    features.cpu()
+                ))
+            weights.append(weight)
+        log_densities, weights = torch.stack(log_densities), torch.stack(weights).view((-1, 1))
+        # `log_densities` has shape (num_classes, N)
+
+        if self.relative: 
+            # Subtract the class independet background density p(x)
+            log_densities -= MultivariateNormal(
+                self.means['all'],
+                covariance_matrix=self.covs['all'], 
+                validate_args=False
+            ).log_prob(features.cpu())
+
+        if self.mode == 'weighted':
+            return torch.logsumexp(log_densities + torch.log(weights), 0) # Sum over `num_classes` axis
+        elif self.mode == 'max':
+            return torch.max(log_densities, 0)[0]
+        else:
+            raise RuntimeError(f'Unknown mode for {self.name} : {self.mode}')
 
 
 class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
@@ -206,17 +254,12 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
             self, 
             number_components=5, 
             seed=1337,
-            dimensionality_reduction={'type' : None},
             **kwargs
         ):
         super().__init__()
         self._fitted = False
         self.number_components = number_components
         self.seed = seed
-        # Dimensionality reduction: If used, assert that it is not per class
-        if dimensionality_reduction['type'] is not None and dimensionality_reduction['per_class']:
-            raise RuntimeError(f'GaussianMixture only supports a non-per-class dimensionality reduction.')
-        self.dimensionality_reduction = DimensionalityReduction(**dimensionality_reduction)
         
 
     def __str__(self):
@@ -229,12 +272,6 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
     @property
     def compressed_name(self):
         return f'{self.number_components}-mog'
-
-    def _transform(self, features):
-        transformed_by_class = self.dimensionality_reduction.transform(features)
-        # All transformations should be the same, select any
-        return list(transformed_by_class.values())[0]
-
 
     @torch.no_grad()
     def fit(self, features, labels):
@@ -250,10 +287,8 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
 
         if self._fitted:
             raise RuntimeError(f'{self.name} density model was already fitted.')
-        self.dimensionality_reduction.fit(features, labels)
-        transformed = self._transform(features)
         self.gmm = GaussianMixture(n_components = self.number_components, random_state=self.seed)
-        self.gmm.fit(transformed)
+        self.gmm.fit(features.cpu().numpy())
         self._fitted = True
     
     @torch.no_grad()
@@ -272,8 +307,7 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
         """
         if not self._fitted:
             raise RuntimeError(f'{self.name} density was not fitted to any data!')
-        transformed = self._transform(features)
-        log_likelihood = torch.tensor(self.gmm.score_samples(transformed))
+        log_likelihood = torch.tensor(self.gmm.score_samples(features.cpu().numpy()))
         return log_likelihood
 
 densities = [

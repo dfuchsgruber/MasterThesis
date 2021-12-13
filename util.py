@@ -225,5 +225,30 @@ def calibration_curve(probs, y_true, bins=10, eps=1e-12):
     
     return bin_edges, bin_confidence, bin_accuracy, bin_weight
 
+def sparse_max(A, B):
+    """
+    Return the element-wise maximum of sparse matrices `A` and `B`.
+
+    References:
+    -----------
+    Taken from: https://stackoverflow.com/questions/19311353/element-wise-maximum-of-two-sparse-matrices
+    """
+    AgtB = (A > B).astype(int)
+    M = AgtB.multiply(A - B) + B
+    return M
+
+def get_cache_path():
+    """ Returns the path to the standard cache.
+    
+    Returns:
+    --------
+    cache_path : str
+        Path the standard chache.
+    """
+    xdg_cache_home = os.environ.get('XDG_CACHE_HOME') or \
+           os.path.join(os.path.expanduser('~'), '.cache')
+
+    return os.path.join(xdg_cache_home, 'MasterThesis')
+
 # edge_list = torch.tensor([[0, 1, 2, 3, 5], [8, 3, 3, 3, 4]]).long()
 # print(get_k_hop_neighbourhood(edge_list, 0))

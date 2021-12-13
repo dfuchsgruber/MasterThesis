@@ -6,11 +6,12 @@ from metrics import accuracy
 from model.gnn import make_model_by_configuration
 from model.prediction import Prediction
 import configuration
+from torch_geometric.utils import remove_self_loops, add_self_loops
 
 class SemiSupervisedNodeClassification(pl.LightningModule):
     """ Wrapper for networks that perform semi supervised node classification. """
 
-    def __init__(self, backbone_configuration, num_input_features, num_classes, learning_rate=1e-2):
+    def __init__(self, backbone_configuration, num_input_features, num_classes, learning_rate=1e-2, self_loop_fill_value=1.0):
         super().__init__()
         # Get default configuration values (a bit hacky...)
         backbone_configuration = configuration.get_experiment_configuration({'model' : backbone_configuration})['model']
@@ -18,10 +19,23 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         self.save_hyperparameters()
         self.backbone = make_model_by_configuration(backbone_configuration, num_input_features, num_classes)
         self.learning_rate = learning_rate
+        self.self_loop_fill_value = self_loop_fill_value
 
     def forward(self, batch, *args, remove_edges=False, **kwargs):
+
+        edge_index, edge_weight = batch.edge_index, batch.edge_weight
+        
         if remove_edges:
-            batch.edge_index = torch.tensor([]).view(2, 0).long().to(batch.edge_index.device)
+            edge_index = torch.tensor([]).view(2, 0).long().to(edge_index.device)
+            edge_weight = torch.tensor([]).view(0).float().to(edge_weight.device)
+
+        # Replace / add self loops with a given fill value
+        edge_index, edge_weight = remove_self_loops(edge_index, edge_weight)
+        edge_index, edge_weight = add_self_loops(edge_index, edge_weight, fill_value = self.self_loop_fill_value, num_nodes=batch.x.size(0))
+
+        batch.edge_index = edge_index
+        batch.edge_weight = edge_weight
+
         return Prediction(self.backbone(batch, *args, **kwargs))
 
     def configure_optimizers(self):  

@@ -63,7 +63,11 @@ class ExperimentWrapper:
     def init_dataset(self, dataset, num_dataset_splits, train_portion, val_portion, test_portion, test_portion_fixed,
                         train_labels='all', train_labels_remove_other=False,
                         val_labels='all', val_labels_remove_other=False,
-                        split_type='stratified', base_labels='all',
+                        split_type='stratified', base_labels='all', 
+                        type='gust', corpus_labels='all',
+                        min_token_frequency=10,
+                        preprocessing='bag_of_words',
+                        language_model='bert-base-uncased',
                         ):
         self.data_config = {
             'dataset' : dataset,
@@ -80,6 +84,12 @@ class ExperimentWrapper:
             # 'val_labels_compress' : val_labels_compress, # Val labels should never be compressed
             'split_type' : split_type,
             'base_labels' : base_labels,
+            'type' : type,
+            'corpus_labels' : corpus_labels,
+            'min_token_frequency' : min_token_frequency,
+            'preprocessing' : preprocessing,
+            'language_model' : language_model,
+
         }
         # self.data_mask_split, self.data_mask_test_fixed = stratified_split_with_fixed_test_set_portion(self.data[0].y.numpy(), num_dataset_splits, 
         #     portion_train=train_portion, portion_val=val_portion, portion_test_fixed=test_portion_fixed, portion_test_not_fixed=test_portion)
@@ -87,7 +97,8 @@ class ExperimentWrapper:
     @ex.capture(prefix="model")
     def init_model(self, model_type: str, hidden_sizes: list, weight_scale: float, num_initializations: int, use_spectral_norm: bool, num_heads=-1, 
         diffusion_iterations=5, teleportation_probability=0.1, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01, normalize=True,
-        residual=False, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1, dropout=0.0, drop_edge=0.0, use_spectral_norm_on_last_layer=True,):
+        residual=False, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1, dropout=0.0, drop_edge=0.0, use_spectral_norm_on_last_layer=True,
+        self_loop_fill_value=1.0,):
         self.model_config = {
             'hidden_sizes' : hidden_sizes,
             'weight_scale' : weight_scale,
@@ -107,6 +118,7 @@ class ExperimentWrapper:
             'dropout' : dropout,
             'drop_edge' : drop_edge,
             'use_spectral_norm_on_last_layer' : use_spectral_norm_on_last_layer,
+            'self_loop_fill_value' : self_loop_fill_value,
         }
         self.model_seeds = model_seeds(num_initializations, model_name=model_type)
 
@@ -174,7 +186,8 @@ class ExperimentWrapper:
                         config['model'], 
                         data_get_num_attributes(data_dict[data_constants.TRAIN][0]), 
                         data_get_num_classes(data_dict[data_constants.TRAIN][0]), 
-                        learning_rate=config['training']['learning_rate']
+                        learning_rate=config['training']['learning_rate'],
+                        self_loop_fill_value=config['model']['self_loop_fill_value'],
                     )
                     # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
 

@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from evaluation.util import split_labels_into_id_and_ood, get_data_loader, run_model_on_datasets, count_neighbours_with_label, get_distribution_labels_leave_out_classes, separate_distributions_leave_out_classes, get_distribution_labels_perturbations
 import evaluation.constants as evaluation_constants
 from evaluation.callbacks import *
-from plot.density import plot_2d_log_density
+from plot.density import plot_2d_log_density, plot_density
 from plot.features import plot_2d_features
 from plot.util import plot_histogram, plot_histograms, plot_2d_histogram
 from plot.calibration import plot_calibration
@@ -302,6 +302,9 @@ class OODDetection(OODSeparation):
             If `True`, the proxy will be plotted in log scale.
         """
 
+        if plot_proxy_log_scale:
+            proxy += 1e-10 # To be able to plot
+
         # Calculate area under the ROC for separating in-distribution (label 1) from out of distribution (label 0)
         roc_auc = roc_auc_score(auroc_labels[auroc_mask].cpu().long().numpy(), proxy[auroc_mask].cpu().numpy()) # higher proxy -> higher uncertainty
         kwargs['metrics'][f'auroc_{proxy_name}{self.suffix}'] = roc_auc
@@ -327,7 +330,7 @@ class OODDetection(OODSeparation):
                         f'{self.prefix}max_{proxy_name}' : proxy_label.max(),
                         f'{self.prefix}median_{proxy_name}' : proxy_label.median(),
                     }, f'{proxy_name}_statistics', step=label)
-                fig, ax = plot_histograms(proxy.cpu(), y.cpu(), log_scale=plot_proxy_log_scale, kind='vertical', x_label=f'{proxy_name}', y_label='Class')
+                fig, ax = plot_histograms(proxy.cpu(), y.cpu(), log_scale=plot_proxy_log_scale, kind='vertical', x_label=f'Proxy', y_label='Class')
                 log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_all_classes{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
                 pipeline_log(f'Evaluated {proxy_name}.')
                 plt.close(fig)
@@ -338,7 +341,7 @@ class OODDetection(OODSeparation):
             if self.log_plots:
                 fig, ax = plot_histograms(proxy.cpu(), distribution_labels.cpu(), 
                     label_names=distribution_label_names,
-                    kind='vertical', kde=True, log_scale=plot_proxy_log_scale,  x_label=f'{proxy_name}', y_label='Kind')
+                    kind='vertical', kde=True, log_scale=plot_proxy_log_scale,  x_label=f'Proxy', y_label='Kind')
                 log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_all_kinds{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
                 pipeline_log(f'Saved {proxy_name} (all kinds) histogram to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_histograms_all_kinds{self.suffix}.pdf')))
                 plt.close(fig)
@@ -349,7 +352,7 @@ class OODDetection(OODSeparation):
             if self.log_plots:
                 fig, ax = plot_histograms(proxy[auroc_mask].cpu(), auroc_labels[auroc_mask].cpu().long(), 
                     label_names={0 : 'Out ouf distribution', 1 : 'In distribution'},
-                    kind='overlapping', kde=True, log_scale=plot_proxy_log_scale,  x_label=f'{proxy_name}', y_label='Kind')
+                    kind='overlapping', kde=True, log_scale=plot_proxy_log_scale,  x_label=f'Proxy', y_label='Kind')
                 log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_id_vs_ood{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
                 pipeline_log(f'Saved {proxy_name} histogram (id vs ood) to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_histograms_id_vs_ood{self.suffix}.pdf')))
                 plt.close(fig)
@@ -535,12 +538,12 @@ class FitFeatureDensityGrid(FeatureDensity):
             for values in product(*[dim_reduction_grid[k] for k in keys]):
                 dim_reduction_config = {key : values[idx] for idx, key in enumerate(keys)}
                 dim_reduction = DimensionalityReduction(type=dim_reduction_type, per_class=False, **dim_reduction_config)
-                dim_reduction.fit(features_to_fit, predictions_to_fit)
+                dim_reduction.fit(features_to_fit)
                 pipeline_log(f'{self.name} fitted dimensionality reduction {dim_reduction.compressed_name}')
 
                 # TODO: dim-reductions transform per-class, but this is not supported here, so we just take any and set `per_class` to false in its constructor
-                features_to_fit_reduced = torch.from_numpy(list(dim_reduction.transform(features_to_fit).values())[0])
-                features_to_evaluate_reduced = torch.from_numpy(list(dim_reduction.transform(features_to_evaluate).values())[0])
+                features_to_fit_reduced = torch.from_numpy(dim_reduction.transform(features_to_fit))
+                features_to_evaluate_reduced = torch.from_numpy(dim_reduction.transform(features_to_evaluate))
 
                 # Grid over feature space densities
                 for density_type, density_grid in self.density_types.items():
@@ -549,7 +552,6 @@ class FitFeatureDensityGrid(FeatureDensity):
                         density_config = {key : values_density[idx] for idx, key in enumerate(keys_density)}
                         density_model = get_density_model(
                             density_type=density_type, 
-                            dimensionality_reduction={'type' : None}, # Features are already reduced
                             **density_config,
                             )
                         density_model.fit(features_to_fit_reduced, predictions_to_fit)
@@ -557,55 +559,89 @@ class FitFeatureDensityGrid(FeatureDensity):
                         is_finite_density = torch.isfinite(log_density)
 
                         pipeline_log(f'{self.name} fitted density {density_model.compressed_name}')
+                        proxy_name = f'{density_model.compressed_name}:{dim_reduction.compressed_name}'
                         self.ood_detection(log_density[is_finite_density], labels_to_evaluate[is_finite_density],
-                            f'{density_model.compressed_name}:{dim_reduction.compressed_name}',
+                            proxy_name,
                             auroc_labels[is_finite_density], auroc_mask[is_finite_density], distribution_labels[is_finite_density],
-                            distribution_label_names, plot_proxy_log_scale=True, **kwargs
+                            distribution_label_names, plot_proxy_log_scale=False, **kwargs
                         )
+                        
+                        if self.log_plots:
+                            fig, ax = plot_density(features_to_fit, 
+                                features_to_evaluate[is_finite_density], density_model, 
+                                distribution_labels[is_finite_density], distribution_label_names, seed=self.seed)
+                            log_figure(kwargs['logs'], fig, f'pca{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
+                            plt.close(fig)
+
 
         return args, kwargs
 
-class FitFeatureSpacePCAIDvsOOD(OODSeparation):
-    """ Fits a 2d PCA to the feature space and separates id and ood data. """
+class VisualizeIDvsOOD(OODSeparation):
+    """ Fits a 2d visualization to some feature space and separates id and ood data. """
 
-    name = 'FitFeatureSpacePCAIDvsOOD'
+    name = 'VisualizeIDvsOOD'
 
-    def __init__(self, gpus=0, fit_to=[data_constants.TRAIN], **kwargs):
+    def __init__(self, gpus=0, fit_to=[data_constants.TRAIN], layer=-2, dimensionality_reductions= ['pca'], **kwargs):
             super().__init__(**kwargs)
             self.gpus = gpus
             self.fit_to = fit_to
+            self.layer = layer
+            self.dimensionality_reductions = dimensionality_reductions
 
     @property
     def configuration(self):
         return super().configuration | {
             'Fit to' : self.fit_to,
+            'Feature layer' : self.layer,
+            'Dimensionality reductions' : self.dimensionality_reductions,
         }
 
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
 
-        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus, model_kwargs=self.model_kwargs_fit)
-        features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
-        pca = PCA(n_components=2)
-        transformed = pca.fit_transform(features.cpu().numpy())
-        fig, ax = plot_2d_features(torch.tensor(transformed), labels)
-        log_figure(kwargs['logs'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_data_fit', 'feature_space_pca_id_vs_ood', save_artifact=kwargs['artifact_directory'])
-        pipeline_log(f'Logged 2d pca fitted to {self.fit_to}')
-        plt.close(fig)
 
-        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus, model_kwargs=self.model_kwargs_evaluate)
+        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], 
+                                                                gpus=self.gpus, model_kwargs=self.model_kwargs_fit,
+                                                                callbacks=[
+                                                                    make_callback_get_features(layer=self.layer),
+                                                                    make_callback_get_predictions(),
+                                                                    make_callback_get_ground_truth(),
+                                                                ])
         features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
-        transformed = pca.transform(features.cpu().numpy())
-        fig, ax = plot_2d_features(torch.tensor(transformed), labels)
-        log_figure(kwargs['logs'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_by_label', 'feature_space_pca_id_vs_ood', save_artifact=kwargs['artifact_directory'])
-        pipeline_log(f'Logged 2d pca fitted to {self.fit_to}, evaluated on {self.evaluate_on} by label')
-        plt.close(fig)
-
         auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
-        fig, ax = plot_2d_features(torch.tensor(transformed), distribution_labels, distribution_label_names)
-        log_figure(kwargs['logs'], fig, f'pca_2d_id_vs_ood{self.suffix}_visualization_by_id_vs_ood', 'feature_space_pca_id_vs_ood', save_artifact=kwargs['artifact_directory'])
-        pipeline_log(f'Logged 2d pca fitted to {self.fit_to}, evaluated on {self.evaluate_on} by in-distribution vs out-of-distribution')
-        plt.close(fig)
+
+        for dimensionality_reduction in self.dimensionality_reductions:
+            group = f'visualization_id_vs_ood_{dimensionality_reduction.lower()}{self.suffix}'
+            dim_reduction = DimensionalityReduction(type = dimensionality_reduction, number_components=2)
+            dim_reduction.fit(features)
+            statistics = dim_reduction.statistics()
+            if len(statistics) > 0:
+                log_metrics(kwargs['logs'], statistics, group)
+            transformed = dim_reduction.transform(features)
+            
+            fig, ax = plot_2d_features(torch.tensor(transformed), labels)
+            log_figure(kwargs['logs'], fig, f'data_fit', group, save_artifact=kwargs['artifact_directory'])
+            pipeline_log(f'Logged 2d{dimensionality_reduction} fitted to {self.fit_to}')
+            plt.close(fig)
+
+            features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], 
+                                                                    gpus=self.gpus, model_kwargs=self.model_kwargs_evaluate,
+                                                                    callbacks=[
+                                                                        make_callback_get_features(layer=self.layer),
+                                                                        make_callback_get_predictions(),
+                                                                        make_callback_get_ground_truth(),
+                                                                    ])
+            features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
+            transformed = dim_reduction.transform(features)
+            fig, ax = plot_2d_features(torch.tensor(transformed), labels)
+            log_figure(kwargs['logs'], fig, f'id_vs_ood_by_label', group, save_artifact=kwargs['artifact_directory'])
+            pipeline_log(f'Logged 2d {dimensionality_reduction} fitted to {self.fit_to}, evaluated on {self.evaluate_on} by label')
+            plt.close(fig)
+
+            fig, ax = plot_2d_features(torch.tensor(transformed), distribution_labels, distribution_label_names)
+            log_figure(kwargs['logs'], fig, f'id_vs_ood_by_distribution', group, save_artifact=kwargs['artifact_directory'])
+            pipeline_log(f'Logged 2d {dimensionality_reduction} fitted to {self.fit_to}, evaluated on {self.evaluate_on} by in-distribution vs out-of-distribution')
+            plt.close(fig)
 
         return args, kwargs
 
@@ -993,7 +1029,7 @@ pipeline_members = [
     EvaluateEmpircalLowerLipschitzBounds,
     LogFeatures,
     FitFeatureSpacePCA,
-    FitFeatureSpacePCAIDvsOOD,
+    VisualizeIDvsOOD,
     PrintDatasetSummary,
     LogInductiveFeatureShift,
     LogInductiveSoftmaxEntropyShift,

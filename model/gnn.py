@@ -45,8 +45,8 @@ class ResidualBlock(nn.Module):
         else:
             self.input_projection = None
         
-    def forward(self, x, edge_index):
-        h = self.conv(x, edge_index)
+    def forward(self, x, edge_index, **kwargs):
+        h = self.conv(x, edge_index, **kwargs)
         if self.input_projection:
             x = self.input_projection(x)
         return x + h
@@ -105,19 +105,19 @@ class GCN(nn.Module):
 
     @staticmethod
     def _make_conv_with_spectral_norm(input_dim, output_dim, *args, use_spectral_norm=False, weight_scale=1.0, **kwargs):
-        conv = torch_geometric.nn.GCNConv(input_dim, output_dim, *args, **kwargs)
+        conv = torch_geometric.nn.GCNConv(input_dim, output_dim, *args, **kwargs, add_self_loops=False)
         if use_spectral_norm:
             conv.lin = spectral_norm(conv.lin, name='weight', rescaling=weight_scale)
         return conv
 
     def forward(self, data, dropout=True):
-        x, edge_index = data.x, data.edge_index
+        x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
         if self.drop_edge > 0:
-            edge_index, _ = dropout_adj(edge_index, p=self.drop_edge, 
+            edge_index, edge_weight = dropout_adj(edge_index, edge_attr=edge_weight, p=self.drop_edge, 
                                             force_undirected=False, training=dropout)
         embeddings = []
         for num, layer in enumerate(self.convs):
-            x = layer(x, edge_index)
+            x = layer(x, edge_index, edge_weight=edge_weight)
             if num < len(self.convs) - 1:
                 x = self.activation(x)
                 if self.dropout > 0:

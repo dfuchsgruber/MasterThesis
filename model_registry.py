@@ -31,6 +31,7 @@ class ModelRegistry:
                         'model.num_samples', 
                         'evaluation', 
                         'training.gpus',
+                        'training.jobs',
                         ],
                     directory_path='/nfs/students/fuchsgru/model_registry', copy_checkpoints_to_registry=True):
         self.database = seml.database
