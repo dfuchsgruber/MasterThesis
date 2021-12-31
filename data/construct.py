@@ -5,7 +5,8 @@ from data.gust_dataset import GustDataset
 from data.npz import NpzDataset
 from torch_geometric.transforms import BaseTransform, Compose
 from data.transform import MaskTransform, MaskLabelsTransform, RemoveLabelsTransform
-from data.util import stratified_split_with_fixed_test_set_portion, uniform_split_with_fixed_test_set_portion
+from data.util import stratified_split_with_fixed_test_set_portion
+from data.split import uniform_split_with_fixed_test_portion
 import data.constants
 
 def _append_labels_transform(dataset, select_labels, remove_other_labels, compress_labels):
@@ -140,17 +141,18 @@ def load_data_from_configuration_uniform_split(config):
     else:
         raise RuntimeError(f'Unsupported dataset type {config["type"]}')
 
-    return uniform_split_with_fixed_test_set_portion(base_data,
+    return uniform_split_with_fixed_test_portion(
+        base_data,
         config['num_dataset_splits'],
-        num_train = int(config['train_portion']),
-        num_val = int(config['val_portion']),
+        num_samples = int(config['train_portion']),
         portion_test_fixed = config['test_portion_fixed'],
-        train_labels = config.get('train_labels', 'all'),
-        train_labels_remove_other=config.get('train_labels_remove_other', False),
-        val_labels = config.get('val_labels', 'all'),
-        val_labels_remove_other = config['val_labels_remove_other'],
-        base_labels = config.get('base_labels', 'all'),
+        train_labels = config['train_labels'],
+        setting = config['setting'],
+        left_out_class_labels = config['left_out_class_labels'],
+        base_labels = config['base_labels'],
         drop_train = config['drop_train_vertices_portion'],
+        perturbation_budget = config['perturbation_budget'],
+        ood_type = config['ood_type'],
         )
 
 def load_data_from_configuration(config):
@@ -170,10 +172,10 @@ def load_data_from_configuration(config):
     """
     split_type = config.get('split_type', 'stratified').lower()
     if split_type == 'stratified':
-        data_list, data_test_fixed = load_data_from_configuration_stratified_split(config)
+        # data_list, data_test_fixed = load_data_from_configuration_stratified_split(config)
+        raise RuntimeError(f'Stratified splitting is not supported fully.')
     elif split_type == 'uniform':
-        data_list, data_test_fixed = load_data_from_configuration_uniform_split(config)
+        return load_data_from_configuration_uniform_split(config)
     else:
         raise RuntimeError(f'Unsupported dataset split type {split_type}')
-    return data_list, data_test_fixed
     

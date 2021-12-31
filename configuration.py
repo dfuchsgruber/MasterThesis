@@ -1,5 +1,6 @@
 from copy import deepcopy
 from collections.abc import Mapping
+import data.constants as dconstants
 
 default_configuration = {
     'model' : {
@@ -29,12 +30,16 @@ default_configuration = {
         'num_dataset_splits' : 1,
         'train_portion' : 20,
         'val_portion' : 20,
-        'test_portion' : 0.6,
+        # 'test_portion' : 0.6,
         'test_portion_fixed' : 0.2,
         'train_labels' : 'all',
-        'train_labels_remove_other' : True,
-        'val_labels' : 'all',
-        'val_labels_remove_other' : True,
+        'perturbation_budget' : 0.1,
+        'setting' : dconstants.HYBRID[0],
+        'ood_type' : dconstants.LEFT_OUT_CLASSES[0],
+        'left_out_class_labels' : 'all',
+        # 'train_labels_remove_other' : True,
+        # 'val_labels' : 'all',
+        # 'val_labels_remove_other' : True,
         'split_type' : 'uniform',
         'base_labels' : 'all',
         'type' : 'gust',
@@ -45,7 +50,6 @@ default_configuration = {
         'drop_train_vertices_portion' : 0.0,
         'normalize' : 'l2',
         'vectorizer' : 'tf-idf',
-        
     },
     'training' : {
         'max_epochs' : 1000,
