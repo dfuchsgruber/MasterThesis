@@ -43,17 +43,18 @@ def plot_density(points_to_fit, points_to_eval, density_model, labels, label_nam
     """
     
     bins_x, bins_y = bins, bins
-    bins_x = 7
     
     # First create a PCA and embed points to fit
     pca = PCA(n_components=2, random_state=seed)
-    pca.fit(points_to_fit.cpu().numpy())
+    points_to_fit_emb = pca.fit_transform(points_to_fit.cpu().numpy())
         
     # Embed the points to eval
     points_to_eval_emb = pca.transform(points_to_eval.cpu().numpy())
-    mins, maxs = points_to_eval_emb.min(0), points_to_eval_emb.max(0)
+    points_emb = np.concatenate([points_to_fit_emb, points_to_eval_emb], axis=0)
+
+    mins, maxs = points_emb.min(0), points_emb.max(0)
+    mins, maxs = mins - 0.1 * (maxs - mins), maxs + 0.1 * (maxs - mins) # Gives a margin for the density map
     xx, yy = np.meshgrid(np.linspace(mins[0], maxs[0], bins_x), np.linspace(mins[1], maxs[1], bins_y), indexing='ij')
-    
     
     # Flatten
     xx, yy = xx.reshape((-1, 1)), yy.reshape((-1, 1))
@@ -72,6 +73,7 @@ def plot_density(points_to_fit, points_to_eval, density_model, labels, label_nam
     for label, name in label_names.items():
         points_to_plot = points_to_eval_emb[labels == label]
         ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label=name, marker='x')
+    ax.scatter(points_to_fit_emb[:, 0], points_to_fit_emb[:, 1], label='Fit', marker='1') 
     ax.legend()
     return fig, ax
 

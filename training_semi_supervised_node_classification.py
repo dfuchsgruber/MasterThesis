@@ -68,6 +68,7 @@ class ExperimentWrapper:
                         min_token_frequency=10,
                         preprocessing='bag_of_words',
                         language_model='bert-base-uncased',
+                        drop_train_vertices_portion = 0.0,
                         ):
         self.data_config = {
             'dataset' : dataset,
@@ -89,6 +90,7 @@ class ExperimentWrapper:
             'min_token_frequency' : min_token_frequency,
             'preprocessing' : preprocessing,
             'language_model' : language_model,
+            'drop_train_vertices_portion' : drop_train_vertices_portion,
 
         }
         # self.data_mask_split, self.data_mask_test_fixed = stratified_split_with_fixed_test_set_portion(self.data[0].y.numpy(), num_dataset_splits, 
@@ -98,7 +100,7 @@ class ExperimentWrapper:
     def init_model(self, model_type: str, hidden_sizes: list, weight_scale: float, num_initializations: int, use_spectral_norm: bool, num_heads=-1, 
         diffusion_iterations=5, teleportation_probability=0.1, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01, normalize=True,
         residual=False, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1, dropout=0.0, drop_edge=0.0, use_spectral_norm_on_last_layer=True,
-        self_loop_fill_value=1.0,):
+        self_loop_fill_value=1.0):
         self.model_config = {
             'hidden_sizes' : hidden_sizes,
             'weight_scale' : weight_scale,
@@ -130,11 +132,13 @@ class ExperimentWrapper:
         self.init_run()
 
     @ex.capture(prefix='evaluation')
-    def init_evaluation(self, pipeline=[], print_pipeline=False, ignore_exceptions=True):
+    def init_evaluation(self, pipeline=[], print_pipeline=False, ignore_exceptions=True, log_plots=True, save_artifacts=False):
         self.evaluation_config = {
             'pipeline' : pipeline,
             'print_pipeline' : print_pipeline,
             'ignore_exceptions' : ignore_exceptions,
+            'log_plots' : log_plots,
+            'save_artifacts' : save_artifacts,
         }
 
     @ex.capture(prefix='run')
@@ -166,7 +170,10 @@ class ExperimentWrapper:
         # One global logger for all splits and initializations
         logger = WandbLogger(save_dir=osp.join('/nfs/students/fuchsgru/wandb'), project=str(self.collection_name), name=f'{run_name}')
         logger.log_hyperparams(config)
+
+        run_artifact_dir = artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), f'{run_name}')
         all_logs = [] # Logs from each run
+        all_artifacts = [] # Paths to all artifacts generated during evaluation
 
         # Iterating over all dataset splits
         result = defaultdict(list)
@@ -191,7 +198,8 @@ class ExperimentWrapper:
                     )
                     # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
 
-                    artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), f'{run_name}', f'{split_idx}-{reinitialization}-{ensemble_idx}')
+
+                    artifact_dir = osp.join(run_artifact_dir, f'{split_idx}-{reinitialization}-{ensemble_idx}')
                     os.makedirs(artifact_dir, exist_ok=True)
 
                     checkpoint_callback = ModelCheckpoint(
@@ -226,6 +234,8 @@ class ExperimentWrapper:
                             trainer.fit(model, data_loaders[data_constants.TRAIN], data_loaders[data_constants.VAL_REDUCED])
                             best_model_path = checkpoint_callback.best_model_path
                             self.model_registry[registry_config] = best_model_path
+                            os.remove(best_model_path) # Clean the checkpoint from the artifact directory
+                            best_model_path = self.model_registry[registry_config]
                         else:
                             print(f'Loading pre-trained model from {best_model_path}')
 
@@ -243,8 +253,6 @@ class ExperimentWrapper:
                     for name in (data_constants.VAL_TRAIN_LABELS, data_constants.VAL_REDUCED)
                 }
                 for name, metrics in val_metrics.items():
-                    with open(osp.join(artifact_dir, f'metrics-{name}.json'), 'w+') as f:
-                        json.dump(val_metrics, f)
                     for val_metric in metrics:
                         for metric, value in val_metric.items():
                             result[f'{metric}-{name}-{ensemble_idx}'].append(value)
@@ -264,6 +272,7 @@ class ExperimentWrapper:
                 logs[SPLIT_INIT_GROUP] = {
                     NAME_SPLIT : split_idx, NAME_INIT : reinitialization 
                 }
+
                 pipeline_metrics = {} # Metrics logged by the pipeline
                 pipeline(
                     model=model.eval(),
@@ -276,7 +285,9 @@ class ExperimentWrapper:
                     logs=logs,
                     metrics=pipeline_metrics,
                     ensembles=ensembles,
+                    artifacts=all_artifacts,
                 )
+
                 all_logs.append(logs)
                 for metric, value in pipeline_metrics.items():
                     result[metric].append(value)
@@ -285,11 +296,16 @@ class ExperimentWrapper:
 
         # Build wandb table for everything that was logged by the pipeline
         build_table(logger, all_logs)
-
-        artifact_dir = osp.join('/nfs/students/fuchsgru/artifacts', str(self.collection_name), str(run_name))
-        metrics_path = osp.join(artifact_dir, 'metrics.json')
+        metrics_path = osp.join(run_artifact_dir, 'metrics.json')
         with open(metrics_path, 'w+') as f:
             json.dump({metric : values for metric, values in result.items()}, f)
+        finish_logging(logger)
+
+        # Remove artifacts if they were not to be logged
+        if not config['evaluation']['save_artifacts']:
+            print(f'Deleting pipeline artifacts...')
+            for path in all_artifacts:
+                os.remove(path)
 
         # To not bloat the MongoDB logs, we just return a path to all metrics
         return metrics_path

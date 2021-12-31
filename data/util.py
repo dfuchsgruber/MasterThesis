@@ -5,8 +5,14 @@ from data.base import SingleGraphDataset
 import torch
 from warnings import warn
 import data.constants as data_constants
+from copy import deepcopy
 
-from seed import data_split_seeds
+from seed import data_split_seeds, data_split_seeds_iterator
+
+class SamplingError(Exception):
+    """ Error to throw when vertices cant be sampled from a configuration. """ 
+    pass
+
 
 def data_get_summary(dataset, prefix='\t'):
     """ Gets the summary string of a dataset. 
@@ -60,6 +66,33 @@ def get_label_mask(labels, select_labels):
     """
     return np.array([l in select_labels for l in labels], dtype=bool)
 
+def sample_from_mask(mask, num_samples, rng=None):
+    """ Samples a set of vertices that are within a given mask. 
+    
+    Parameters:
+    -----------
+    mask : ndarray, shape [N]
+        Which vertices to sample from.
+    num_samples : int
+        How many samples to draw.
+    rng : np.random.RandomState or None
+        A random state to ensure reproducability.
+
+    Returns:
+    --------
+    sample_mask : ndarray, shape [N]
+        A mask that contains all the vertices sampled.
+    """
+    if rng is None:
+        rng = np.random.RandomState()
+    if mask.sum() < num_samples:
+        raise SamplingError(f'Can not sample {num_samples} vertices from a mask with {mask.sum()} vertices')
+    idxs = np.where(mask)[0]
+    rng.shuffle(idxs)
+    sample_mask = np.zeros_like(mask, dtype=bool)
+    sample_mask[idxs[ : num_samples]] = True
+    return sample_mask
+
 def sample_uniformly(labels, select_lables, num_samples, mask, rng=None):
     """ Uniformly samples vertices within a mask. 
     
@@ -86,11 +119,12 @@ def sample_uniformly(labels, select_lables, num_samples, mask, rng=None):
     all_labels = set(select_lables)
     sample_mask = np.zeros_like(labels, dtype=bool)
     for label in all_labels:
-        idxs = np.where(mask & (labels == label))[0]
-        if idxs.shape[0] < num_samples:
-            raise RuntimeError(f'Could not sample {num_samples} vertices from class {label}, only {idxs.shape[0]} present.')
-        rng.shuffle(idxs)
-        sample_mask[idxs[:num_samples]] = True
+        sample_mask |= sample_from_mask(mask & (labels == label), num_samples, rng=rng)
+        # idxs = np.where(mask & (labels == label))[0]
+        # if idxs.shape[0] < num_samples:
+        #     raise RuntimeError(f'Could not sample {num_samples} vertices from class {label}, only {idxs.shape[0]} present.')
+        # rng.shuffle(idxs)
+        # sample_mask[idxs[:num_samples]] = True
     assert sample_mask.sum() == num_samples * len(all_labels)
 
     return sample_mask
@@ -152,8 +186,84 @@ def labels_to_idx(labels, dataset):
         except:
             raise RuntimeError(f'Could not understand the datatype of labels {set(type(label) for label in labels)}')
 
+def assert_integrity(x_first, edge_index_first, y_first, vertex_to_idx_first : dict, label_to_idx_first : dict,
+                        x_second, edge_index_second, y_second, vertex_to_idx_second : dict, label_to_idx_second : dict, 
+                        assert_second_is_vertex_subset=True, assert_second_is_label_subset=True):
+    """ 
+    Checks that a mapping from vertex name to attribute and label is the same in two graphs. It checks:
+        i) That a vertex that is in both graphs has the same attributes
+        ii) That a vertex that is in both graphs has the same label
+        iii) That a vertex that is in both graphs has the same neighbourhood (considering vertices that are in both graphs)
+    
+    Parameters:
+    -----------
+    x_first : ndarray, shape [N_first, d]
+        Attributes of first graph.
+    edge_index_first : ndarray, shape [2, E_first]
+        Edges of first graph.
+    y_first : ndarray, shape [N_first]
+        Labels of first graph.
+    vertex_to_idx_first : dict
+        Mapping from vertex name to idx in `x_first`.
+    label_to_idx_first : dict
+        Mapping from class name to class idx in `y_first`.
+    x_second : ndarray, shape [N_second, d]
+        Attributes of second graph.
+    edge_index_second : ndarray, shape [2, E_second]
+        Edges of second graph.
+    y_second : ndarray, shape [N_second]
+        Labels of second graph.
+    vertex_to_idx_second : dict
+        Mapping from vertex name to idx in `x_second`.
+    label_to_idx_second : dict
+        Mapping from class name to class idx in `y_second`.
+    assert_second_is_vertex_subset : bool
+        Checks if the second graph's vertices is a vertex subset of the first graph.
+    assert_second_is_label_subset : bool
+        Checks if the second graph's label set is a subset of the first graph's label set.
+    
+    Returns:
+    --------
+    num_asserted : int
+        The number of vertices for which integrity is given. If any vertex that is in both graph violates integrity, an AssertionError will be thrown.
+    """
+    idx_to_vertex_first = {idx : v for v, idx in vertex_to_idx_first.items()}
+    vertex_to_x_first = {v : x_first[idx] for v, idx in vertex_to_idx_first.items()}
+    idx_to_vertex_second = {idx : v for v, idx in vertex_to_idx_second.items()}
+    vertex_to_x_second = {v : x_second[idx] for v, idx in vertex_to_idx_second.items()}
+
+    idx_to_label_first = {idx : label for label, idx in label_to_idx_first.items()}
+    vertex_to_label_first = {v : idx_to_label_first[y_first[idx]] for v, idx in vertex_to_idx_first.items()}
+    idx_to_label_second = {idx : label for label, idx in label_to_idx_second.items()}
+    vertex_to_label_second = {v : idx_to_label_second[y_second[idx]] for v, idx in vertex_to_idx_second.items()}
+
+    if assert_second_is_vertex_subset:
+        assert set(vertex_to_x_second.keys()) <= set(vertex_to_x_first.keys()), f'Vertices of second are not a subset of first'
+    if assert_second_is_label_subset:
+        assert set(label_to_idx_second.keys()) <= set(label_to_idx_first.keys()), f'Labels of second are not a subset of first'
+
+    vertex_intersection = set(vertex_to_x_first.keys()) & set(vertex_to_x_second.keys())
+
+    neighbours_first = {
+        v : set(idx_to_vertex_first[n_idx] for n_idx in edge_index_first[1, edge_index_first[0, :] == v_idx]) for v, v_idx in vertex_to_idx_first.items()
+    }
+    neighbours_second = {
+        v : set(idx_to_vertex_second[n_idx] for n_idx in edge_index_second[1, edge_index_second[0, :] == v_idx]) for v, v_idx in vertex_to_idx_second.items()
+    }
+
+    # Check vertex integrity w.r.t. attributes, label and structure
+    num_asserted = 0
+    for vertex in vertex_intersection:
+        assert np.allclose(vertex_to_x_first[vertex], vertex_to_x_second[vertex])
+        assert vertex_to_label_first[vertex] == vertex_to_label_second[vertex]
+        assert (neighbours_first[vertex] & vertex_intersection) == (neighbours_second[vertex] & vertex_intersection)
+        num_asserted += 1
+
+    return num_asserted
+
+
 def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, num_val=20, portion_test_fixed=0.2, train_labels='all', train_labels_remove_other=False, 
-        val_labels='all', val_labels_remove_other=False, base_labels='all'):
+        val_labels='all', val_labels_remove_other=False, base_labels='all', drop_train = 0.0):
     """ Splits the data by uniformaly sampling a fixed amount of vertices per class for each dataset.
     The procedure goes as follows:
     A. Split into a fixed test-set and a non-fixed dataset in a stratified manner
@@ -190,6 +300,8 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
         If `True`, labels on the validation graph are mapped onto (0, 1, ..., k)
     base_labels : iterable or 'all'
         If given, the entire graph is reduced to these base labels before.
+    drop_train : float
+        A fraction of vertices in the training graph that is dropped randomly.
 
     Returns:
     --------
@@ -198,6 +310,9 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
     data_test_fixed : torch_geometric.data.Dataset
         Fixed test dataset that is consistent among all splits.
     """
+
+    seeder = data_split_seeds_iterator()
+
     # Get the base graph from the dataset
     if base_labels != 'all':
         base_labels = labels_to_idx(base_labels, data)
@@ -217,108 +332,151 @@ def uniform_split_with_fixed_test_set_portion(data, num_splits, num_train=20, nu
     assert not (y == -1).any()
     data.y = torch.tensor(y).long()
     data.label_to_idx = label_to_idx
-
-    seeds = data_split_seeds(num_splits + 1) # The first seed is used to fix the shared testing data
     
     # First stratified split to get the untouched test data
-    mask_fixed, mask_non_fixed = stratified_split(data.y.numpy(), seeds[0:1], [portion_test_fixed, 1 - portion_test_fixed])[:, 0, :]
+    mask_fixed, mask_non_fixed = stratified_split(data.y.numpy(), np.array([next(seeder)]), [portion_test_fixed, 1 - portion_test_fixed])[:, 0, :]
 
     all_labels = set(labels_to_idx('all', data))
 
     train_labels = set(labels_to_idx(train_labels, data))
     # Reduce the graph for training
     if train_labels_remove_other:
-        x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_train_graph = graph_select_labels(data.x.numpy(), 
+        x_train_base, edge_index_train_base, y_train_base, vertex_to_idx_train_base, label_to_idx_train_base, mask_train_graph_base = graph_select_labels(data.x.numpy(), 
             data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, train_labels, connected=True, _compress_labels=False)
     else:
-        x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_train_graph = (data.x.numpy(), 
-            data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx.copy(), data.label_to_idx.copy(), torch.ones_like(data.y).bool())
+        x_train_base, edge_index_train_base, y_train_base, vertex_to_idx_train_base, label_to_idx_train_base, mask_train_graph_base = (data.x.numpy(), 
+            data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx.copy(), data.label_to_idx.copy(), torch.ones_like(data.y).bool().numpy())
+    assert_integrity(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx,
+                        x_train_base, edge_index_train_base, y_train_base, vertex_to_idx_train_base, label_to_idx_train_base, 
+                        assert_second_is_vertex_subset=True, assert_second_is_label_subset=True)
 
     # Reduce graph for validation
     val_labels = set(labels_to_idx(val_labels, data))
     if val_labels_remove_other:
-        x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, mask_val_graph = graph_select_labels(data.x.numpy(), 
+        x_val_base, edge_index_val_base, y_val_base, vertex_to_idx_val_base, label_to_idx_val_base, mask_val_graph_base = graph_select_labels(data.x.numpy(), 
             data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, val_labels, connected=True, _compress_labels=False)
     else:
-        x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, mask_val_graph = (data.x.numpy(), 
-            data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx.copy(), data.label_to_idx.copy(), torch.ones_like(data.y).bool())
-    
+        x_val_base, edge_index_val_base, y_val_base, vertex_to_idx_val_base, label_to_idx_val_base, mask_val_graph_base = (data.x.numpy(), 
+            data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx.copy(), data.label_to_idx.copy(), torch.ones_like(data.y).bool().numpy())
+    assert_integrity(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx,
+                        x_val_base, edge_index_val_base, y_val_base, vertex_to_idx_val_base, label_to_idx_val_base, 
+                        assert_second_is_vertex_subset=True, assert_second_is_label_subset=True)
+
     # Check if the validation graph is a superset of the training graph
-    if not mask_val_graph[mask_train_graph].all():
+    if not mask_val_graph_base[mask_train_graph_base].all():
         warn(f'Validation graph is not a superset of the training graph!')
 
     data_list = []
     # Sample `train_portion` vertices per class both for training and reduced validation sets
-    for split_idx in range(num_splits):
-        rng = np.random.RandomState(seeds[split_idx + 1])
+    split_idx = 0
+    while len(data_list) < num_splits:
+        seed = next(seeder)
+        rng = np.random.RandomState(seed)
+        try:
+            # As the train and val graphs are modified, we have to copy the initial configuration for it from the "base"
+            x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_train_graph = x_train_base.copy(), edge_index_train_base.copy(), y_train_base.copy(), deepcopy(vertex_to_idx_train_base), deepcopy(label_to_idx_train_base), mask_train_graph_base.copy()
+            x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, mask_val_graph = x_val_base.copy(), edge_index_val_base.copy(), y_val_base.copy(), deepcopy(vertex_to_idx_val_base), deepcopy(label_to_idx_val_base), mask_val_graph_base.copy()
 
-        ### ---------- TRAINING ----------- ###
-        # Sample train idxs
-        mask_train = sample_uniformly(data.y.numpy(), train_labels, num_train, mask_train_graph & mask_non_fixed, rng=rng)
-        data_train = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_train[mask_train_graph])
+            # Drop a random portion of the training vertices in the train graph. These should not be selected as labeled vertices
+            mask_to_drop_train = split_from_mask_stratified(mask_train_graph, data.y.numpy(), sizes=[drop_train, 1 - drop_train], rng=rng)[:, 0]
 
-        ### ---------- VALIDATION ----------- ###
-        # A) Sample val reduced idxs (=validation vertices on the training label set for monitoring), disjunct from train idxs
-        mask_val_reduced = sample_uniformly(data.y.numpy(), train_labels, num_val, mask_train_graph & (~mask_train) & mask_non_fixed, rng=rng)
-        data_val_reduced = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_val_reduced[mask_train_graph])
-        
-        # B) Sample val idxs on the validation graph, disjunct from train idxs
-        # Re-use the vertices from A) if there for classes that are both in training and validation labels
-        # Sample val idxs: First sample idxs from the val classes not in the training classes
-        mask_val = mask_val_reduced | sample_uniformly(data.y.numpy(), val_labels - train_labels, num_val, mask_val_graph & (~mask_train) & mask_non_fixed, rng=rng)
-        # Remove train labels from the reduced mask that are not in val
-        for label in train_labels - val_labels:
-            mask_val[data.y.numpy() == label] = False
-        data_val = SingleGraphDataset(x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, mask_val[mask_val_graph])
+            # mask_to_drop_train = sample_from_mask(mask_train_graph, int(drop_train * x_train.shape[0]), rng=rng)
+            x_train, edge_index_train, y_train, vertex_to_idx_train = graph_select_idxs(~(mask_to_drop_train[mask_train_graph]), x_train, edge_index_train, y_train, vertex_to_idx_train)
+            mask_kept = ~(mask_to_drop_train[mask_train_graph]) # shape: [mask_train_graph.sum()] (i.e. indexes vertices on the train graph *before* dropping)
+            assert mask_kept.sum() == x_train.shape[0]
+            x_train, edge_index_train, y_train, vertex_to_idx_train, mask_kept_lcc = graph_get_largest_connected_component(x_train, edge_index_train, y_train, vertex_to_idx_train)
+            # Remove the dropped vertices from `mask_train_graph`. This is a bit confusing, but we need to "backpropagte" the mask through all the graph reduction steps
+            mask_kept[mask_kept] &= mask_kept_lcc
+            assert mask_kept.sum() == x_train.shape[0]
+            mask_train_graph[mask_train_graph] &= mask_kept
+            assert mask_train_graph.sum() == x_train.shape[0]
 
-        # C) Get val idxs that are on the validation graph and also appear in the training graph
-        # That is, this graph is potentially different from the training graph, but only masks vertices that have training labels
-        mask_val_train_labels = mask_val.copy()
-        for label in val_labels - train_labels:
-            mask_val_train_labels[data.y.numpy() == label] = False
-        # Permute labels so we match training data
-        data_val_train_labels = SingleGraphDataset(x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, 
-                                                        mask_val_train_labels[mask_val_graph])
+            assert_integrity(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx,
+                                x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, 
+                                assert_second_is_vertex_subset=True, assert_second_is_label_subset=True)
+            assert_integrity(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx,
+                                x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, 
+                                assert_second_is_vertex_subset=True, assert_second_is_label_subset=True)
 
-        ### ------------ TEST ---------------- ###
-        # A) Test idx are the non-used idxs (which are not fixed)
-        mask_test = (~(mask_train | mask_val_reduced | mask_val)) & mask_non_fixed
-        data_test = SingleGraphDataset(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, mask_test)
-        
-        # B) Test idxs on the training graph with train labels
-        # Test idx for the reduced graph is the subset of the test graph that is on train labels, minus all non-training classes
-        mask_test_reduced = mask_test.copy()
-        for label in all_labels - train_labels:
-            mask_test_reduced[data.y.numpy() == label] = False
-        data_test_reduced = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_test_reduced[mask_train_graph])
+            ### ---------- TRAINING ----------- ###
+            # Sample train idxs
+            mask_train = sample_uniformly(data.y.numpy(), train_labels, num_train, mask_train_graph & mask_non_fixed, rng=rng)
+            data_train = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_train[mask_train_graph])
+            data_train_dropped = SingleGraphDataset(x_train_base, edge_index_train_base, y_train_base, vertex_to_idx_train_base, label_to_idx_train_base, mask_to_drop_train)
 
-        # C) Test idxs on the testing graph (=all labels), but only with train labels
-        data_test_train_labels = SingleGraphDataset(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, mask_test_reduced)
 
-        # Sanity checks
-        assert ((mask_train.astype(int) + mask_val_reduced.astype(int)) <= 1).all(), f'Training and reduced Validation data are not disjunct'
-        assert ((mask_train.astype(int) + mask_val.astype(int)) <= 1).all(), f'Training and full Validation data are not disjunct'
-        assert ((mask_train.astype(int) + mask_test_reduced.astype(int)) <= 1).all(), f'Training and reduced Testing data are not disjunct'
-        assert ((mask_train.astype(int) + mask_test.astype(int)) <= 1).all(), f'Training and full Testing data are not disjunct'
-        assert (((mask_train | mask_val | mask_val_reduced).astype(int) + mask_test.astype(int)) <= 1).all(), f'Training & Validation and Testing data are not disjunct'
-        assert (((mask_train | mask_val | mask_val_reduced | mask_test).astype(int) + mask_fixed.astype(int)) <= 1).all(), f'Non-fixed and fixed data are not disjunct'
+            ### ---------- VALIDATION ----------- ###
+            # A) Sample val reduced idxs (=validation vertices on the training label set for monitoring), disjunct from train idxs
+            mask_val_reduced = sample_uniformly(data.y.numpy(), train_labels, num_val, mask_train_graph & (~mask_train) & mask_non_fixed, rng=rng)
+            data_val_reduced = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_val_reduced[mask_train_graph])
+            
+            
+            # B) Sample val idxs on the validation graph, disjunct from train idxs
+            # Re-use the vertices from A) if there for classes that are both in training and validation labels
+            # Sample val idxs: First sample idxs from the val classes not in the training classes
+            mask_val = mask_val_reduced | sample_uniformly(data.y.numpy(), val_labels - train_labels, num_val, mask_val_graph & (~mask_train) & mask_non_fixed, rng=rng)
+            # Remove train labels from the reduced mask that are not in val
+            for label in train_labels - val_labels:
+                mask_val[data.y.numpy() == label] = False
+            data_val = SingleGraphDataset(x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, mask_val[mask_val_graph])
 
-        for idx, dataset in enumerate((data_train, data_val, data_val_reduced, data_test)):
-            assert (dataset[0].x.size()[0] == dataset[0].mask.size()[0])
-            assert (dataset[0].y.size() == dataset[0].mask.size())
-            assert (dataset[0].edge_index <= dataset[0].x.size()[0]).all()
+            # C) Get val idxs that are on the validation graph and also appear in the training graph
+            # That is, this graph is potentially different from the training graph, but only masks vertices that have training labels
+            mask_val_train_labels = mask_val.copy()
+            for label in val_labels - train_labels:
+                mask_val_train_labels[data.y.numpy() == label] = False
+            # Permute labels so we match training data
+            data_val_train_labels = SingleGraphDataset(x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, 
+                                                            mask_val_train_labels[mask_val_graph])
 
-        data_list.append({
-            data_constants.TRAIN : data_train,
-            data_constants.VAL : data_val,
-            data_constants.VAL_REDUCED : data_val_reduced,
-            data_constants.VAL_TRAIN_LABELS : data_val_train_labels,
-            data_constants.TEST : data_test,
-            data_constants.TEST_REDUCED : data_test_reduced,
-            data_constants.TEST_TRAIN_LABELS : data_test_train_labels,
-        })
+            ### ------------ TEST ---------------- ###
+            # A) Test idx are the non-used idxs (which are not fixed) on the validation graph
+            mask_test = (~(mask_train | mask_val_reduced | mask_val)) & mask_non_fixed
+            data_test = SingleGraphDataset(x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, mask_test[mask_val_graph])
+            
+            # B) Test idxs on the training graph with train labels
+            # Test idx for the reduced graph is the subset of the test graph that is on train labels, minus all non-training classes
+            mask_test_reduced = mask_test.copy()
+            for label in all_labels - train_labels:
+                mask_test_reduced[data.y.numpy() == label] = False
+            data_test_reduced = SingleGraphDataset(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_test_reduced[mask_train_graph])
 
-    return data_list, SingleGraphDataset(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, mask_fixed)
+            # C) Test idxs on the testing graph (=all labels), but only with train labels
+            data_test_train_labels = SingleGraphDataset(x_val, edge_index_val, y_val, vertex_to_idx_val, label_to_idx_val, mask_test_reduced[mask_val_graph])
+
+            ### ------------- BASE --------------- ###
+            data_base = SingleGraphDataset(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), deepcopy(data.vertex_to_idx), deepcopy(data.label_to_idx), mask=np.ones(data.x.size(0), dtype=bool))
+
+            # Sanity checks
+            assert ((mask_train.astype(int) + mask_val_reduced.astype(int)) <= 1).all(), f'Training and reduced Validation data are not disjunct'
+            assert ((mask_train.astype(int) + mask_val.astype(int)) <= 1).all(), f'Training and full Validation data are not disjunct'
+            assert ((mask_train.astype(int) + mask_test_reduced.astype(int)) <= 1).all(), f'Training and reduced Testing data are not disjunct'
+            assert ((mask_train.astype(int) + mask_test.astype(int)) <= 1).all(), f'Training and full Testing data are not disjunct'
+            assert (((mask_train | mask_val | mask_val_reduced).astype(int) + mask_test.astype(int)) <= 1).all(), f'Training & Validation and Testing data are not disjunct'
+            assert (((mask_train | mask_val | mask_val_reduced | mask_test).astype(int) + mask_fixed.astype(int)) <= 1).all(), f'Non-fixed and fixed data are not disjunct'
+
+            for idx, dataset in enumerate((data_train, data_val, data_val_reduced, data_test)):
+                assert (dataset[0].x.size()[0] == dataset[0].mask.size()[0])
+                assert (dataset[0].y.size() == dataset[0].mask.size())
+                assert (dataset[0].edge_index <= dataset[0].x.size()[0]).all()
+
+            data_list.append({
+                data_constants.TRAIN : data_train,
+                data_constants.TRAIN_DROPPED : data_train_dropped,
+                data_constants.VAL : data_val,
+                data_constants.VAL_REDUCED : data_val_reduced,
+                data_constants.VAL_TRAIN_LABELS : data_val_train_labels,
+                data_constants.TEST : data_test,
+                data_constants.TEST_REDUCED : data_test_reduced,
+                data_constants.TEST_TRAIN_LABELS : data_test_train_labels,
+                data_constants.BASE : data_base,
+            })
+            split_idx += 1
+
+        except SamplingError:
+            warn(f'Split {split_idx} failed due to an sampling error in splitting. Trying next seed...')
+
+    return data_list, SingleGraphDataset(x_val_base, edge_index_val_base, y_val_base, vertex_to_idx_val_base, label_to_idx_val_base, mask_fixed[mask_val_graph_base])
 
 def stratified_split_with_fixed_test_set_portion(ys, num_splits, portion_train=0.05, portion_val=0.15, portion_test_fixed=0.2, portion_test_not_fixed=0.6):
     """ Splits the dataset using a stratified strategy into training, validation and testing data.
@@ -355,6 +513,55 @@ def stratified_split_with_fixed_test_set_portion(ys, num_splits, portion_train=0
     mask[:, :, mask_non_fixed] = stratified_split(ys[mask_non_fixed], seeds[1:], sizes=np.array([portion_train, portion_val, portion_test_not_fixed]) / norm)
     return mask, mask_fixed
 
+def split_from_mask_stratified(mask, y, sizes=[0.05, 0.95], rng = None):
+    """ Splits into subsets from a mask that roughly preserve the distribution of labels.
+    
+    Parameters:
+    -----------
+    mask : ndarray, shape [N]
+        Vertices to sample from.
+    y : ndarray, shape [N]
+        Labels.
+    sizes : list
+        Relative sizes of the portions to split into.
+    rng : RandomState
+        The random number generator.
+
+    Returns:
+    --------
+    split_mask : ndarray, shape [N, len(sizes)]
+        Which vertices were sampled per split.
+    """ 
+    if rng is None:
+        rng = np.random.RandomState()
+    assert mask.shape[0] == y.shape[0]
+    assert len(mask.shape) == len(y.shape) == 1
+    sizes = np.array(sizes)
+    assert np.allclose(sizes.sum(), 1.0), f'Relative sizes should sum to 1.0'
+
+    endpoints = np.cumsum(sizes)
+    endpoints[-1] = 1.0 # For stability
+
+    split_mask = np.zeros((y.shape[0], len(sizes),), dtype=bool)
+    for label, count in zip(*np.unique(y, return_counts=True)):
+        idxs = (np.where((y == label) & mask)[0])
+        rng.shuffle(idxs)
+
+        start_idx = 0
+        for set_idx, endpoint in enumerate(endpoints):
+            end_idx = int(idxs.shape[0] * endpoint)
+            idxs_mask = np.zeros(split_mask.shape[0], dtype=bool)
+            idxs_mask[idxs[start_idx : end_idx]] = True
+            split_mask[idxs_mask, set_idx] = True
+            start_idx = end_idx
+
+    assert np.allclose(split_mask.sum(), mask.sum()) # The mask should be split entirely
+    assert (split_mask.sum(1) <= 1).all()
+    assert not (split_mask.sum(1).astype(bool) & (~mask)).any()
+    return split_mask
+
+
+
 def stratified_split(ys, seeds, sizes=[0.05, 0.15, 0.8]):
     """ Performs several splits of a dataset into index sets using a stratified strategy.
     
@@ -374,24 +581,11 @@ def stratified_split(ys, seeds, sizes=[0.05, 0.15, 0.8]):
     """
     sizes = np.array(sizes)
     assert np.allclose(sizes.sum(), 1.0), f'Sizes should sum up to 1.0'
-
         
     mask = np.zeros((len(sizes), len(seeds), len(ys)), dtype=bool)
     for split_idx, seed in enumerate(seeds):
-        for v, count in zip(*np.unique(ys, return_counts=True)):
-            idxs = np.where(ys == v)[0]
-            rng = np.random.RandomState(seed)
-            rng.shuffle(idxs)
-            
-            # Partition this subset by splitting the shuffled idx in portions
-            start_idx = 0
-            sizecumsum = np.cumsum(sizes)
-            sizecumsum[-1] = 1.0 # A bit hacky, but avoids numerical issues
-            for set_idx, endpoint in enumerate(sizecumsum):
-                end_idx = int(len(idxs) * endpoint)
-                mask[set_idx, split_idx][idxs[start_idx : end_idx]] = True
-                start_idx = end_idx
-
+        rng = np.random.RandomState(seed)
+        mask[:, split_idx, :] = split_from_mask_stratified(np.ones(len(ys), dtype=bool), ys, sizes, rng=rng).T 
     return mask
 
 def data_get_num_attributes(data):

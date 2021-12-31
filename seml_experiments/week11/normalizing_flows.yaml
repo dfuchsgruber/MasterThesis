@@ -1,0 +1,502 @@
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week11_normalizing_flows
+  output_dir: /nfs/students/fuchsgru/seml_output/week11
+  project_root_dir: ../..
+
+slurm:
+  experiments_per_job: 2
+  sbatch_options:
+    gres: gpu:1       # num GPUs
+    mem: 16G          # memory
+    cpus-per-task: 2  # num cores
+    time: 0-48:00     # max time, D-HH:MM
+
+
+###### BEGIN PARAMETER CONFIGURATION ######
+
+
+
+fixed:
+  run.args:
+    - model:residual
+    - model:use_spectral_norm
+    - model:weight_scale
+    - data:train_labels_remove_other
+    - model:use_spectral_norm_on_last_layer
+    - model:self_loop_fill_value
+    - data:type
+    
+  training.early_stopping.patience: 100
+  training.early_stopping.mode: min
+  training.early_stopping.monitor: val_loss
+  training.early_stopping.min_delta: 1e-3
+  training.max_epochs: 1000
+  training.gpus: 1
+
+  data.dataset: cora_full
+  # Select a subgraph of cora_full that contains all AI and OS papers
+  data.base_labels: ['Artificial_Intelligence/NLP', 'Artificial_Intelligence/Data_Mining','Artificial_Intelligence/Speech', 'Artificial_Intelligence/Knowledge_Representation','Artificial_Intelligence/Theorem_Proving', 'Artificial_Intelligence/Games_and_Search','Artificial_Intelligence/Vision_and_Pattern_Recognition', 'Artificial_Intelligence/Planning','Artificial_Intelligence/Agents','Artificial_Intelligence/Robotics', 'Artificial_Intelligence/Expert_Systems','Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
+  data.corpus_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
+  data.train_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
+  data.preprocessing: bag_of_words
+  data.num_dataset_splits : 5
+  data.train_portion : 20
+  data.val_portion : 20
+  data.test_portion : 0.6
+  data.test_portion_fixed : 0.2
+  data.split_type: uniform
+  data.type: 'npz'
+
+  model.num_initializations : 5
+  model.use_bias: true
+  model.activation: leaky_relu
+  model.leaky_relu_slope: 0.01
+  model.model_type: gcn
+  model.freeze_residual_projection: false
+  model.hidden_sizes: [64]
+  model.use_spectral_norm_on_last_layer: false
+  model.weight_scale: 2.0
+  
+  evaluation.ignore_exceptions: true
+  evaluation.pipeline:
+  
+    - type: PerturbData
+      base_data: 'val-reduced'
+      dataset_name: 'val-reduced-bernoulli'
+      budget: 0.1
+      perturbation_type: 'bernoulli'
+      parameters:
+        p: 0.5
+      perturb_in_mask_only: true
+
+    - type: PerturbData
+      base_data: 'val-reduced'
+      dataset_name: 'val-reduced-normal'
+      budget: 0.1
+      perturbation_type: 'normal'
+      parameters:
+        scale: 1.0
+      perturb_in_mask_only: true
+
+    # Evaluate calibration with and without edges
+    - type: EvaluateCalibration
+      evaluate_on: ['val-reduced']
+
+    - type: EvaluateCalibration
+      evaluate_on: ['val-reduced']
+      model_kwargs:
+        remove_edges: true
+      name: 'no_edges'
+
+    # Evaluate accuracy for all ood settings with and without edges
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced']
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced']
+      model_kwargs:
+        remove_edges: true
+      name: 'no-edges'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val']
+      kind: 'leave-out-classes'
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      name: 'loc'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val']
+      kind: 'leave-out-classes'
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      model_kwargs:
+        remove_edges: true
+      name: 'loc-no-edges'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      name: 'bernoulli'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      model_kwargs:
+        remove_edges: true
+      name: 'bernoulli-no-edges'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      name: 'normal'
+
+    - type: EvaluateAccuracy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      model_kwargs:
+        remove_edges: true
+      name: 'normal-no-edges'
+
+    # Lipschitz constants of the model
+
+    - type: EvaluateEmpircalLowerLipschitzBounds
+      num_perturbations: 20
+      min_perturbation: 0.1
+      max_perturbation: 10.0
+      num_perturbations_per_sample: 5
+      seed: 1337
+      perturbation_type: noise
+      name: noise-perturbations
+
+    - type: EvaluateEmpircalLowerLipschitzBounds
+      num_perturbations: 10
+      min_perturbation: 0.1
+      max_perturbation: 10.0
+      num_perturbations_per_sample: 2
+      seed: 1337
+      perturbation_type: derangement
+      name: derangement-perturbations
+
+    # PCA on Feature Space for ID and OOD data (all ood settings)
+
+    - type: VisualizeIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val']
+      kind: 'leave-out-classes'
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      name: 'loc'
+      dimensionality_reductions: ['pca', 'tsne']
+
+    - type: VisualizeIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      name: 'bernoulli'
+      dimensionality_reductions: ['pca', 'tsne']
+
+    - type: VisualizeIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      name: 'normal'
+      dimensionality_reductions: ['pca', 'tsne']
+
+    - type: VisualizeIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val']
+      kind: 'leave-out-classes'
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: 'loc-no-edges'
+      dimensionality_reductions: ['pca', 'tsne']
+
+    - type: VisualizeIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: 'bernoulli-no-edges'
+      dimensionality_reductions: ['pca', 'tsne']
+
+    - type: VisualizeIDvsOOD
+      fit_to: ['train']
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: 'normal-no-edges'
+      dimensionality_reductions: ['pca', 'tsne']
+
+    # Softmax emtropy all ood types, with and without edges
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val']
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave-out-classes
+      name: loc
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val']
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave-out-classes
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      name: bernoulli
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: bernoulli-no-edges
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      name: normal
+
+    - type: EvaluateSoftmaxEntropy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges
+
+    # Logit Energy on all odd types (with and without edges)
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val']
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave-out-classes
+      name: loc
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val']
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave-out-classes
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      name: bernoulli
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val-reduced-bernoulli']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: bernoulli-no-edges
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      name: normal
+
+    - type: EvaluateLogitEnergy
+      evaluate_on: ['val-reduced-normal']
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges
+
+    # Features shifts for loc experiments
+
+    - type: LogInductiveFeatureShift
+      data_before: 'train'
+      data_after: 'val'
+
+    - type: LogInductiveSoftmaxEntropyShift
+      data_before: 'train'
+      data_after: 'val'
+
+    # Feature densities for all ood types, with and without edges
+
+    - type: FitFeatureDensityGrid
+      fit_to: ['train']
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val']
+      density_types:
+        GaussianPerClass:
+          diagonal_covariance: [false, true]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+        GaussianMixture:
+          number_components: [7]
+        FeatureSpaceDensityNormalizingFlowPerClass:
+          iterations: [100]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+          num_layers: [2, 10, 20]
+          hidden_dim: [64]
+          flow_type: ['maf', 'radial']
+      dimensionality_reductions:
+        none: {}
+      log_plots: true
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave-out-classes
+      name: loc
+
+    - type: FitFeatureDensityGrid
+      fit_to: ['train']
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val']
+      density_types:
+        GaussianPerClass:
+          diagonal_covariance: [false, true]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+        GaussianMixture:
+          number_components: [7]
+        FeatureSpaceDensityNormalizingFlowPerClass:
+          iterations: [100]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+          num_layers: [2, 10, 20]
+          hidden_dim: [64]
+          flow_type: ['maf', 'radial']
+      dimensionality_reductions:
+        none: {}
+      log_plots: true
+      separate_distributions_by : 'neighbourhood'
+      separate_distributions_tolerance : 0.1
+      kind: leave-out-classes
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges
+
+    - type: FitFeatureDensityGrid
+      fit_to: ['train']
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val-reduced-bernoulli']
+      density_types:
+        GaussianPerClass:
+          diagonal_covariance: [false, true]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+        GaussianMixture:
+          number_components: [7]
+        FeatureSpaceDensityNormalizingFlowPerClass:
+          iterations: [100]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+          num_layers: [2, 10, 20]
+          hidden_dim: [64]
+          flow_type: ['maf', 'radial']
+      dimensionality_reductions:
+        none: {}
+      log_plots: true
+      kind: 'perturbations'
+      name: bernoulli
+
+    - type: FitFeatureDensityGrid
+      fit_to: ['train']
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val-reduced-bernoulli']
+      density_types:
+        GaussianPerClass:
+          diagonal_covariance: [false, true]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+        GaussianMixture:
+          number_components: [7]
+        FeatureSpaceDensityNormalizingFlowPerClass:
+          iterations: [100]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+          num_layers: [2, 10, 20]
+          hidden_dim: [64]
+          flow_type: ['maf', 'radial']
+      dimensionality_reductions:
+        none: {}
+      log_plots: true
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: bernoulli-no-edges
+    
+    - type: FitFeatureDensityGrid
+      fit_to: ['train']
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val-reduced-normal']
+      density_types:
+        GaussianPerClass:
+          diagonal_covariance: [false, true]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+        GaussianMixture:
+          number_components: [7]
+        FeatureSpaceDensityNormalizingFlowPerClass:
+          iterations: [100]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+          num_layers: [2, 10, 20]
+          hidden_dim: [64]
+          flow_type: ['maf', 'radial']
+      dimensionality_reductions:
+        none: {}
+      log_plots: true
+      kind: 'perturbations'
+      name: normal
+
+    - type: FitFeatureDensityGrid
+      fit_to: ['train']
+      fit_to_ground_truth_labels: ['train']
+      evaluate_on: ['val-reduced-normal']
+      density_types:
+        GaussianPerClass:
+          diagonal_covariance: [false, true]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+        GaussianMixture:
+          number_components: [7]
+        FeatureSpaceDensityNormalizingFlowPerClass:
+          iterations: [100]
+          relative: [true, false]
+          mode: ['weighted', 'max']
+          num_layers: [2, 10, 20]
+          hidden_dim: [64]
+          flow_type: ['maf', 'radial']
+      dimensionality_reductions:
+        none: {}
+      log_plots: true
+      kind: 'perturbations'
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges
+
+  training.learning_rate: 0.001
+
+grid:
+  model.residual:
+    type: choice
+    options: [true, false]
+
+spectral_norm_inductive:
+  fixed:
+    model.use_spectral_norm: true
+    run.name: gcn_cora_ml_r:{0}_sn:{1}_ws:{2}_ro:{3}_snol{4}_fv{5}_{6}
+    data.drop_train_vertices_portion: 0.2
+    data.train_labels_remove_other: true
+  
+no_spectral_norm_inductive:
+  fixed:
+    model.use_spectral_norm: false
+    run.name: gcn_cora_ml_r:{0}_sn:{1}_ro:{3}_{6}
+    data.drop_train_vertices_portion: 0.2
+    data.train_labels_remove_other: true
+
+
+spectral_norm_transductive:
+  fixed:
+    model.use_spectral_norm: true
+    run.name: gcn_cora_ml_r:{0}_sn:{1}_ws:{2}_ro:{3}_snol{4}_fv{5}_{6}
+    data.drop_train_vertices_portion: 0.0
+    data.train_labels_remove_other: false
+  
+no_spectral_norm_transductive:
+  fixed:
+    model.use_spectral_norm: false
+    run.name: gcn_cora_ml_r:{0}_sn:{1}_ro:{3}_{6}
+    data.drop_train_vertices_portion: 0.0
+    data.train_labels_remove_other: false
+

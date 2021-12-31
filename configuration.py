@@ -40,8 +40,11 @@ default_configuration = {
         'type' : 'gust',
         'corpus_labels' : 'all',
         'min_token_frequency' : 10,
-        "peprocessing" : "bag_of_words",
+        "preprocessing" : "bag_of_words",
         "language_model" : "bert-base-uncased",
+        'drop_train_vertices_portion' : 0.0,
+        'normalize' : 'l2',
+        'vectorizer' : 'tf-idf',
         
     },
     'training' : {

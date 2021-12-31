@@ -95,7 +95,7 @@ def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50),
             noise = noise / noise.norm(dim=-1, keepdim=True) * eps
             x_perturbed = dataset.x
             x_perturbed[dataset.mask] += noise
-            data = Data(x=x_perturbed, edge_index=dataset.edge_index)
+            data = Data(x=x_perturbed, edge_index=dataset.edge_index, edge_weight=dataset.edge_weight)
             h_perturbed = model(data, **model_kwargs).get_features(-2)[dataset.mask]
             results_eps.append((h - h_perturbed).norm(dim=1).detach().cpu())
             

@@ -134,7 +134,8 @@ def load_data_from_configuration_uniform_split(config):
     elif config['type'].lower() in ('npz',):
         base_data = NpzDataset(
             config['dataset'], corpus_labels=config['corpus_labels'], min_token_frequency=config['min_token_frequency'],
-            preprocessing = config['preprocessing'], language_model=config['language_model'],
+            preprocessing = config['preprocessing'], language_model=config['language_model'], normalize=config['normalize'],
+            vectorizer=config['vectorizer'],
         )[0]
     else:
         raise RuntimeError(f'Unsupported dataset type {config["type"]}')
@@ -149,6 +150,7 @@ def load_data_from_configuration_uniform_split(config):
         val_labels = config.get('val_labels', 'all'),
         val_labels_remove_other = config['val_labels_remove_other'],
         base_labels = config.get('base_labels', 'all'),
+        drop_train = config['drop_train_vertices_portion'],
         )
 
 def load_data_from_configuration(config):

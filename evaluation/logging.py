@@ -26,7 +26,7 @@ def log_metrics(logs, metrics, group, step=None):
         metrics = {f'{k}-{step}' : v for k, v in metrics.items()}
     logs[group].update(metrics)
 
-def log_figure(logs, fig, label, group, save_artifact=None):
+def log_figure(logs, fig, label, group, artifacts, save_artifact=None):
     """ Logs a figure. 
     
     Parameters:
@@ -39,6 +39,8 @@ def log_figure(logs, fig, label, group, save_artifact=None):
         The label of the figure.
     group : str
         In which group (table) to log it in.
+    artifacts : list
+        A list of paths to all artifacts.
     save_artifact : path-like or None
         If a path is given, the figure is saved as pdf to that directory.
     """
@@ -47,6 +49,9 @@ def log_figure(logs, fig, label, group, save_artifact=None):
         fig.savefig(basename + '.pdf', format='pdf')
         fig.savefig(basename + '.png', format='png')
         logs[group][label] = wandb.Image(basename + '.png')
+        artifacts.append(basename + '.png') 
+        artifacts.append(basename + '.pdf') 
+
 
 def log_histogram(logs, values, label, **kwargs):
     """ Logs a Histogram. 
@@ -65,7 +70,7 @@ def log_histogram(logs, values, label, **kwargs):
     # hist = wandb.Histogram(sequence = values, num_bins = kwargs.get('num_bins', 64))
     # logs[label] = hist
 
-def log_embedding(logs, embeddings, label, labels=None, save_artifact=None):
+def log_embedding(logs, embeddings, label, artifacts, labels=None, save_artifact=None):
     """ Logs embeddings. 
     
     Parameters:
@@ -76,16 +81,21 @@ def log_embedding(logs, embeddings, label, labels=None, save_artifact=None):
         Embeddings to log.
     label : str
         The label of the embedding.
+    artifacts : list
+        A list to all artifacts.
     labels : ndarray, shape [N]
         Labels for each embedding point.
     save_artifact : path-like or None
         If a path is given, the embeddings is saved as npy to that directory.
     """
     if save_artifact is not None:
-        np.save(osp.join(save_artifact, label + '.npy'), {
+        path = osp.join(save_artifact, label + '.npy')
+        np.save(path, {
             'embeddings' : embeddings,
             'labels' : labels}
         )
+        artifacts.append(path)
+
 
 def build_table(logger, logs):
     """ Builds the final logging table object. 

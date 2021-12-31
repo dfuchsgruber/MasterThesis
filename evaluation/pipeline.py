@@ -158,7 +158,7 @@ class EvaluateEmpircalLowerLipschitzBounds(PipelineMember):
             # Plot the perturbations and log it
             if self.log_plots:
                 fig, _ , _, _ = plot.perturbations.local_perturbations_plot(perturbations)
-                log_figure(kwargs['logs'], fig, f'{name}_perturbations', f'empirical_lipschitz{self.suffix}', save_artifact=kwargs['artifact_directory'])
+                log_figure(kwargs['logs'], fig, f'{name}_perturbations', f'empirical_lipschitz{self.suffix}', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                 pipeline_log(f'Logged input vs. output perturbation plot for dataset {name}.')
                 plt.close(fig)
         
@@ -331,7 +331,7 @@ class OODDetection(OODSeparation):
                         f'{self.prefix}median_{proxy_name}' : proxy_label.median(),
                     }, f'{proxy_name}_statistics', step=label)
                 fig, ax = plot_histograms(proxy.cpu(), y.cpu(), log_scale=plot_proxy_log_scale, kind='vertical', x_label=f'Proxy', y_label='Class')
-                log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_all_classes{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
+                log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_all_classes{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                 pipeline_log(f'Evaluated {proxy_name}.')
                 plt.close(fig)
         except Exception as e:
@@ -342,7 +342,7 @@ class OODDetection(OODSeparation):
                 fig, ax = plot_histograms(proxy.cpu(), distribution_labels.cpu(), 
                     label_names=distribution_label_names,
                     kind='vertical', kde=True, log_scale=plot_proxy_log_scale,  x_label=f'Proxy', y_label='Kind')
-                log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_all_kinds{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
+                log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_all_kinds{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                 pipeline_log(f'Saved {proxy_name} (all kinds) histogram to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_histograms_all_kinds{self.suffix}.pdf')))
                 plt.close(fig)
         except Exception as e:
@@ -353,7 +353,7 @@ class OODDetection(OODSeparation):
                 fig, ax = plot_histograms(proxy[auroc_mask].cpu(), auroc_labels[auroc_mask].cpu().long(), 
                     label_names={0 : 'Out ouf distribution', 1 : 'In distribution'},
                     kind='overlapping', kde=True, log_scale=plot_proxy_log_scale,  x_label=f'Proxy', y_label='Kind')
-                log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_id_vs_ood{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
+                log_figure(kwargs['logs'], fig, f'{proxy_name}_histograms_id_vs_ood{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                 pipeline_log(f'Saved {proxy_name} histogram (id vs ood) to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_histograms_id_vs_ood{self.suffix}.pdf')))
                 plt.close(fig)
         except Exception as e:
@@ -570,7 +570,7 @@ class FitFeatureDensityGrid(FeatureDensity):
                             fig, ax = plot_density(features_to_fit, 
                                 features_to_evaluate[is_finite_density], density_model, 
                                 distribution_labels[is_finite_density], distribution_label_names, seed=self.seed)
-                            log_figure(kwargs['logs'], fig, f'pca{self.suffix}', f'{proxy_name}_plots', save_artifact=kwargs['artifact_directory'])
+                            log_figure(kwargs['logs'], fig, f'pca{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                             plt.close(fig)
 
 
@@ -620,7 +620,7 @@ class VisualizeIDvsOOD(OODSeparation):
             transformed = dim_reduction.transform(features)
             
             fig, ax = plot_2d_features(torch.tensor(transformed), labels)
-            log_figure(kwargs['logs'], fig, f'data_fit', group, save_artifact=kwargs['artifact_directory'])
+            log_figure(kwargs['logs'], fig, f'data_fit', group, kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Logged 2d{dimensionality_reduction} fitted to {self.fit_to}')
             plt.close(fig)
 
@@ -634,12 +634,12 @@ class VisualizeIDvsOOD(OODSeparation):
             features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
             transformed = dim_reduction.transform(features)
             fig, ax = plot_2d_features(torch.tensor(transformed), labels)
-            log_figure(kwargs['logs'], fig, f'id_vs_ood_by_label', group, save_artifact=kwargs['artifact_directory'])
+            log_figure(kwargs['logs'], fig, f'id_vs_ood_by_label', group, kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Logged 2d {dimensionality_reduction} fitted to {self.fit_to}, evaluated on {self.evaluate_on} by label')
             plt.close(fig)
 
             fig, ax = plot_2d_features(torch.tensor(transformed), distribution_labels, distribution_label_names)
-            log_figure(kwargs['logs'], fig, f'id_vs_ood_by_distribution', group, save_artifact=kwargs['artifact_directory'])
+            log_figure(kwargs['logs'], fig, f'id_vs_ood_by_distribution', group, kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
             pipeline_log(f'Logged 2d {dimensionality_reduction} fitted to {self.fit_to}, evaluated on {self.evaluate_on} by in-distribution vs out-of-distribution')
             plt.close(fig)
 
@@ -687,11 +687,11 @@ class FitFeatureSpacePCA(PipelineMember):
 
                 projected = pca.fit_transform(features[idx].cpu().numpy())
                 fig, ax = plot_2d_features(torch.tensor(projected), labels[idx])
-                log_figure(kwargs['logs'], fig, f'pca_{self.suffix}_{data_name}_gnd', 'pca', save_artifact=kwargs['artifact_directory'])
+                log_figure(kwargs['logs'], fig, f'pca_{self.suffix}_{data_name}_gnd', 'pca', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                 plt.close(fig)
 
                 fig, ax = plot_2d_features(torch.tensor(projected), predictions[idx].argmax(dim=1))
-                log_figure(kwargs['logs'], fig, f'pca_{self.suffix}_{data_name}_predicted', 'pca', save_artifact=kwargs['artifact_directory'])
+                log_figure(kwargs['logs'], fig, f'pca_{self.suffix}_{data_name}_predicted', 'pca', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                 plt.close(fig)
 
         kwargs['feature_space_pca'] = pca
@@ -787,14 +787,14 @@ class LogInductiveFeatureShift(PipelineMember):
         # Log the feature shift by "in mask / not in mask"
         fig, ax = plot_histograms(shift.cpu() + FEATURE_SHIFT_EPS, data[0].mask[idx_before].cpu(), 
                 label_names={True : f'In {self.data_before}', False : f'Not in {self.data_before}'}, log_scale=True, kind='overlapping', x_label='Feature Shift')
-        log_figure(kwargs['logs'], fig, f'feature_shift_by_mask', f'inductive_feature_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
+        log_figure(kwargs['logs'], fig, f'feature_shift_by_mask', f'inductive_feature_shift{self.suffix}', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
         plt.close(fig)
         pipeline_log(f'Logged inductive feature shift for data {self.data_before} -> {self.data_after} by mask.')
 
         for k in range(1, receptive_field_size + 1):
             fraction = 1 - (num_nbs_in_train_labels[k - 1][1].float() / (num_nbs[k - 1][1] + 1e-12))
             fig, ax = plot_2d_histogram(shift.cpu() + FEATURE_SHIFT_EPS, fraction[idx_after], x_label='Log Feature Shift', y_label=f'Fraction of ood vertices in {k} neighbourhood', log_scale_x=True)
-            log_figure(kwargs['logs'], fig, f'feature_shift_by_{k}_nbs', f'inductive_feature_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
+            log_figure(kwargs['logs'], fig, f'feature_shift_by_{k}_nbs', f'inductive_feature_shift{self.suffix}', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
             plt.close(fig)
             pipeline_log(f'Logged inductive feature shift for data {self.data_before} -> {self.data_after} by {k}-hop neighbourhood.')
         
@@ -844,14 +844,14 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
         # Log the entropy shift by "in mask / not in mask"
         fig, ax = plot_histograms(shift.cpu() + 0, data[0].mask[idx_before].cpu(), 
                 label_names={True : f'In {self.data_before}', False : f'Not in {self.data_before}'}, log_scale=False, kind='overlapping', x_label='Entropy Shift')
-        log_figure(kwargs['logs'], fig, f'entropy_shift_by_mask', f'inductive_entropy_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
+        log_figure(kwargs['logs'], fig, f'entropy_shift_by_mask', f'inductive_entropy_shift{self.suffix}', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
         plt.close(fig)
         pipeline_log(f'Logged inductive entropy shift for data {self.data_before} -> {self.data_after} by mask.')
 
         for k in range(1, receptive_field_size + 1):
             fraction = 1 - (num_nbs_in_train_labels[k - 1][1].float() / (num_nbs[k - 1][1] + 1e-12))
             fig, ax = plot_2d_histogram(shift.cpu() + FEATURE_SHIFT_EPS, fraction[idx_after], x_label='Entropy Shift', y_label=f'Fraction of ood vertices in {k} neighbourhood', log_scale_x=False)
-            log_figure(kwargs['logs'], fig, f'entropy_shift_by_{k}_nbs', f'inductive_entropy_shift{self.suffix}', save_artifact=kwargs['artifact_directory'])
+            log_figure(kwargs['logs'], fig, f'entropy_shift_by_{k}_nbs', f'inductive_entropy_shift{self.suffix}', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
             plt.close(fig)
             pipeline_log(f'Logged inductive entropy shift for data {self.data_before} -> {self.data_after} by {k}-hop neighbourhood.')
         
@@ -1018,7 +1018,7 @@ class EvaluateCalibration(PipelineMember):
 
         if self.log_plots:
             fig, ax = plot_calibration(scores, gnd, bins=self.bins, eps=ECE_EPS)
-            log_figure(kwargs['logs'], fig, f'calibration_{dataset_names}{self.suffix}', f'calibration', save_artifact=kwargs['artifact_directory'])
+            log_figure(kwargs['logs'], fig, f'calibration_{dataset_names}{self.suffix}', f'calibration', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
             plt.close(fig)
         
         pipeline_log(f'Logged calibration for {self.evaluate_on}')
@@ -1083,6 +1083,7 @@ class Pipeline:
     """ Pipeline for stuff to do after a model has been trained. """
 
     def __init__(self, members: list, config: dict, gpus=0, ignore_exceptions=False):
+
         self.members = []
         self.ignore_exceptions = ignore_exceptions
         self.config = config
@@ -1090,6 +1091,9 @@ class Pipeline:
         for idx, entry in enumerate(members):
             configs = pipeline_configs_from_grid(entry)
             for member in configs:
+                # Update settings that the member does not specify with the master configuration
+                if 'log_plots' not in member:
+                    member['log_plots'] = config['log_plots']
                 for _class in pipeline_members:
                     if member['type'].lower() == _class.name.lower():
                         self.members.append(_class(

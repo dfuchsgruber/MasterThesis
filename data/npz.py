@@ -1,15 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.sparse as sp
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from data.base import SingleGraphDataset
 import data.util
 import os.path as osp
 import os
 from util import sparse_max, get_cache_path
 from tqdm import tqdm
+from sentence_transformers import SentenceTransformer
 import torch
-
 
 from transformers import AutoModel, AutoTokenizer
 
@@ -35,9 +35,8 @@ def load_embedded_word_features(dataset_name, language_model, cache_dir=osp.join
     feature_to_idx : dict
         A mapping that names every column in [0, ... D-1].
     """ 
-
-    os.makedirs(cache_dir, exist_ok=True)
     cache_file = osp.join(cache_dir, f'{dataset_name}:{language_model}:word-embeddings.npy')
+    os.makedirs(osp.dirname(cache_file), exist_ok=True)
     if osp.exists(cache_file):
         X =  np.load(cache_file)
     else:
@@ -47,29 +46,35 @@ def load_embedded_word_features(dataset_name, language_model, cache_dir=osp.join
         else:
             raise RuntimeError(f'Npz Dataset {dataset_name} has no text attribute "attr_text" to embed.')
         
-        # Create embeddings
-        tokenizer = AutoTokenizer.from_pretrained(language_model, max_length=max_length)
-        model = AutoModel.from_pretrained(language_model).cuda()
-        if torch.cuda.is_available():
-            model = model.cuda()
+        if language_model in ('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2', ):
+            sentences = corpus.tolist()
+            model = SentenceTransformer(language_model)
+            if torch.cuda.is_available():
+                model = model.cuda()
+            X = model.encode(sentences)
+        else:
+            # Create embeddings using any `transformer` pre-trained model
+            tokenizer = AutoTokenizer.from_pretrained(language_model, max_length=max_length, padding=True)
+            model = AutoModel.from_pretrained(language_model).cuda()
+            if torch.cuda.is_available():
+                model = model.cuda()
 
-        embedded = []
-        with torch.no_grad():
-            for idx in tqdm(range(corpus.shape[0]), desc=f'Embedding using {language_model}'):
-                inputs = {k : v[..., :max_length].cuda() for k, v in tokenizer(corpus[idx], return_tensors='pt').items()}
-                if torch.cuda.is_available():
-                    inputs = {k : v.cuda() for k, v in inputs.items()}
-                output = model(**inputs)
-                embedded.append(output.pooler_output.cpu().clone())
-                del output
+            embedded = []
+            with torch.no_grad():
+                for idx in tqdm(range(corpus.shape[0]), desc=f'Embedding using {language_model}'):
+                    inputs = {k : v[..., :max_length] for k, v in tokenizer(corpus[idx], return_tensors='pt').items()}
+                    if torch.cuda.is_available():
+                        inputs = {k : v.cuda() for k, v in inputs.items()}
+                    output = model(**inputs)
+                    embedded.append(output.pooler_output.cpu().clone())
+                    del output
 
-        X = torch.cat(embedded, dim=0).numpy() # shape (N, embedding_size)
+            X = torch.cat(embedded, dim=0).numpy() # shape (N, embedding_size)
+
         np.save(cache_file, X)
-
+    
     feature_to_idx = {f'feature_{i}' : i for i in range(X.shape[1])}
     return X, feature_to_idx
-
-
 
 class NpzDataset(SingleGraphDataset):
     
@@ -140,7 +145,7 @@ class NpzDataset(SingleGraphDataset):
             
         return A, vertices_to_keep
     
-    def _build_vectorizer(self, corpus, y, idx_to_label, corpus_labels='all', min_token_frequency=10):
+    def _build_vectorizer(self, corpus, y, idx_to_label, corpus_labels='all', min_token_frequency=10, normalize='l2', vectorizer='tf-idf'):
         """ Builds and fits a vectorizer on all elements 
         
         Parameters:
@@ -155,6 +160,8 @@ class NpzDataset(SingleGraphDataset):
             Which class labels to base the vectorizer on. This prevents data leakage.
         min_token_frequency : int
             How often a token must appear to at minimum to be recognized by the vectorizer
+        normalize : 'l1', 'l2' or None
+            How the bag of words features are normalized.
 
         Returns:
         --------
@@ -167,7 +174,12 @@ class NpzDataset(SingleGraphDataset):
         else:
             corpus_labels = set(corpus_labels)
         has_corpus_label = np.array([idx_to_label[label] in corpus_labels for label in y])
-        vectorizer = TfidfVectorizer(min_df=min_token_frequency)
+        if vectorizer.lower() in ('tf-idf', 'tfidf'):
+            vectorizer = TfidfVectorizer(min_df=min_token_frequency, norm=normalize)
+        elif vectorizer.lower() in ('count', ):
+            vectorizer = CountVectorizer(min_df=min_token_frequency)
+        else:
+            raise RuntimeError(f'Unsupported vectorizer type {vectorizer}.')
         vectorizer.fit(corpus[has_corpus_label])
         return vectorizer
     
@@ -223,7 +235,7 @@ class NpzDataset(SingleGraphDataset):
         return X, feature_to_idx
 
     def __init__(self, name, corpus_labels='all', min_token_frequency=10, make_undirected=True, make_unweighted=True, select_lcc=True, remove_self_loops=True, transform=None,
-        preprocessing='bag_of_words', language_model="bert-base-uncased"):
+        preprocessing='bag_of_words', language_model="bert-base-uncased", normalize='l2', vectorizer='tf-idf'):
         if name not in self.raw_files:
             raise RuntimeError(f'Npz dataset {name} does not exist.')
         loader = np.load(self.raw_files[name], allow_pickle=True)
@@ -235,7 +247,7 @@ class NpzDataset(SingleGraphDataset):
         
         # Build the attribute matrix
         if preprocessing.lower() in ('bag_of_words', 'bag-of-words'):
-            vectorizer = self._build_vectorizer(corpus[vertices_to_keep], y, idx_to_label, corpus_labels=corpus_labels, min_token_frequency=min_token_frequency)
+            vectorizer = self._build_vectorizer(corpus[vertices_to_keep], y, idx_to_label, corpus_labels=corpus_labels, min_token_frequency=min_token_frequency, normalize=normalize, vectorizer=vectorizer)
             X, feature_to_idx = self._vectorize(corpus[vertices_to_keep], vectorizer)
             X = X.todense()
             vertex_to_idx = self._build_vertex_to_idx(loader['idx_to_node'].item(), vertices_to_keep)

@@ -30,7 +30,7 @@ from data.util import label_binarize, data_get_summary
 #                     split_type='stratified',
 #                     )
 
-num_splits, num_inits = 1, 1
+num_splits, num_inits = 2, 1
 
 
 ex = ExperimentWrapper(init_all=False, collection_name='model-test', run_id='gcn_64_32_residual')
@@ -69,11 +69,15 @@ ex.init_dataset(dataset='cora_full', num_dataset_splits=num_splits, train_portio
                     train_labels = ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning'],
                     val_labels = ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance'],
                     corpus_labels = ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning'],
-                    preprocessing='word_embedding',
-                    language_model = 'bert-base-uncased',
+                    preprocessing='bag-of-words',
+                    #preprocessing='word_embedding',
+                    #language_model = 'bert-base-uncased',
+                    #language_model = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+                    #language_model = 'allenai/longformer-base-4096',
+                    drop_train_vertices_portion = 0.2,
                     )
 
-ex.init_model(model_type='gcn', hidden_sizes=[64,32], num_initializations=num_inits, weight_scale=0.9, 
+ex.init_model(model_type='gcn', hidden_sizes=[64], num_initializations=num_inits, weight_scale=0.9, 
     use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
     residual=True, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1,
     use_spectral_norm_on_last_layer=False, self_loop_fill_value=1.0,
@@ -84,6 +88,17 @@ ex.init_run(name='model_no_remove_{0}_hidden_sizes_{1}_weight_scale_{2}', args=[
 ])
 
 pipeline = []
+
+# pipeline += [{
+#         'type' : 'EvaluateEmpircalLowerLipschitzBounds',
+#         'num_perturbations' : 20,
+#         'min_perturbation' : 2,
+#         'max_perturbation' : 10,
+#         'num_perturbations_per_sample' : 5,
+#         'perturbation_type' : 'noise',
+#         'seed' : 1337,
+#         'name' : 'noise_perturbations',
+#     },]
 
 # Perturbed datasets
 pipeline += [{
@@ -133,29 +148,29 @@ for dataset, short in (('val-reduced-ber', 'ber'), ('val-reduced-normal', 'norma
         else:
             dataset_acc = dataset
 
-        pipeline.append({
-            'type' : 'EvaluateAccuracy',
-            'evaluate_on' : [dataset_acc],
-            'model_kwargs' : {'remove_edges' : remove_edges},
-            'name' : name,
-        } | ood_cfg)
-        pipeline.append({
-            'type' : 'EvaluateCalibration',
-            'evaluate_on' : [dataset_acc],
-            'name' : name,
-        })
-        pipeline.append({
-            'type' : 'EvaluateSoftmaxEntropy',
-            'evaluate_on' : [dataset],
-            'model_kwargs' : {'remove_edges' : remove_edges},
-            'name' : name,
-        } | ood_cfg)
-        pipeline.append({
-            'type' : 'EvaluateLogitEnergy',
-            'evaluate_on' : [dataset],
-            'model_kwargs' : {'remove_edges' : remove_edges},
-            'name' : name,
-        } | ood_cfg)
+        # pipeline.append({
+        #     'type' : 'EvaluateAccuracy',
+        #     'evaluate_on' : [dataset_acc],
+        #     'model_kwargs' : {'remove_edges' : remove_edges},
+        #     'name' : name,
+        # } | ood_cfg)
+        # pipeline.append({
+        #     'type' : 'EvaluateCalibration',
+        #     'evaluate_on' : [dataset_acc],
+        #     'name' : name,
+        # })
+        # pipeline.append({
+        #     'type' : 'EvaluateSoftmaxEntropy',
+        #     'evaluate_on' : [dataset],
+        #     'model_kwargs' : {'remove_edges' : remove_edges},
+        #     'name' : name,
+        # } | ood_cfg)
+        # pipeline.append({
+        #     'type' : 'EvaluateLogitEnergy',
+        #     'evaluate_on' : [dataset],
+        #     'model_kwargs' : {'remove_edges' : remove_edges},
+        #     'name' : name,
+        # } | ood_cfg)
         pipeline.append({
             'type' : 'FitFeatureDensityGrid',
             'fit_to' : ['train'],
@@ -167,6 +182,19 @@ for dataset, short in (('val-reduced-ber', 'ber'), ('val-reduced-normal', 'norma
                     'relative' : [True, False],
                     'mode' : ['weighted', 'max'],
                 },
+                'FeatureSpaceDensityNormalizingFlowPerClass' : {
+                    # 'iterations' : [10],
+                    # 'relative' : [True, False],
+                    # 'mode' : ['weighted', 'max'],
+                    # 'num_layers' : [10],
+                    'iterations' : [10],
+                    'relative' : [True],
+                    'mode' : ['weighted'],
+                    'num_layers' : [2],
+                    'hidden_dim' : [64],
+                    'flow_type' : ['maf'],
+
+                },
             },
             'dimensionality_reductions' : {
                 'none' : {
@@ -176,9 +204,11 @@ for dataset, short in (('val-reduced-ber', 'ber'), ('val-reduced-normal', 'norma
             'model_kwargs_evaluate' : {'remove_edges' : remove_edges},
             'name' : name,
         } | ood_cfg)
+        
 
 
 ex.init_evaluation(
+    save_artifacts=False,
     print_pipeline=True,
     pipeline=pipeline,
     # [
