@@ -11,9 +11,10 @@ cfg['data']['base_labels'] = ['Artificial_Intelligence/NLP', 'Artificial_Intelli
 cfg['data']['corpus_labels'] = ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
 cfg['data']['train_labels'] = ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
 cfg['data']['setting'] = dconstants.HYBRID[0]
-cfg['data']['ood_type'] = dconstants.LEFT_OUT_CLASSES[0]
+#cfg['data']['ood_type'] = dconstants.LEFT_OUT_CLASSES[0]
+cfg['data']['ood_type'] = dconstants.PERTURBATION[0]
 cfg['data']['left_out_class_labels'] = ['Artificial_Intelligence/NLP', 'Artificial_Intelligence/Data_Mining', 'Artificial_Intelligence/Speech', 'Artificial_Intelligence/Knowledge_Representation', 'Artificial_Intelligence/Theorem_Proving', 'Artificial_Intelligence/Games_and_Search', 'Artificial_Intelligence/Vision_and_Pattern_Recognition', 'Artificial_Intelligence/Planning', 'Artificial_Intelligence/Agents', 'Artificial_Intelligence/Robotics', 'Artificial_Intelligence/Expert_Systems', 'Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
-cfg['data']['drop_train_vertices_portion'] = 0.5
+cfg['data']['drop_train_vertices_portion'] = 0.1
 cfg['perturbation_budget'] = 0.1
 cfg = configuration.get_experiment_configuration(cfg)
 
