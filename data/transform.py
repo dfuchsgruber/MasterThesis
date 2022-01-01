@@ -7,22 +7,15 @@ from torch_geometric.data import Data
 class PerturbationTransform(T.BaseTransform):
     """ Perturbs certain vertices with noise. """
 
-    def __init__(self, noise_type='bernoulli', perturb_only_in_mask=True, budget=0.1, **kwargs):
+    def __init__(self, noise_type='bernoulli', **kwargs):
         self.noise_type = noise_type
-        self.perturb_only_in_mask = perturb_only_in_mask
-        self.budget = budget
         for k, v in kwargs.items():
             setattr(self, k, v)
     
     @torch.no_grad()
     def __call__(self, data):
-        if self.perturb_only_in_mask:
-            idxs = torch.where(data.mask)[0].numpy()
-        else:
-            idxs = torch.arange(data.x.size(0)).numpy()
-        num_to_perturb = int(idxs.shape[0] * self.budget)
-        idxs = torch.tensor(np.random.choice(idxs, num_to_perturb, replace=False))
-        noise = torch.zeros((num_to_perturb, data.x.size(1)))
+        idxs = torch.where(data.is_out_of_distribution)[0].numpy()
+        noise = torch.zeros((idxs.shape[0], data.x.size(1)))
         if self.noise_type.lower() in ('bernoulli', ):
             p = getattr(self, 'p', 0.5)
             noise = noise.bernoulli(p)
@@ -34,9 +27,7 @@ class PerturbationTransform(T.BaseTransform):
         else:
             raise RuntimeError(f'Unknown perturbation type {self.noise_type}')
         data.x[idxs] = noise
-        perturbation_mask = torch.zeros(data.x.size(0)).bool()
-        perturbation_mask[idxs] = True
-        return data, perturbation_mask
+        return data
 
 class RemoveEdgesTransform(T.BaseTransform):
     """ Removes all edges in the dataset. """

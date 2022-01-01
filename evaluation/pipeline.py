@@ -895,15 +895,13 @@ class PerturbData(PipelineMember):
 
     name = 'PerturbData'
 
-    def __init__(self, base_data=data_constants.VAL_REDUCED, dataset_name='unnamed-perturbation-dataset', 
-                    perturbation_type='bernoulli', budget=0.1, parameters={}, perturb_only_in_mask=True, **kwargs):
+    def __init__(self, base_data=data_constants.OOD, dataset_name='unnamed-perturbation-dataset', 
+                    perturbation_type='bernoulli', parameters={}, **kwargs):
         super().__init__(**kwargs)
         self.base_data = base_data
         self.dataset_name = dataset_name
         self.perturbation_type = perturbation_type
-        self.budget = budget
         self.parameters = parameters
-        self.perturb_only_in_mask = perturb_only_in_mask
 
     @property
     def configuration(self):
@@ -911,8 +909,6 @@ class PerturbData(PipelineMember):
             'Based on' : self.base_data,
             'Dataset name' : self.dataset_name,
             'Type' : self.perturbation_type,
-            'Budget' : self.budget,
-            'Perturb vertices in mask only' : self.perturb_only_in_mask,
             'Parameters' : self.parameters,
         }
 
@@ -921,20 +917,11 @@ class PerturbData(PipelineMember):
         base_loader = get_data_loader(self.base_data, kwargs['data_loaders'])
         if len(base_loader) != 1:
             raise RuntimeError(f'Perturbing is only supported for single graph data.')
-        data, is_perturbed = PerturbationTransform(
+        data = PerturbationTransform(
             noise_type=self.perturbation_type,
-            perturb_only_in_mask=self.perturb_only_in_mask,
-            budget=self.budget,
             **self.parameters,
         )(base_loader.dataset[0])
-        dataset = SingleGraphDataset(
-            data.x.numpy(), 
-            data.edge_index.numpy(), 
-            data.y.numpy(), 
-            data.vertex_to_idx, 
-            data.label_to_idx, 
-            data.mask.numpy(), 
-            is_perturbed=is_perturbed.numpy())
+        dataset = SingleGraphDataset(data)
         kwargs['data_loaders'][self.dataset_name] = DataLoader(dataset, batch_size=1, shuffle=False)
         return args, kwargs
 

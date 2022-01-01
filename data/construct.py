@@ -43,17 +43,18 @@ def _load_gust_data_from_configuration(config):
                                                            portion_test_fixed=config['test_portion_fixed'], 
                                                            portion_test_not_fixed=config['test_portion'],
                                                            )
-    return [
-            {
-                name : GustDataset(config['dataset'], transform = MaskTransform(mask[type_idx, split_idx])) for name, type_idx in {
-                    data.constants.TRAIN : 0,
-                    data.constants.VAL : 1,
-                    data.constants.VAL_REDUCED : 1,
-                    data.constants.TEST : 2,
-                    data.constants.TEST_REDUCED : 2,
-                }.items()
-            } for split_idx in range(mask.shape[1])
-        ], GustDataset(config['dataset'], transform=MaskTransform(mask_test_fixed))
+    raise NotImplemented
+    # return [
+    #         {
+    #             name : GustDataset(config['dataset'], transform = MaskTransform(mask[type_idx, split_idx])) for name, type_idx in {
+    #                 data.constants.TRAIN : 0,
+    #                 data.constants.VAL : 1,
+    #                 data.constants.VAL_REDUCED : 1,
+    #                 data.constants.TEST : 2,
+    #                 data.constants.TEST_REDUCED : 2,
+    #             }.items()
+    #         } for split_idx in range(mask.shape[1])
+    #     ], GustDataset(config['dataset'], transform=MaskTransform(mask_test_fixed))
 
 def _print_stats(dataset, prefix=''):
     d = dataset[0]
