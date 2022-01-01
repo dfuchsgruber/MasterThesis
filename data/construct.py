@@ -167,8 +167,8 @@ def load_data_from_configuration(config):
     --------
     data_list : list
         A list of different data splits. Each element is 4-tuple of data_train, data_val, data_val_all_classes, data_test.
-    data_test_fixed : torch_geometric.data.Dataset
-        Fixed test dataset that is consistent among all splits.
+    fixed_vertices : set
+        The vertex ids (as in `data.vertex_to_idx`'s keys) of the common portion that will only be allocated to testing data. 
     """
     split_type = config.get('split_type', 'stratified').lower()
     if split_type == 'stratified':

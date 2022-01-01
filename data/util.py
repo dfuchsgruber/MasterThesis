@@ -15,6 +15,47 @@ class SamplingError(Exception):
     pass
 
 
+def mask_from_vertices(vertices, vertex_to_idx, n=None):
+    """ Builds a mask that only selects certain vertices by their ids. 
+    
+    Parameters:
+    -----------
+    vertices : set
+        The vertices to select. (ids)
+    vertex_to_idx : dict
+        The mapping from vertex id -> idx
+    n : int or None
+        How big the mask should be. If `None` is given, it will be the max vertex idx in `vertex_to_idx`
+
+    Returns:
+    --------
+    mask : ndarray, shape [N]
+        The mask.
+    """
+    if n is None:
+        n = max(vertex_to_idx.values()) + 1
+    mask = np.zeros(n, dtype=bool)
+    for vertex in vertices:
+        mask[vertex_to_idx[vertex]] = True
+    return mask
+
+def vertices_from_mask(mask, vertex_to_idx):
+    """ Gets the vertices that are selected by a mask. Inverse of `mask_from_vertices`. 
+    
+    Parameters:
+    -----------
+    mask : ndarray, shape [N]
+        The vertices to be selected
+    vertex_to_idx : dict
+        Mapping from vertex id -> idx
+    
+    Returns:
+    --------
+    vertices : set
+        The vertices that are selected by the mask.
+    """
+    return set(v for v, idx in vertex_to_idx.items() if mask[idx])
+
 def data_get_summary(dataset, prefix='\t'):
     """ Gets the summary string of a dataset. 
     
@@ -44,7 +85,7 @@ def data_get_summary(dataset, prefix='\t'):
     summary.append(f'{prefix}Vertex hash in mask: {vertex_hash[data.mask].mean()}')
     summary.append(f'{prefix}Vertex hash graph: {vertex_hash.mean()}')
     summary.append(f'{prefix}Feature range {data.x.min()} - {data.x.max()}')
-    summary.append(f'Classes: (in_mask / total) ')
+    summary.append(f'{prefix}Classes: (in_mask / total) ')
     for label, class_idx in data.label_to_idx.items():
         num_in_mask = (data.y[data.mask] == class_idx).sum()
         num_total = (data.y == class_idx).sum()
