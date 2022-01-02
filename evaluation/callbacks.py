@@ -65,6 +65,21 @@ def make_callback_get_ground_truth(mask=True, cpu=True):
         return y
     return callback
 
+def make_callback_count_neighbours_with_attribute(attribute_getter, k, mask=True, cpu=True):
+    """ Makes a callback that counts the neighbours with a certain attribute. """
+    def callback(data, output):
+        has_attribute = attribute_getter(data, output)
+        neighbours = get_k_hop_neighbourhood(data.edge_index, k, k_min=k)
+        result = torch.tensor([
+                has_attribute[np.array(neighbours.get(idx, []))].sum() for idx in range(data.x.size(0))
+            ]).long()
+        if mask:
+            result = result[data.mask]
+        if cpu:
+            result = result.cpu()
+        return result
+    return callback
+
 def make_callback_is_ground_truth_in_labels(labels, mask=True, cpu=True):
     """ Makes a callback that identifies all train labels in the ground truth. """
     labels = set(labels)
@@ -79,35 +94,9 @@ def make_callback_is_ground_truth_in_labels(labels, mask=True, cpu=True):
         return is_train_label
     return callback
 
-def make_callback_count_neighbours_with_labels(labels, k, mask=True, cpu=True):
-    """ Makes a callback that counts vertices that have neighbours in the k-hop neighbood that have certain label. """
-    labels = set(labels)
-    def callback(data, output):
-        is_in_lables = make_callback_is_ground_truth_in_labels(labels, cpu=cpu, mask=False)(data, output)
-        neighbours = get_k_hop_neighbourhood(data.edge_index, k, k_min=k)
-        result = torch.tensor([
-                is_in_lables[np.array(neighbours.get(idx, []))].sum() for idx in range(data.x.size(0))
-            ]).long()
-        if mask:
-            result = result[data.mask]
-        if cpu:
-            result = result.cpu()
-        return result
-    return callback
-
 def make_callback_count_neighbours(k, mask=True, cpu=True):
     """ Makes a callback counts all neighbours in the k-hop neighbood. """
-    def callback(data, output):
-        neighbours = get_k_hop_neighbourhood(data.edge_index, k, k_min=k)
-        result = torch.tensor([
-                len(neighbours.get(idx, [])) for idx in range(data.x.size(0))
-            ]).long()
-        if mask:
-            result = result[data.mask]
-        if cpu:
-            result = result.cpu()
-        return result
-    return callback
+    return make_callback_count_neighbours_with_attribute(lambda data, output: np.ones(data.x.size(0), dtype=bool), k, mask=mask, cpu=cpu)
 
 
 def make_callback_get_perturbation_mask(mask=True, cpu=True):

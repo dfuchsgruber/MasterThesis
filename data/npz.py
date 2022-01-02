@@ -90,7 +90,8 @@ class NpzDataset(SingleGraphDataset):
     def list_datasets():
         return list(NpzDataset.raw_files.keys())
     
-    def _load_graph(self, loader, make_undirected=True, make_unweighted=True, select_lcc=True, remove_self_loops=True):
+    @staticmethod
+    def _load_graph(loader, make_undirected=True, make_unweighted=True, select_lcc=True, remove_self_loops=True):
         """ Loads and preprocessed the graph adjacency. 
         
         Parameters:
@@ -145,7 +146,8 @@ class NpzDataset(SingleGraphDataset):
             
         return A, vertices_to_keep
     
-    def _build_vectorizer(self, corpus, y, idx_to_label, corpus_labels='all', min_token_frequency=10, normalize='l2', vectorizer='tf-idf'):
+    @staticmethod
+    def _build_vectorizer(corpus, y, idx_to_label, corpus_labels='all', min_token_frequency=10, normalize='l2', vectorizer='tf-idf'):
         """ Builds and fits a vectorizer on all elements 
         
         Parameters:
@@ -183,8 +185,8 @@ class NpzDataset(SingleGraphDataset):
         vectorizer.fit(corpus[has_corpus_label])
         return vectorizer
     
-
-    def _build_vertex_to_idx(self, idx_to_vertex, vertices_to_keep):
+    @staticmethod
+    def _build_vertex_to_idx(idx_to_vertex, vertices_to_keep):
         """ Builds the mapping from vertex -> idx. 
         
         Parameters:
@@ -208,8 +210,8 @@ class NpzDataset(SingleGraphDataset):
         vertex_to_idx = {vertex : idx for idx, vertex in enumerate(vertex_names)}
         return vertex_to_idx
 
-
-    def _vectorize(self, corpus, vectorizer):
+    @staticmethod
+    def _vectorize(corpus, vectorizer):
         """ Loads the attribute matrix of the dataset using a vectorizer. 
         
         Parameters:
@@ -234,12 +236,13 @@ class NpzDataset(SingleGraphDataset):
         feature_to_idx = {feat : idx for idx, feat in enumerate(feature_names)}
         return X, feature_to_idx
 
-    def __init__(self, name, corpus_labels='all', min_token_frequency=10, make_undirected=True, make_unweighted=True, select_lcc=True, remove_self_loops=True, transform=None,
+    @staticmethod
+    def build(name, corpus_labels='all', min_token_frequency=10, make_undirected=True, make_unweighted=True, select_lcc=True, remove_self_loops=True, transform=None,
         preprocessing='bag_of_words', language_model="bert-base-uncased", normalize='l2', vectorizer='tf-idf'):
-        if name not in self.raw_files:
+        if name not in NpzDataset.raw_files:
             raise RuntimeError(f'Npz dataset {name} does not exist.')
-        loader = np.load(self.raw_files[name], allow_pickle=True)
-        A, vertices_to_keep = self._load_graph(loader, make_undirected=make_undirected, select_lcc=select_lcc, remove_self_loops=remove_self_loops)
+        loader = np.load(NpzDataset.raw_files[name], allow_pickle=True)
+        A, vertices_to_keep = NpzDataset._load_graph(loader, make_undirected=make_undirected, select_lcc=select_lcc, remove_self_loops=remove_self_loops)
         y = loader['labels'][vertices_to_keep]
         idx_to_label = loader['idx_to_class'].item()
         if 'attr_text' in loader:
@@ -247,20 +250,21 @@ class NpzDataset(SingleGraphDataset):
         
         # Build the attribute matrix
         if preprocessing.lower() in ('bag_of_words', 'bag-of-words'):
-            vectorizer = self._build_vectorizer(corpus[vertices_to_keep], y, idx_to_label, corpus_labels=corpus_labels, min_token_frequency=min_token_frequency, normalize=normalize, vectorizer=vectorizer)
-            X, feature_to_idx = self._vectorize(corpus[vertices_to_keep], vectorizer)
+            vectorizer = NpzDataset._build_vectorizer(corpus[vertices_to_keep], y, idx_to_label, corpus_labels=corpus_labels, min_token_frequency=min_token_frequency, normalize=normalize, vectorizer=vectorizer)
+            X, feature_to_idx = NpzDataset._vectorize(corpus[vertices_to_keep], vectorizer)
             X = X.todense()
-            vertex_to_idx = self._build_vertex_to_idx(loader['idx_to_node'].item(), vertices_to_keep)
+            vertex_to_idx = NpzDataset._build_vertex_to_idx(loader['idx_to_node'].item(), vertices_to_keep)
         elif preprocessing.lower() in ('word_embedding', 'word-embedding', 'embedding'):
             X, feature_to_idx = load_embedded_word_features(name, language_model)
             X = X[vertices_to_keep]
-            vertex_to_idx = self._build_vertex_to_idx(loader['idx_to_node'].item(), vertices_to_keep)
+            vertex_to_idx = NpzDataset._build_vertex_to_idx(loader['idx_to_node'].item(), vertices_to_keep)
         else:
             raise RuntimeError(f'Unknown preprocessing for features of type {preprocessing}')
 
         label_to_idx = {label : idx for idx, label in idx_to_label.items() if idx in y}
         y, label_to_idx, _ = data.util.compress_labels(y, label_to_idx)
-        super().__init__(X, np.array(A.nonzero()), y, vertex_to_idx, label_to_idx, np.ones_like(y), transform=transform, feature_to_idx=feature_to_idx)
-        
+        _data = SingleGraphDataset.build(X, np.array(A.nonzero()), y, vertex_to_idx, label_to_idx, np.ones_like(y), transform=transform, feature_to_idx=feature_to_idx)
+        return NpzDataset(_data.data, transform=transform)
+
 if __name__ == '__main__':
     pass

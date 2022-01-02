@@ -44,7 +44,7 @@ class SingleGraphDataset(Dataset):
         return self.transform(data) # This way we can apply in-place transforms
 
     @staticmethod
-    def build(x, edge_index, y, vertex_to_idx, label_to_idx, mask, transform=None, edge_weight=None, **kwargs ):
+    def build(x, edge_index, y, vertex_to_idx, label_to_idx, mask, transform=None, edge_weight=None, is_out_of_distribution = None, **kwargs ):
         """ 
         Parameters:
         -----------
@@ -72,6 +72,12 @@ class SingleGraphDataset(Dataset):
         
         if edge_weight is None:
             edge_weight = torch.ones(edge_index.shape[1]).float()
+        else:
+            edge_weight = torch.tensor(edge_weight)
+        if is_out_of_distribution is None:
+            is_out_of_distribution = torch.zeros(x.shape[0]).bool()
+        else:
+            is_out_of_distribution = torch.tensor(is_out_of_distribution)
         attributes = {}
         for attribute, value in kwargs.items():
             if isinstance(value, np.ndarray):
@@ -87,6 +93,8 @@ class SingleGraphDataset(Dataset):
             mask = torch.tensor(mask).bool(),
             vertex_to_idx = vertex_to_idx,
             label_to_idx = label_to_idx,
+            edge_weight = edge_weight,
+            is_out_of_distribution = is_out_of_distribution,
             **attributes
         )
         return SingleGraphDataset(data, transform=transform)

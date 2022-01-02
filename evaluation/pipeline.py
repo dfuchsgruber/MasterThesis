@@ -4,33 +4,30 @@ import pytorch_lightning as pl
 import evaluation.lipschitz
 import plot.perturbations
 import matplotlib.pyplot as plt
-from evaluation.util import split_labels_into_id_and_ood, get_data_loader, run_model_on_datasets, count_neighbours_with_label, get_distribution_labels_leave_out_classes, separate_distributions_leave_out_classes, get_distribution_labels_perturbations
+from evaluation.util import get_data_loader, run_model_on_datasets, separate_distributions, get_distribution_labels
 import evaluation.constants as evaluation_constants
 from evaluation.callbacks import *
 from plot.density import plot_2d_log_density, plot_density
 from plot.features import plot_2d_features
 from plot.util import plot_histogram, plot_histograms, plot_2d_histogram
 from plot.calibration import plot_calibration
-from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from model.density import get_density_model
 from model.dimensionality_reduction import DimensionalityReduction
 from evaluation.logging import log_figure, log_histogram, log_embedding, log_metrics
 from evaluation.features import inductive_feature_shift
-from torch_geometric.data import Dataset, Data
 from torch_geometric.loader import DataLoader
 from sklearn.decomposition import PCA
-from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve, auc
+from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
 import os.path as osp
 from data.util import label_binarize, data_get_summary, labels_in_dataset, vertex_intersection, labels_to_idx, graph_select_labels
 from data.base import SingleGraphDataset
-from data.transform import RemoveEdgesTransform, PerturbationTransform
+from data.transform import PerturbationTransform
 from warnings import warn
 from itertools import product
 from util import format_name, get_k_hop_neighbourhood
 from copy import deepcopy
 import traceback
-import data.constants as data_constants
-from torch_geometric.transforms import Compose
+import data.constants as dconstants
 from metrics import expected_calibration_error
 
 _ID_LABEL, _OOD_LABEL = 1, 0
@@ -169,12 +166,11 @@ class OODSeparation(PipelineMember):
 
     name = 'OODSeparation'
     
-    def __init__(self, *args, separate_distributions_by='train_label', separate_distributions_tolerance=0.0,
-            evaluate_on=[data_constants.VAL], kind='leave-out-classes', **kwargs):
+    def __init__(self, *args, separate_distributions_by='ood', separate_distributions_tolerance=0.0,
+            evaluate_on=[dconstants.OOD], **kwargs):
         super().__init__(*args, **kwargs)
         self.separate_distributions_by = separate_distributions_by
         self.separate_distributions_tolerance = separate_distributions_tolerance
-        self.kind = kind
         self.evaluate_on = evaluate_on
 
     @property
@@ -183,7 +179,6 @@ class OODSeparation(PipelineMember):
             'Evaluate on' : self.evaluate_on,
             'Separate distributions by' : self.separate_distributions_by,
             'Separate distributions tolerance' : self.separate_distributions_tolerance,
-            'OOD kind' : self.kind,
         }
 
     def _get_distribution_labels_perturbations(self, **kwargs):
@@ -200,15 +195,23 @@ class OODSeparation(PipelineMember):
         distribution_label_names : dict
             Mapping that names all the labels in `distribution_labels`.
         """
-        distribution_labels = get_distribution_labels_perturbations(
+
+        is_ood = run_model_on_datasets(None, 
             [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
-        )
+            run_model = False,
+            callbacks = [
+                make_callback_count_neighbours_with_attribute(
+                    lambda data, outputs: data.is_out_of_distribution.numpy(), 0
+                )
+            ]
+        )[0]
+        distribution_labels = (torch.cat(is_ood, dim = 0) > 0).long()
         auroc_mask = torch.ones_like(distribution_labels).bool()
         auroc_labels = torch.zeros_like(distribution_labels).bool()
         auroc_labels[distribution_labels == evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS] = True
         distribution_label_names = {
-            evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS : f'Perturbed', 
-            evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS : f'Unperturbed', 
+            1 : f'Perturbed', 
+            0 : f'Unperturbed', 
         }
         return auroc_labels, auroc_mask, distribution_labels, distribution_label_names
 
@@ -228,14 +231,13 @@ class OODSeparation(PipelineMember):
         """
         # Classify vertices according to which distribution they belong to
         k = len(kwargs['config']['model']['hidden_sizes']) + 1
-        distribution_labels = get_distribution_labels_leave_out_classes(
+        distribution_labels = get_distribution_labels(
             [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
             k, # Receptive field of each vertex is num-hidden-layers + 1
-            kwargs['config']['data']['train_labels'],
             mask = True,
             threshold = self.separate_distributions_tolerance,
         )
-        auroc_labels, auroc_mask = separate_distributions_leave_out_classes(distribution_labels, self.separate_distributions_by)
+        auroc_labels, auroc_mask = separate_distributions(distribution_labels, self.separate_distributions_by)
         distribution_label_names = {
             evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS : f'ood, no id nbs in {k} hops', 
             evaluation_constants.OOD_CLASS_ID_CLASS_NBS : f'ood, id nbs in {k}-hops',
@@ -263,12 +265,13 @@ class OODSeparation(PipelineMember):
         distribution_label_names : dict
             Mapping that names all the labels in `distribution_labels`.
         """
-        if self.kind.lower() in ('leave-out-classes', 'loc', 'leave_out_classes'):
+        if kwargs['config']['data']['ood_type'] in dconstants.LEFT_OUT_CLASSES:
             return self._get_distribution_labels_leave_out_classes(**kwargs)
-        elif self.kind.lower() in ('perturbations', 'perturbation', 'noise'):
+        elif kwargs['config']['data']['ood_type'] in dconstants.PERTURBATION:
             return self._get_distribution_labels_perturbations(**kwargs)
         else:
-            raise RuntimeError(f'Could not separate distribution labels (id vs ood) by unknown type {self.kind}.')
+            kind = kwargs['config']['data']['ood_type']
+            raise RuntimeError(f'Could not separate distribution labels (id vs ood) by unknown type {kind}.')
 
 class OODDetection(OODSeparation):
     """ Pipeline member to perform OOD detection for a given metric. Evaluates AUROC scores and logs plots. """
@@ -369,7 +372,7 @@ class EvaluateLogitEnergy(OODDetection):
 
     name = 'EvaluateLogitEnergy'
 
-    def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', 
+    def __init__(self, gpus=0, evaluate_on=[dconstants.VAL], separate_distributions_by='ood-and-neighbourhood', 
                 separate_distributions_tolerance=0.0, log_plots=True, temperature=1.0, **kwargs):
         super().__init__(separate_distributions_by=separate_distributions_by, 
                             separate_distributions_tolerance=separate_distributions_tolerance,
@@ -408,7 +411,7 @@ class EvaluateSoftmaxEntropy(OODDetection):
 
     name = 'EvaluateSoftmaxEntropy'
 
-    def __init__(self, gpus=0, evaluate_on=[data_constants.VAL], separate_distributions_by='train-label', 
+    def __init__(self, gpus=0, evaluate_on=[dconstants.VAL], separate_distributions_by='ood-and-neighbourhood', 
                 separate_distributions_tolerance=0.0, log_plots=True, **kwargs):
         super().__init__(separate_distributions_by=separate_distributions_by, 
                             separate_distributions_tolerance=separate_distributions_tolerance,
@@ -461,8 +464,8 @@ class FeatureDensity(OODDetection):
 
     name = 'FeatureDensity'
 
-    def __init__(self, gpus=0, fit_to=[data_constants.TRAIN], 
-        fit_to_ground_truth_labels=[data_constants.TRAIN], evaluate_on=[data_constants.TEST], separate_distributions_by='train_label',
+    def __init__(self, gpus=0, fit_to=[dconstants.TRAIN], 
+        fit_to_ground_truth_labels=[dconstants.TRAIN], evaluate_on=[dconstants.OOD], separate_distributions_by='train_label',
         separate_distributions_tolerance=0.0, kind='leave_out_classes',
         **kwargs):
         super().__init__(
@@ -499,9 +502,9 @@ class FitFeatureDensityGrid(FeatureDensity):
 
     name = 'FitFeatureDensityGrid'
 
-    def __init__(self, fit_to=[data_constants.TRAIN], fit_to_ground_truth_labels=[data_constants.TRAIN], 
-                    evaluate_on=[data_constants.VAL], density_types={}, dimensionality_reductions={}, gpus=0,
-                    separate_distributions_by='train-label', separate_distributions_tolerance=0.0, seed=1337,
+    def __init__(self, fit_to=[dconstants.TRAIN], fit_to_ground_truth_labels=[dconstants.TRAIN], 
+                    evaluate_on=[dconstants.OOD], density_types={}, dimensionality_reductions={}, gpus=0,
+                    separate_distributions_by='ood-and-neighbourhood', separate_distributions_tolerance=0.0, seed=1337,
                     **kwargs):
         super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, 
                         separate_distributions_by=separate_distributions_by,
@@ -567,8 +570,8 @@ class FitFeatureDensityGrid(FeatureDensity):
                         )
                         
                         if self.log_plots:
-                            fig, ax = plot_density(features_to_fit, 
-                                features_to_evaluate[is_finite_density], density_model, 
+                            fig, ax = plot_density(features_to_fit_reduced, 
+                                features_to_evaluate_reduced[is_finite_density], density_model, 
                                 distribution_labels[is_finite_density], distribution_label_names, seed=self.seed)
                             log_figure(kwargs['logs'], fig, f'pca{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                             plt.close(fig)
@@ -581,7 +584,7 @@ class VisualizeIDvsOOD(OODSeparation):
 
     name = 'VisualizeIDvsOOD'
 
-    def __init__(self, gpus=0, fit_to=[data_constants.TRAIN], layer=-2, dimensionality_reductions= ['pca'], **kwargs):
+    def __init__(self, gpus=0, fit_to=[dconstants.TRAIN], layer=-2, dimensionality_reductions= ['pca'], **kwargs):
             super().__init__(**kwargs)
             self.gpus = gpus
             self.fit_to = fit_to
@@ -650,7 +653,7 @@ class FitFeatureSpacePCA(PipelineMember):
 
     name = 'FitFeatureSpacePCA'
 
-    def __init__(self, gpus=0, fit_to=['train'], evaluate_on=[], num_components=16, **kwargs):
+    def __init__(self, gpus=0, fit_to=[dconstants.TRAIN], evaluate_on=[dconstants.VAL], num_components=16, **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.fit_to = fit_to
@@ -674,7 +677,7 @@ class FitFeatureSpacePCA(PipelineMember):
         pca = PCA(n_components=self.num_components)
         projected = pca.fit_transform(features.cpu().numpy())
 
-        log_embedding(kwargs['logs'], projected, f'pca_{self.suffix}', labels.cpu().numpy(), save_artifact=kwargs['artifact_directory'])
+        log_embedding(kwargs['logs'], projected, f'pca_{self.suffix}', kwargs['artifacts'], labels=labels.cpu().numpy(), save_artifact=kwargs['artifact_directory'])
         pipeline_log(f'Fit feature space PCA with {self.num_components} components. Explained variance ratio {pca.explained_variance_ratio_}')
 
         if len(self.evaluate_on) > 0 and self.num_components > 2:
@@ -685,7 +688,7 @@ class FitFeatureSpacePCA(PipelineMember):
             features, predictions, labels = run_model_on_datasets(kwargs['model'], loaders, gpus=self.gpus, model_kwargs=self.model_kwargs_evaluate)
             for idx, data_name in enumerate(self.evaluate_on):
 
-                projected = pca.fit_transform(features[idx].cpu().numpy())
+                projected = pca.transform(features[idx].cpu().numpy())
                 fig, ax = plot_2d_features(torch.tensor(projected), labels[idx])
                 log_figure(kwargs['logs'], fig, f'pca_{self.suffix}_{data_name}_gnd', 'pca', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                 plt.close(fig)
@@ -703,7 +706,7 @@ class LogFeatures(PipelineMember):
 
     name = 'LogFeatures'
 
-    def __init__(self, gpus=0, evaluate_on=['val'], **kwargs):
+    def __init__(self, gpus=0, evaluate_on=[dconstants.VAL], **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.evaluate_on = evaluate_on
@@ -729,7 +732,7 @@ class PrintDatasetSummary(PipelineMember):
 
     name = 'PrintDatasetSummary'
 
-    def __init__(self, gpus=0, evaluate_on=['train', 'val'], **kwargs):
+    def __init__(self, gpus=0, evaluate_on=[dconstants.TRAIN, dconstants.VAL, dconstants.OOD], **kwargs):
         super().__init__(**kwargs)
         self.evaluate_on = evaluate_on
 
@@ -752,7 +755,7 @@ class LogInductiveFeatureShift(PipelineMember):
 
     name = 'LogInductiveFeatureShift'
 
-    def __init__(self, gpus=0, data_before=data_constants.TRAIN, data_after=data_constants.VAL, **kwargs):
+    def __init__(self, gpus=0, data_before=dconstants.TRAIN, data_after=dconstants.OOD, **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.data_before = data_before
@@ -775,7 +778,7 @@ class LogInductiveFeatureShift(PipelineMember):
         ]
         for k in range(1, receptive_field_size + 1):
             callbacks += [
-                make_callback_count_neighbours_with_labels(kwargs['config']['data']['train_labels'], k, mask=False),
+                make_callback_count_neighbours_with_attribute(lambda data, output: ~data.is_out_of_distribution.numpy(), k, mask=True),
                 make_callback_count_neighbours(k, mask=False),
             ]
         results = run_model_on_datasets(kwargs['model'], [get_data_loader(data, kwargs['data_loaders']) for data in (self.data_before, self.data_after)], gpus=self.gpus, callbacks=callbacks, model_kwargs=self.model_kwargs)
@@ -805,7 +808,7 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
 
     name = 'LogInductiveSoftmaxEntropyShift'
 
-    def __init__(self, gpus=0, data_before=data_constants.TRAIN, data_after=data_constants.VAL, **kwargs):
+    def __init__(self, gpus=0, data_before=dconstants.TRAIN, data_after=dconstants.OOD, **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.data_before = data_before
@@ -828,7 +831,7 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
         ]
         for k in range(1, receptive_field_size + 1):
             callbacks += [
-                make_callback_count_neighbours_with_labels(kwargs['config']['data']['train_labels'], k, mask=False),
+                make_callback_count_neighbours_with_attribute(lambda data, output: ~data.is_out_of_distribution.numpy(), k, mask=True),
                 make_callback_count_neighbours(k, mask=False),
             ]
         results = run_model_on_datasets(kwargs['model'], [get_data_loader(data, kwargs['data_loaders']) for data in (self.data_before, self.data_after)], gpus=self.gpus, callbacks=callbacks, model_kwargs=self.model_kwargs)
@@ -862,7 +865,7 @@ class SubsetDataByLabel(PipelineMember):
 
     name = 'SubsetDataByLabel'
 
-    def __init__(self, base_data=data_constants.VAL, subset_name='unnamed-subset', labels='all', **kwargs):
+    def __init__(self, base_data=dconstants.OOD, subset_name='unnamed-subset', labels='all', **kwargs):
         super().__init__(**kwargs)
         self.base_data = base_data
         self.subset_name = subset_name.lower()
@@ -895,7 +898,7 @@ class PerturbData(PipelineMember):
 
     name = 'PerturbData'
 
-    def __init__(self, base_data=data_constants.OOD, dataset_name='unnamed-perturbation-dataset', 
+    def __init__(self, base_data=dconstants.OOD, dataset_name='unnamed-perturbation-dataset', 
                     perturbation_type='bernoulli', parameters={}, **kwargs):
         super().__init__(**kwargs)
         self.base_data = base_data
@@ -930,7 +933,7 @@ class EvaluateAccuracy(OODSeparation):
 
     name = 'EvaluateAccuracy'
 
-    def __init__(self, evaluate_on=[data_constants.VAL_TRAIN_LABELS], evaluate_on_id_only=True, gpus=0, **kwargs):
+    def __init__(self, evaluate_on=[dconstants.OOD], gpus=0, **kwargs):
         super().__init__(evaluate_on=evaluate_on, **kwargs)
         self.gpus = gpus
 
@@ -947,7 +950,8 @@ class EvaluateAccuracy(OODSeparation):
             callbacks = [
                 evaluation.callbacks.make_callback_get_predictions(),
                 evaluation.callbacks.make_callback_get_ground_truth(),
-                evaluation.callbacks.make_callback_is_ground_truth_in_labels(kwargs['config']['data']['train_labels']),
+                evaluation.callbacks.make_callback_is_ground_truth_in_labels(
+                    kwargs['config']['data']['train_labels']),
 
             ])
         mask, predictions, labels = torch.cat(mask, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
@@ -975,7 +979,7 @@ class EvaluateCalibration(PipelineMember):
 
     name = 'EvaluateCalibration'
 
-    def __init__(self, evaluate_on=[data_constants.VAL_TRAIN_LABELS], bins=10, gpus=0, **kwargs):
+    def __init__(self, evaluate_on=[dconstants.VAL], bins=10, gpus=0, **kwargs):
         super().__init__(**kwargs)
         self.evaluate_on = evaluate_on
         self.gpus = gpus

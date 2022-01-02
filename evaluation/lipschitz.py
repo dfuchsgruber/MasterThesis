@@ -169,7 +169,7 @@ def permutation_perturbations(model, dataset, num_permutations, num_perturbation
     for num_permutations in perturbations:
         for _ in range(num_perturbations_per_sample):
             x_perturbed = permute_features(dataset.x, num_permutations, rng=rng, per_sample=per_sample)
-            h_perturbed = model(Data(x=x_perturbed, edge_index=dataset.edge_index), **model_kwargs).get_features(-2).cpu()
+            h_perturbed = model(Data(x=x_perturbed, edge_index=dataset.edge_index, edge_weight=dataset.edge_weight), **model_kwargs).get_features(-2).cpu()
             input_perturbations.append((x_perturbed - dataset.x).norm(dim=1).cpu())
             output_perturbations.append((h_perturbed - h).norm(dim=1).cpu())
     input_perturbations = torch.cat(input_perturbations).numpy() # N * len(perturbations) * num_perturbations_per_sample

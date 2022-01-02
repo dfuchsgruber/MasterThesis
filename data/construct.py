@@ -134,7 +134,7 @@ def load_data_from_configuration_uniform_split(config):
     if config['type'].lower() in ('gust',):
         base_data = GustDataset(config['dataset'])[0]
     elif config['type'].lower() in ('npz',):
-        base_data = NpzDataset(
+        base_data = NpzDataset.build(
             config['dataset'], corpus_labels=config['corpus_labels'], min_token_frequency=config['min_token_frequency'],
             preprocessing = config['preprocessing'], language_model=config['language_model'], normalize=config['normalize'],
             vectorizer=config['vectorizer'],

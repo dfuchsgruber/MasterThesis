@@ -19,7 +19,7 @@ from model.semi_supervised_node_classification import SemiSupervisedNodeClassifi
 from data.gust_dataset import GustDataset
 from data.util import data_get_num_attributes, data_get_num_classes
 from data.construct import load_data_from_configuration
-import data.constants as data_constants
+import data.constants as dconstants
 from seed import model_seeds
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
@@ -60,29 +60,27 @@ class ExperimentWrapper:
 
     # With the prefix option we can "filter" the configuration for the sub-dictionary under "data".
     @ex.capture(prefix="data")
-    def init_dataset(self, dataset, num_dataset_splits, train_portion, val_portion, test_portion, test_portion_fixed,
-                        train_labels='all', train_labels_remove_other=False,
-                        val_labels='all', val_labels_remove_other=False,
-                        split_type='stratified', base_labels='all', 
-                        type='gust', corpus_labels='all',
+    def init_dataset(self, dataset, num_dataset_splits, train_portion, test_portion_fixed,
+                        setting = dconstants.HYBRID[0],
+                        ood_type = dconstants.LEFT_OUT_CLASSES[0],
+                        train_labels='all', 
+                        split_type='stratified', 
+                        base_labels='all',
+                        left_out_class_labels = [], 
+                        type='npz', 
+                        corpus_labels='all',
                         min_token_frequency=10,
                         preprocessing='bag_of_words',
                         language_model='bert-base-uncased',
                         drop_train_vertices_portion = 0.0,
+                        perturbation_budget = 0.1,
                         ):
         self.data_config = {
             'dataset' : dataset,
             'num_dataset_splits' : num_dataset_splits,
             'train_portion' : train_portion,
-            'val_portion' : val_portion,
-            'test_portion' : test_portion,
             'test_portion_fixed' : test_portion_fixed,
             'train_labels' : train_labels,
-            'train_labels_remove_other' : train_labels_remove_other,
-            # 'train_labels_compress' : train_labels_compress, # Train labels should always be compressed
-            'val_labels' : val_labels,
-            'val_labels_remove_other' : val_labels_remove_other,
-            # 'val_labels_compress' : val_labels_compress, # Val labels should never be compressed
             'split_type' : split_type,
             'base_labels' : base_labels,
             'type' : type,
@@ -91,10 +89,11 @@ class ExperimentWrapper:
             'preprocessing' : preprocessing,
             'language_model' : language_model,
             'drop_train_vertices_portion' : drop_train_vertices_portion,
-
+            'setting' : setting,
+            'ood_type' : ood_type,
+            'left_out_class_labels' : left_out_class_labels,
+            'perturbation_budget' : perturbation_budget,
         }
-        # self.data_mask_split, self.data_mask_test_fixed = stratified_split_with_fixed_test_set_portion(self.data[0].y.numpy(), num_dataset_splits, 
-        #     portion_train=train_portion, portion_val=val_portion, portion_test_fixed=test_portion_fixed, portion_test_not_fixed=test_portion)
 
     @ex.capture(prefix="model")
     def init_model(self, model_type: str, hidden_sizes: list, weight_scale: float, num_initializations: int, use_spectral_norm: bool, num_heads=-1, 
@@ -164,7 +163,7 @@ class ExperimentWrapper:
         })
 
         # Data loading
-        data_list, dataset_fixed = load_data_from_configuration(config['data'])
+        data_list, fixed_vertices = load_data_from_configuration(config['data'])
         
         run_name = format_name(self.run_name_format, self.run_name_format_args, config)
         # One global logger for all splits and initializations
@@ -191,8 +190,8 @@ class ExperimentWrapper:
 
                     model = SemiSupervisedNodeClassification(
                         config['model'], 
-                        data_get_num_attributes(data_dict[data_constants.TRAIN][0]), 
-                        data_get_num_classes(data_dict[data_constants.TRAIN][0]), 
+                        data_get_num_attributes(data_dict[dconstants.TRAIN][0]), 
+                        data_get_num_classes(data_dict[dconstants.TRAIN][0]), 
                         learning_rate=config['training']['learning_rate'],
                         self_loop_fill_value=config['model']['self_loop_fill_value'],
                     )
@@ -231,7 +230,7 @@ class ExperimentWrapper:
                         }
                         best_model_path = self.model_registry[registry_config]
                         if best_model_path is None:
-                            trainer.fit(model, data_loaders[data_constants.TRAIN], data_loaders[data_constants.VAL_REDUCED])
+                            trainer.fit(model, data_loaders[dconstants.TRAIN], data_loaders[dconstants.VAL])
                             best_model_path = checkpoint_callback.best_model_path
                             self.model_registry[registry_config] = best_model_path
                             os.remove(best_model_path) # Clean the checkpoint from the artifact directory
@@ -250,7 +249,7 @@ class ExperimentWrapper:
                 model.eval()
                 val_metrics = {
                     name : trainer.validate(model, data_loaders[name], ckpt_path=best_model_path)
-                    for name in (data_constants.VAL_TRAIN_LABELS, data_constants.VAL_REDUCED)
+                    for name in (dconstants.VAL, )
                 }
                 for name, metrics in val_metrics.items():
                     for val_metric in metrics:

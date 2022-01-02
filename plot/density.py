@@ -44,12 +44,18 @@ def plot_density(points_to_fit, points_to_eval, density_model, labels, label_nam
     
     bins_x, bins_y = bins, bins
     
-    # First create a PCA and embed points to fit
-    pca = PCA(n_components=2, random_state=seed)
-    points_to_fit_emb = pca.fit_transform(points_to_fit.cpu().numpy())
-        
-    # Embed the points to eval
-    points_to_eval_emb = pca.transform(points_to_eval.cpu().numpy())
+    if points_to_fit.size(1) > 2:
+        # First create a PCA and embed points to fit
+        pca = PCA(n_components=2, random_state=seed)
+        points_to_fit_emb = pca.fit_transform(points_to_fit.cpu().numpy())
+            
+        # Embed the points to eval
+        points_to_eval_emb = pca.transform(points_to_eval.cpu().numpy())
+    else:
+        points_to_fit_emb = points_to_fit.cpu().numpy()
+        points_to_eval_emb = points_to_eval.cpu().numpy()
+        pca = None
+
     points_emb = np.concatenate([points_to_fit_emb, points_to_eval_emb], axis=0)
 
     mins, maxs = points_emb.min(0), points_emb.max(0)
@@ -62,7 +68,10 @@ def plot_density(points_to_fit, points_to_eval, density_model, labels, label_nam
     
     # Get the densities
     density_points = density_model(points_to_eval).cpu().numpy()
-    density_grid = density_model(torch.tensor(pca.inverse_transform(grid)).float()).cpu().numpy()
+    if pca is None:
+        density_grid = density_model(torch.tensor(grid).float()).cpu().numpy()
+    else:
+        density_grid = density_model(torch.tensor(pca.inverse_transform(grid)).float()).cpu().numpy()
     
     xx, yy, density_grid = xx.reshape((bins_x, bins_y)), yy.reshape((bins_x, bins_y)), density_grid.reshape((bins_x, bins_y))
     
