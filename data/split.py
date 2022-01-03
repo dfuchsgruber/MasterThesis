@@ -81,7 +81,7 @@ def uniform_split_perturbations(data, setting, num_splits, mask_non_fixed, seed_
             mask_dropped, mask_perturbed = _masks[:, 0], _masks[:, 1]
 
             if setting in dconstants.TRANSDUCTIVE:
-                mask_train = dutils.sample_uniformly(data.y.numpy(), train_labels, num_samples, mask_train_graph & mask_non_fixed & (~mask_dropped) & (~mask_perturbed), rng=rng)
+                mask_train = dutils.sample_uniformly(data.y.numpy(), train_labels, num_samples, mask_train_graph & mask_non_fixed & (~mask_perturbed), rng=rng)
                 data_train = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_train, mask_train[mask_train_graph])
 
                 mask_val = dutils.sample_uniformly(data.y.numpy(), train_labels, num_samples, mask_train_graph & (~mask_train) & mask_non_fixed, rng=rng)
