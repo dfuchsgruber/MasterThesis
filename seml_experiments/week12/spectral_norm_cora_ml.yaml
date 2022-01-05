@@ -112,7 +112,7 @@ left-out-classes-no-spectral-norm:
       seed: 1337
       type: EvaluateEmpircalLowerLipschitzBounds
     - evaluate_on:
-      - ood
+      - ood-val
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-no-edges
@@ -123,7 +123,7 @@ left-out-classes-no-spectral-norm:
       - pca
       - tsne
       evaluate_on:
-      - ood
+      - ood-val
       fit_to:
       - train
       model_kwargs_evaluate:
@@ -133,7 +133,7 @@ left-out-classes-no-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: VisualizeIDvsOOD
     - evaluate_on:
-      - ood
+      - ood-val
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-no-edges
@@ -141,7 +141,7 @@ left-out-classes-no-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: EvaluateSoftmaxEntropy
     - evaluate_on:
-      - ood
+      - ood-val
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-no-edges
@@ -159,7 +159,7 @@ left-out-classes-no-spectral-norm:
       dimensionality_reductions:
         none: {}
       evaluate_on:
-      - ood
+      - ood-val
       fit_to:
       - train
       fit_to_ground_truth_labels:
@@ -172,7 +172,7 @@ left-out-classes-no-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: FitFeatureDensityGrid
     - data_after:
-      - ood
+      - ood-val
       data_before:
       - train
       model_kwargs_evaluate:
@@ -182,7 +182,7 @@ left-out-classes-no-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: LogInductiveFeatureShift
     - data_after:
-      - ood
+      - ood-val
       data_before:
       - train
       model_kwargs_evaluate:
@@ -192,7 +192,7 @@ left-out-classes-no-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: LogInductiveSoftmaxEntropyShift
     - evaluate_on:
-      - ood
+      - ood-val
       name: loc
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -201,7 +201,7 @@ left-out-classes-no-spectral-norm:
       - pca
       - tsne
       evaluate_on:
-      - ood
+      - ood-val
       fit_to:
       - train
       name: loc
@@ -209,13 +209,13 @@ left-out-classes-no-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: VisualizeIDvsOOD
     - evaluate_on:
-      - ood
+      - ood-val
       name: loc
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateSoftmaxEntropy
     - evaluate_on:
-      - ood
+      - ood-val
       name: loc
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -231,7 +231,7 @@ left-out-classes-no-spectral-norm:
       dimensionality_reductions:
         none: {}
       evaluate_on:
-      - ood
+      - ood-val
       fit_to:
       - train
       fit_to_ground_truth_labels:
@@ -242,7 +242,7 @@ left-out-classes-no-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: FitFeatureDensityGrid
     - data_after:
-      - ood
+      - ood-val
       data_before:
       - train
       name: loc
@@ -250,7 +250,7 @@ left-out-classes-no-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: LogInductiveFeatureShift
     - data_after:
-      - ood
+      - ood-val
       data_before:
       - train
       name: loc
@@ -298,7 +298,7 @@ left-out-classes-spectral-norm:
       seed: 1337
       type: EvaluateEmpircalLowerLipschitzBounds
     - evaluate_on:
-      - ood
+      - ood-val
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-no-edges
@@ -309,7 +309,7 @@ left-out-classes-spectral-norm:
       - pca
       - tsne
       evaluate_on:
-      - ood
+      - ood-val
       fit_to:
       - train
       model_kwargs_evaluate:
@@ -319,7 +319,7 @@ left-out-classes-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: VisualizeIDvsOOD
     - evaluate_on:
-      - ood
+      - ood-val
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-no-edges
@@ -327,7 +327,7 @@ left-out-classes-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: EvaluateSoftmaxEntropy
     - evaluate_on:
-      - ood
+      - ood-val
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-no-edges
@@ -345,7 +345,7 @@ left-out-classes-spectral-norm:
       dimensionality_reductions:
         none: {}
       evaluate_on:
-      - ood
+      - ood-val
       fit_to:
       - train
       fit_to_ground_truth_labels:
@@ -358,7 +358,7 @@ left-out-classes-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: FitFeatureDensityGrid
     - data_after:
-      - ood
+      - ood-val
       data_before:
       - train
       model_kwargs_evaluate:
@@ -368,7 +368,7 @@ left-out-classes-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: LogInductiveFeatureShift
     - data_after:
-      - ood
+      - ood-val
       data_before:
       - train
       model_kwargs_evaluate:
@@ -378,7 +378,7 @@ left-out-classes-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: LogInductiveSoftmaxEntropyShift
     - evaluate_on:
-      - ood
+      - ood-val
       name: loc
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -387,7 +387,7 @@ left-out-classes-spectral-norm:
       - pca
       - tsne
       evaluate_on:
-      - ood
+      - ood-val
       fit_to:
       - train
       name: loc
@@ -395,13 +395,13 @@ left-out-classes-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: VisualizeIDvsOOD
     - evaluate_on:
-      - ood
+      - ood-val
       name: loc
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateSoftmaxEntropy
     - evaluate_on:
-      - ood
+      - ood-val
       name: loc
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -417,7 +417,7 @@ left-out-classes-spectral-norm:
       dimensionality_reductions:
         none: {}
       evaluate_on:
-      - ood
+      - ood-val
       fit_to:
       - train
       fit_to_ground_truth_labels:
@@ -428,7 +428,7 @@ left-out-classes-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: FitFeatureDensityGrid
     - data_after:
-      - ood
+      - ood-val
       data_before:
       - train
       name: loc
@@ -436,7 +436,7 @@ left-out-classes-spectral-norm:
       separate_distributions_tolerance: 0.1
       type: LogInductiveFeatureShift
     - data_after:
-      - ood
+      - ood-val
       data_before:
       - train
       name: loc
@@ -465,6 +465,23 @@ left-out-classes-spectral-norm:
       type: choice
 perturbations-no-spectral-norm:
   fixed:
+    data.base_labels:
+    - Artificial_Intelligence/Machine_Learning/Case-Based
+    - Artificial_Intelligence/Machine_Learning/Theory
+    - Artificial_Intelligence/Machine_Learning/Genetic_Algorithms
+    - Artificial_Intelligence/Machine_Learning/Probabilistic_Methods
+    - Artificial_Intelligence/Machine_Learning/Neural_Networks
+    - Artificial_Intelligence/Machine_Learning/Rule_Learning
+    - Artificial_Intelligence/Machine_Learning/Reinforcement_Learning
+    data.corpus_labels:
+    - Artificial_Intelligence/Machine_Learning/Case-Based
+    - Artificial_Intelligence/Machine_Learning/Theory
+    - Artificial_Intelligence/Machine_Learning/Genetic_Algorithms
+    - Artificial_Intelligence/Machine_Learning/Probabilistic_Methods
+    - Artificial_Intelligence/Machine_Learning/Neural_Networks
+    - Artificial_Intelligence/Machine_Learning/Rule_Learning
+    - Artificial_Intelligence/Machine_Learning/Reinforcement_Learning
+    data.left_out_class_labels: []
     evaluation.pipeline:
     - evaluate_on:
       - val
@@ -500,13 +517,13 @@ perturbations-no-spectral-norm:
       perturbation_type: derangement
       seed: 1337
       type: EvaluateEmpircalLowerLipschitzBounds
-    - base_data: ood
+    - base_data: ood-val
       dataset_name: ber
       parameters:
         p: 0.5
       perturbation_type: bernoulli
       type: PerturbData
-    - base_data: ood
+    - base_data: ood-val
       dataset_name: normal
       parameters:
         scale: 1.0
@@ -753,6 +770,23 @@ perturbations-no-spectral-norm:
     run.name: residual:{0}-spectral_norm-{1}-setting:{3}-self_loop_fill:{5}-ood_type:per
 perturbations-spectral-norm:
   fixed:
+    data.base_labels:
+    - Artificial_Intelligence/Machine_Learning/Case-Based
+    - Artificial_Intelligence/Machine_Learning/Theory
+    - Artificial_Intelligence/Machine_Learning/Genetic_Algorithms
+    - Artificial_Intelligence/Machine_Learning/Probabilistic_Methods
+    - Artificial_Intelligence/Machine_Learning/Neural_Networks
+    - Artificial_Intelligence/Machine_Learning/Rule_Learning
+    - Artificial_Intelligence/Machine_Learning/Reinforcement_Learning
+    data.corpus_labels:
+    - Artificial_Intelligence/Machine_Learning/Case-Based
+    - Artificial_Intelligence/Machine_Learning/Theory
+    - Artificial_Intelligence/Machine_Learning/Genetic_Algorithms
+    - Artificial_Intelligence/Machine_Learning/Probabilistic_Methods
+    - Artificial_Intelligence/Machine_Learning/Neural_Networks
+    - Artificial_Intelligence/Machine_Learning/Rule_Learning
+    - Artificial_Intelligence/Machine_Learning/Reinforcement_Learning
+    data.left_out_class_labels: []
     evaluation.pipeline:
     - evaluate_on:
       - val
@@ -788,13 +822,13 @@ perturbations-spectral-norm:
       perturbation_type: derangement
       seed: 1337
       type: EvaluateEmpircalLowerLipschitzBounds
-    - base_data: ood
+    - base_data: ood-val
       dataset_name: ber
       parameters:
         p: 0.5
       perturbation_type: bernoulli
       type: PerturbData
-    - base_data: ood
+    - base_data: ood-val
       dataset_name: normal
       parameters:
         scale: 1.0

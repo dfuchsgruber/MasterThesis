@@ -2,6 +2,9 @@ from copy import deepcopy
 from collections.abc import Mapping
 import data.constants as dconstants
 
+# Increment this number whenever you changed something essential that makes previously trained models invalid
+REGISTRY_VERSION = 0 
+
 default_configuration = {
     'model' : {
         'hidden_sizes' : [64,],
@@ -37,6 +40,7 @@ default_configuration = {
         'setting' : dconstants.HYBRID[0],
         'ood_type' : dconstants.LEFT_OUT_CLASSES[0],
         'left_out_class_labels' : 'all',
+        'ood_sampling_strategy' : dconstants.SAMPLE_ALL[0],
         # 'train_labels_remove_other' : True,
         # 'val_labels' : 'all',
         # 'val_labels_remove_other' : True,
@@ -67,6 +71,7 @@ default_configuration = {
         'print_pipeline' : True,
         'ignore_exceptions' : False,
     },
+    'version' : REGISTRY_VERSION,
 }
 
 def remove_from_configuration(cfg, key, not_exists_ok=True):

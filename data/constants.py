@@ -5,7 +5,7 @@ VAL = 'val' # Training graph with mask on train labels
 TEST = 'test' # Testing graph, all labels and full graph
 
 # OOD has a different graph in the LoC setting that includes left out classes. OOD and OOD_TEST have disjunct masks
-OOD = 'ood'
+OOD_VAL = 'ood-val'
 OOD_TEST = 'ood-test'
 
 TRANSDUCTIVE = ('transductive',)
@@ -16,3 +16,7 @@ PERTURBATION = ('perturbations', 'perturbation', 'noise')
 
 BERNOULLI = ('bernoulli',)
 NORMAL = ('normal',)
+
+# Different sampling strategies
+SAMPLE_UNIFORM = ('uniform', ) # Sample uniformly per class
+SAMPLE_ALL = ('all', ) # Don't sample but instead use all available samples in mask

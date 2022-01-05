@@ -74,6 +74,7 @@ class ExperimentWrapper:
                         language_model='bert-base-uncased',
                         drop_train_vertices_portion = 0.0,
                         perturbation_budget = 0.1,
+                        ood_sampling_strategy = dconstants.SAMPLE_UNIFORM[0],
                         ):
         self.data_config = {
             'dataset' : dataset,
@@ -93,6 +94,7 @@ class ExperimentWrapper:
             'ood_type' : ood_type,
             'left_out_class_labels' : left_out_class_labels,
             'perturbation_budget' : perturbation_budget,
+            'ood_sampling_strategy' : ood_sampling_strategy,
         }
 
     @ex.capture(prefix="model")

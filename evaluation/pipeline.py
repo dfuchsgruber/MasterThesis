@@ -167,7 +167,7 @@ class OODSeparation(PipelineMember):
     name = 'OODSeparation'
     
     def __init__(self, *args, separate_distributions_by='ood', separate_distributions_tolerance=0.0,
-            evaluate_on=[dconstants.OOD], **kwargs):
+            evaluate_on=[dconstants.OOD_VAL], **kwargs):
         super().__init__(*args, **kwargs)
         self.separate_distributions_by = separate_distributions_by
         self.separate_distributions_tolerance = separate_distributions_tolerance
@@ -465,7 +465,7 @@ class FeatureDensity(OODDetection):
     name = 'FeatureDensity'
 
     def __init__(self, gpus=0, fit_to=[dconstants.TRAIN], 
-        fit_to_ground_truth_labels=[dconstants.TRAIN], evaluate_on=[dconstants.OOD], separate_distributions_by='train_label',
+        fit_to_ground_truth_labels=[dconstants.TRAIN], evaluate_on=[dconstants.OOD_VAL], separate_distributions_by='train_label',
         separate_distributions_tolerance=0.0, kind='leave_out_classes',
         **kwargs):
         super().__init__(
@@ -503,7 +503,7 @@ class FitFeatureDensityGrid(FeatureDensity):
     name = 'FitFeatureDensityGrid'
 
     def __init__(self, fit_to=[dconstants.TRAIN], fit_to_ground_truth_labels=[dconstants.TRAIN], 
-                    evaluate_on=[dconstants.OOD], density_types={}, dimensionality_reductions={}, gpus=0,
+                    evaluate_on=[dconstants.OOD_VAL], density_types={}, dimensionality_reductions={}, gpus=0,
                     separate_distributions_by='ood-and-neighbourhood', separate_distributions_tolerance=0.0, seed=1337,
                     **kwargs):
         super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, 
@@ -732,7 +732,7 @@ class PrintDatasetSummary(PipelineMember):
 
     name = 'PrintDatasetSummary'
 
-    def __init__(self, gpus=0, evaluate_on=[dconstants.TRAIN, dconstants.VAL, dconstants.OOD], **kwargs):
+    def __init__(self, gpus=0, evaluate_on=[dconstants.TRAIN, dconstants.VAL, dconstants.OOD_VAL], **kwargs):
         super().__init__(**kwargs)
         self.evaluate_on = evaluate_on
 
@@ -755,7 +755,7 @@ class LogInductiveFeatureShift(PipelineMember):
 
     name = 'LogInductiveFeatureShift'
 
-    def __init__(self, gpus=0, data_before=dconstants.TRAIN, data_after=dconstants.OOD, **kwargs):
+    def __init__(self, gpus=0, data_before=dconstants.TRAIN, data_after=dconstants.OOD_VAL, **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.data_before = data_before
@@ -808,7 +808,7 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
 
     name = 'LogInductiveSoftmaxEntropyShift'
 
-    def __init__(self, gpus=0, data_before=dconstants.TRAIN, data_after=dconstants.OOD, **kwargs):
+    def __init__(self, gpus=0, data_before=dconstants.TRAIN, data_after=dconstants.OOD_VAL, **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
         self.data_before = data_before
@@ -865,7 +865,7 @@ class SubsetDataByLabel(PipelineMember):
 
     name = 'SubsetDataByLabel'
 
-    def __init__(self, base_data=dconstants.OOD, subset_name='unnamed-subset', labels='all', **kwargs):
+    def __init__(self, base_data=dconstants.OOD_VAL, subset_name='unnamed-subset', labels='all', **kwargs):
         super().__init__(**kwargs)
         self.base_data = base_data
         self.subset_name = subset_name.lower()
@@ -898,7 +898,7 @@ class PerturbData(PipelineMember):
 
     name = 'PerturbData'
 
-    def __init__(self, base_data=dconstants.OOD, dataset_name='unnamed-perturbation-dataset', 
+    def __init__(self, base_data=dconstants.OOD_VAL, dataset_name='unnamed-perturbation-dataset', 
                     perturbation_type='bernoulli', parameters={}, **kwargs):
         super().__init__(**kwargs)
         self.base_data = base_data
@@ -933,7 +933,7 @@ class EvaluateAccuracy(OODSeparation):
 
     name = 'EvaluateAccuracy'
 
-    def __init__(self, evaluate_on=[dconstants.OOD], gpus=0, **kwargs):
+    def __init__(self, evaluate_on=[dconstants.OOD_VAL], gpus=0, **kwargs):
         super().__init__(evaluate_on=evaluate_on, **kwargs)
         self.gpus = gpus
 

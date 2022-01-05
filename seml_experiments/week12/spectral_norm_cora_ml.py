@@ -75,7 +75,7 @@ def build_experiments(cfg):
             pipeline += [
                 {
                     'type' : 'PerturbData',
-                    'base_data' : 'ood',
+                    'base_data' : 'ood-val',
                     'dataset_name' : 'ber',
                     'perturbation_type' : 'bernoulli',
                     'parameters' : {
@@ -84,7 +84,7 @@ def build_experiments(cfg):
                 },
                 {
                     'type' : 'PerturbData',
-                    'base_data' : 'ood',
+                    'base_data' : 'ood-val',
                     'dataset_name' : 'normal',
                     'perturbation_type' : 'normal',
                     'parameters' : {
@@ -94,7 +94,7 @@ def build_experiments(cfg):
             ]
             ood_datasets = {'ber' : 'ber', 'normal' : 'normal'}
         else:
-            ood_datasets = {'loc' : 'ood'}
+            ood_datasets = {'loc' : 'ood-val'}
         
         for ood_name, ood_dataset in ood_datasets.items():
             if ood_name == 'loc':
@@ -189,10 +189,14 @@ def build_experiments(cfg):
                 subcfg['fixed']['run.name'] = 'residual:{0}-spectral_norm-{1}-setting:{3}-self_loop_fill:{5}-ood_type:' + ood_type_short
                 subcfg['fixed']['model.weight_scale'] = -1
 
+            if ood_type == 'perturbations':
+                subcfg['fixed']['data.left_out_class_labels'] = []
+                subcfg['fixed']['data.base_labels'] = deepcopy(cfg['fixed']['data.train_labels'])
+                subcfg['fixed']['data.corpus_labels'] = deepcopy(cfg['fixed']['data.train_labels'])
+
 
             cfg[f'{ood_type}' + ('-spectral-norm' if spectral_norm else '-no-spectral-norm')] = subcfg
 
-
-
+        
 if __name__ == '__main__':
     build()

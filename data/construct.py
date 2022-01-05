@@ -154,6 +154,7 @@ def load_data_from_configuration_uniform_split(config):
         drop_train = config['drop_train_vertices_portion'],
         perturbation_budget = config['perturbation_budget'],
         ood_type = config['ood_type'],
+        ood_sampling_strategy = config['ood_sampling_strategy'],
         )
 
 def load_data_from_configuration(config):
