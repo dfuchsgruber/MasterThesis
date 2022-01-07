@@ -27,6 +27,7 @@ fixed:
   - Operating_Systems/Realtime
   - Operating_Systems/Fault_Tolerance
   data.num_dataset_splits: 5
+  data.ood_sampling_strategy: all
   data.preprocessing: bag_of_words
   data.split_type: uniform
   data.test_portion_fixed: 0.2
@@ -76,6 +77,7 @@ grid:
     type: choice
 left-out-classes-no-spectral-norm:
   fixed:
+    data.ood_type: left-out-classes
     evaluation.pipeline:
     - evaluate_on:
       - val
@@ -262,6 +264,7 @@ left-out-classes-no-spectral-norm:
     run.name: residual:{0}-spectral_norm-{1}-setting:{3}-self_loop_fill:{5}-ood_type:loc
 left-out-classes-spectral-norm:
   fixed:
+    data.ood_type: left-out-classes
     evaluation.pipeline:
     - evaluate_on:
       - val
@@ -482,6 +485,7 @@ perturbations-no-spectral-norm:
     - Artificial_Intelligence/Machine_Learning/Rule_Learning
     - Artificial_Intelligence/Machine_Learning/Reinforcement_Learning
     data.left_out_class_labels: []
+    data.ood_type: perturbations
     evaluation.pipeline:
     - evaluate_on:
       - val
@@ -787,6 +791,7 @@ perturbations-spectral-norm:
     - Artificial_Intelligence/Machine_Learning/Rule_Learning
     - Artificial_Intelligence/Machine_Learning/Reinforcement_Learning
     data.left_out_class_labels: []
+    data.ood_type: perturbations
     evaluation.pipeline:
     - evaluate_on:
       - val

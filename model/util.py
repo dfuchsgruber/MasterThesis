@@ -27,3 +27,4 @@ def module_numel(m: torch.nn.Module, only_trainable: bool = False):
         parameters = [p for p in parameters if p.requires_grad]
     unique = {p.data_ptr(): p for p in parameters}.values()
     return sum(p.numel() for p in unique)
+    

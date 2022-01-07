@@ -10,6 +10,7 @@ from sklearn.mixture import GaussianMixture
 import traceback
 import pyblaze.nn as xnn
 from pyblaze.utils.stdlib import flatten
+from normalizing_flow import NormalizingFlow
 
 def cov_and_mean(x, rowvar=False, bias=False, ddof=None, aweights=None):
     """Estimates covariance matrix like numpy.cov and also returns the weighted mean.
@@ -554,24 +555,13 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
         if self.seed is not None:
             torch.manual_seed(self.seed)
 
-        if self.flow_type.lower() == 'radial':
-            transformations = [xnn.RadialTransform(features.size(1)) for _ in range(self.num_layers)]
-        elif self.flow_type.lower() == 'maf':
-            transformations = []
-            for i in range(self.num_layers):
-                if i > 0:
-                    transformations += [xnn.FlipTransform1d()]
-                transformations += [
-                    xnn.MaskedAutoregressiveTransform1d(features.size(1), *([self.hidden_dim] * self.num_hidden), constrain_scale=True),
-                    xnn.BatchNormTransform1d(features.size(1))
-                    ]
+        self.flows[class_idx] = NormalizingFlow(self.flow_type, self.num_layers, features.size(1), seed=self.seed, num_hidden=self.num_hidden, 
+                hidden_dim = self.hidden_dim)
+        if class_idx == 'all':
+            weights = torch.ones(features.size(0)).float()
         else:
-            raise RuntimeError(f'Normalizing flow type {self.flow_type} not supported.')
-
-        flow = xnn.NormalizingFlow(transformations)
-        self._fit_flow(flow, features, iterations=self.iterations)
-
-        self.flows[class_idx] = flow
+            weights = soft[:, class_idx]
+        self.flows[class_idx].fit(features, weights=weights)
 
     def get_density_class(self, class_idx, features):
         """ Gets the density for a given class.
@@ -588,31 +578,7 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
         log_densities : torch.Tensor, shape [N]
             Log densities for each sample given that class density.
         """
-        flow = self.flows[class_idx]
-        flow.eval()
-        with torch.no_grad():
-            log_density = -xnn.TransformedNormalLoss(reduction='none')(*flow(features))
-        return log_density.cpu()
-
-
-    def _fit_flow(self, flow, x, iterations=1000):
-        """ Fits a normalizing flow to some features. """
-        with torch.enable_grad():
-            flow.train()
-            engine = xnn.MLEEngine(flow, expects_data_target=False)
-            loader = TensorDataset(x).loader(batch_size=x.size(0))
-            optimizer = torch.optim.Adam(engine.model.parameters(), lr=1e-3)
-            engine.train(
-                    loader,
-                    epochs=iterations,
-                    optimizer=optimizer,
-                    loss=xnn.TransformedNormalLoss(),
-                    # callbacks=[
-                    #     xnn.EpochProgressLogger(),
-                    # ],
-                    gpu=torch.cuda.is_available(),
-                )
-
+        return self.flows[class_idx](features).cpu()
 
 
 densities = [

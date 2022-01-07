@@ -189,6 +189,7 @@ def build_experiments(cfg):
                 subcfg['fixed']['run.name'] = 'residual:{0}-spectral_norm-{1}-setting:{3}-self_loop_fill:{5}-ood_type:' + ood_type_short
                 subcfg['fixed']['model.weight_scale'] = -1
 
+            subcfg['fixed']['data.ood_type'] = ood_type
             if ood_type == 'perturbations':
                 subcfg['fixed']['data.left_out_class_labels'] = []
                 subcfg['fixed']['data.base_labels'] = deepcopy(cfg['fixed']['data.train_labels'])
