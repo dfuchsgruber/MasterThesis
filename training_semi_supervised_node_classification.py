@@ -240,8 +240,8 @@ class ExperimentWrapper:
                         else:
                             print(f'Loading pre-trained model from {best_model_path}')
 
-                        print(model.state_dict().keys())
-                        print(torch.load(best_model_path)['state_dict'].keys())
+                        # print(model.state_dict().keys())
+                        # print(torch.load(best_model_path)['state_dict'].keys())
 
                         model = model.load_from_checkpoint(best_model_path, strict=False)
 
