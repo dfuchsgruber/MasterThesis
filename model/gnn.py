@@ -94,7 +94,6 @@ class GCN(nn.Module):
         self.residual = residual
         self.dropout = dropout
         self.drop_edge = drop_edge
-
         self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, self._make_conv_with_spectral_norm,
                                                 cached=cached, bias=use_bias, use_spectral_norm=use_spectral_norm,
                                                 weight_scale=weight_scale, 

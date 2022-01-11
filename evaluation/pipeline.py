@@ -466,7 +466,7 @@ class FeatureDensity(OODDetection):
 
     def __init__(self, gpus=0, fit_to=[dconstants.TRAIN], 
         fit_to_ground_truth_labels=[dconstants.TRAIN], evaluate_on=[dconstants.OOD_VAL], separate_distributions_by='train_label',
-        separate_distributions_tolerance=0.0, kind='leave_out_classes',
+        separate_distributions_tolerance=0.0, kind='leave_out_classes', fit_to_mask_only=True,
         **kwargs):
         super().__init__(
             separate_distributions_by=separate_distributions_by,
@@ -478,19 +478,27 @@ class FeatureDensity(OODDetection):
         self.gpus = gpus
         self.fit_to = fit_to
         self.fit_to_ground_truth_labels = fit_to_ground_truth_labels
+        self.fit_to_mask_only = fit_to_mask_only
 
     @property
     def configuration(self):
         return super().configuration | {
             'Fit to' : self.fit_to,
+            'Fit to mask only' : self.fit_to_mask_only,
             'Use ground truth labels for fit on' : self.fit_to_ground_truth_labels,
         }
 
     def _get_features_and_labels_to_fit(self, **kwargs):
-        features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus, model_kwargs=self.model_kwargs_fit)
+        features, predictions, labels, mask = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], gpus=self.gpus, model_kwargs=self.model_kwargs_fit,
+            callbacks = [
+                make_callback_get_features(mask = self.fit_to_mask_only),
+                make_callback_get_predictions(mask = self.fit_to_mask_only),
+                make_callback_get_ground_truth(mask = self.fit_to_mask_only),
+                make_callback_get_mask(mask = self.fit_to_mask_only),
+            ])
         for idx, name in enumerate(self.fit_to):
-            if name.lower() in self.fit_to_ground_truth_labels: # Override predictions with ground truth for training data
-                predictions[idx] = label_binarize(labels[idx], num_classes=predictions[idx].size(1)).float()
+            if name.lower() in self.fit_to_ground_truth_labels: # Override predictions with ground truth for training data, but only within the mask
+                predictions[idx][mask[idx]] = label_binarize(labels[idx][mask[idx]], num_classes=predictions[idx].size(1)).float()
         return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
 
     def _get_features_and_labels_to_evaluate(self, **kwargs):
@@ -505,6 +513,7 @@ class FitFeatureDensityGrid(FeatureDensity):
     def __init__(self, fit_to=[dconstants.TRAIN], fit_to_ground_truth_labels=[dconstants.TRAIN], 
                     evaluate_on=[dconstants.OOD_VAL], density_types={}, dimensionality_reductions={}, gpus=0,
                     separate_distributions_by='ood-and-neighbourhood', separate_distributions_tolerance=0.0, seed=1337,
+                    density_plots = ['pca', 'umap'],
                     **kwargs):
         super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, 
                         separate_distributions_by=separate_distributions_by,
@@ -513,12 +522,14 @@ class FitFeatureDensityGrid(FeatureDensity):
         self.density_types = density_types
         self.dimensionality_reductions = dimensionality_reductions
         self.seed = seed
+        self.density_plots = density_plots
 
     @property
     def configuration(self):
         return super().configuration | {
             'Density types' : self.density_types,
             'Dimensionality Reductions' : self.dimensionality_reductions,
+            'Density Plots' : self.density_plots,
             'Seed' : self.seed,
         }
         
@@ -530,6 +541,7 @@ class FitFeatureDensityGrid(FeatureDensity):
 
         # Only compute data once
         features_to_fit, predictions_to_fit, labels_to_fit = self._get_features_and_labels_to_fit(**kwargs)
+        # print(features_to_fit.size(), predictions_to_fit)
 
         # Note that for `self.fit_to_ground_truth_labels` data, the `predictions_to_fit` are overriden with a 1-hot ground truth
         features_to_evaluate, predictions_to_evaluate, labels_to_evaluate = self._get_features_and_labels_to_evaluate(**kwargs)
@@ -570,11 +582,12 @@ class FitFeatureDensityGrid(FeatureDensity):
                         )
                         
                         if self.log_plots:
-                            fig, ax = plot_density(features_to_fit_reduced, 
-                                features_to_evaluate_reduced[is_finite_density], density_model, 
-                                distribution_labels[is_finite_density], distribution_label_names, seed=self.seed)
-                            log_figure(kwargs['logs'], fig, f'pca{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
-                            plt.close(fig)
+                            for plotting_type in self.density_plots:
+                                fig, ax = plot_density(features_to_fit_reduced, 
+                                    features_to_evaluate_reduced[is_finite_density], density_model, 
+                                    distribution_labels[is_finite_density], distribution_label_names, seed=self.seed, dimensionality_reduction=plotting_type, alpha=0.5)
+                                log_figure(kwargs['logs'], fig, f'{plotting_type}{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
+                                plt.close(fig)
 
 
         return args, kwargs

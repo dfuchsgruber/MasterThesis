@@ -10,7 +10,7 @@ from sklearn.mixture import GaussianMixture
 import traceback
 import pyblaze.nn as xnn
 from pyblaze.utils.stdlib import flatten
-from normalizing_flow import NormalizingFlow
+from model.normalizing_flow import NormalizingFlow
 
 def cov_and_mean(x, rowvar=False, bias=False, ddof=None, aweights=None):
     """Estimates covariance matrix like numpy.cov and also returns the weighted mean.
@@ -499,7 +499,7 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
 
     name = 'FeatureSpaceDensityNormalizingFlowPerClass'
 
-    def __init__(self, flow_type='maf', num_layers=2, hidden_dim=64, num_hidden=2, iterations=1000, seed=1337, *args, **kwargs):
+    def __init__(self, flow_type='maf', num_layers=2, hidden_dim=64, num_hidden=2, iterations=1000, seed=1337, gpu=False, verbose=False, *args, **kwargs):
         super().__init__(**kwargs)
         self.seed = seed
         self.flow_type = flow_type
@@ -507,6 +507,8 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
         self.hidden_dim = hidden_dim
         self.num_hidden = num_hidden
         self.iterations = iterations
+        self.gpu = gpu
+        self.verbose = verbose
 
         self._fitted = False
         self.flows = dict()
@@ -520,6 +522,7 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
             f'\t Hidden dimensionality : {self.hidden_dim}',
             f'\t Number of hidden units per layer : {self.num_hidden} '
             f'\t Iterations : {self.iterations}',
+            f'\t On GPU : {self.gpu}'
         ])
 
     @property
@@ -542,26 +545,19 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
             Soft probabilities (scores) for assigning a sample to a class.
         """
         hard = soft.argmax(1)
-        if class_idx ==  'all':
-            features = features # use all features
-            if features.size(0) == 0:
-                return
-        else:
-            features = features[hard == class_idx]
-            if features.size(0) == 0:
-                return
+        if class_idx != 'all':
             self.coefs[class_idx] = (hard == class_idx).sum(0) / hard.size(0)
         
         if self.seed is not None:
             torch.manual_seed(self.seed)
 
         self.flows[class_idx] = NormalizingFlow(self.flow_type, self.num_layers, features.size(1), seed=self.seed, num_hidden=self.num_hidden, 
-                hidden_dim = self.hidden_dim)
+                hidden_dim = self.hidden_dim, gpu = self.gpu)
         if class_idx == 'all':
             weights = torch.ones(features.size(0)).float()
         else:
             weights = soft[:, class_idx]
-        self.flows[class_idx].fit(features, weights=weights)
+        self.flows[class_idx].fit(features, weights=weights, verbose=self.verbose, iterations=self.iterations)
 
     def get_density_class(self, class_idx, features):
         """ Gets the density for a given class.

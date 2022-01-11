@@ -15,7 +15,7 @@ _tableaeu_colors = list(mcolors.TABLEAU_COLORS.keys())
 
 def plot_density(points_to_fit, points_to_eval, density_model, labels, label_names, 
                 seed=1337, bins=20, levels=20, dimensionality_reduction='umap', num_samples=50000,
-            sampling_stragey = 'random'):
+            sampling_stragey = 'random', alpha=0.5):
     """ Creates a density plot for high dimensional points by using dimensionality reduction. 
     Also visualizes the density by creating a meshgrid in 2d space
     and using the inverse transform to find densities for these points or sampling.
@@ -42,6 +42,8 @@ def plot_density(points_to_fit, points_to_eval, density_model, labels, label_nam
         How to reduce the dimensionality of the points.
     sampling_strategy : 'random', 'convex_combinations', 'normal'
         How to sample points to find densities over a meshgrid in non invertible dimensionality reductions.
+    alpha : float
+        Alpha value for plots.
 
     Returns:
     --------
@@ -124,10 +126,10 @@ def plot_density(points_to_fit, points_to_eval, density_model, labels, label_nam
     c = ax.contourf(xx, yy, density_grid, cmap='Reds', levels=levels)
     fig.colorbar(c, ax=ax)
     #ax.scatter(samples_emb[:, 0], samples_emb[:, 1], c=density_samples)
+    ax.scatter(emb_to_fit[:, 0], emb_to_fit[:, 1], label='Fit', marker='1', alpha=alpha)
     for label, name in label_names.items():
         points_to_plot = emb_to_eval[labels == label]
-        ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label=name, marker='x')
-    ax.scatter(emb_to_fit[:, 0], emb_to_fit[:, 1], label='Fit', marker='1')
+        ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label=name, marker='x', alpha=alpha)
     
     emb_mins, emb_maxs = emb.min(0), emb.max(0)
     emb_mins, emb_maxs = emb_mins - 0.05 * (emb_maxs - emb_mins), emb_maxs + 0.05 * (emb_maxs - emb_mins)

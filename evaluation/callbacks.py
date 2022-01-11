@@ -109,3 +109,16 @@ def make_callback_get_perturbation_mask(mask=True, cpu=True):
             perturbation_mask = perturbation_mask.cpu()
         return perturbation_mask
     return callback
+
+
+def make_callback_get_mask(mask=True, cpu=True):
+    """ Makes a callback that gets the masks in the datasets. """
+    def callback(data, output):
+        _mask = data.mask
+        if mask:
+            _mask = _mask[data.mask]
+        if cpu:
+            _mask = _mask.cpu()
+        return _mask
+    return callback
+

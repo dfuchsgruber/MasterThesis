@@ -32,6 +32,8 @@ class ModelRegistry:
                         'evaluation', 
                         'training.gpus',
                         'training.jobs',
+                        'data.num_dataset_splits',
+                        'model.num_initializations',
                         ],
                     directory_path='/nfs/students/fuchsgru/model_registry', copy_checkpoints_to_registry=True):
         self.database = seml.database
@@ -77,8 +79,9 @@ class ModelRegistry:
     def __getitem__(self, cfg):
         """ Gets the path to a trained model with a given configuration set. """
         collection = self.database.get_collection(self.collection_name)
+        cfg_sanitized = self._sanitze_config(cfg)
         for doc in collection.find():
-            if self._sanitze_config(doc['config']) == self._sanitze_config(cfg):
+            if self._sanitze_config(doc['config']) == cfg_sanitized:
                 return doc['path']
         return None
 

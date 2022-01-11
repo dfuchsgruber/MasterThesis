@@ -198,8 +198,7 @@ class ExperimentWrapper:
                         self_loop_fill_value=config['model']['self_loop_fill_value'],
                     )
                     # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
-
-
+                    
                     artifact_dir = osp.join(run_artifact_dir, f'{split_idx}-{reinitialization}-{ensemble_idx}')
                     os.makedirs(artifact_dir, exist_ok=True)
 
@@ -232,6 +231,7 @@ class ExperimentWrapper:
                         }
                         best_model_path = self.model_registry[registry_config]
                         if best_model_path is None:
+                            print(f'Could not find pre-trained model.')
                             trainer.fit(model, data_loaders[dconstants.TRAIN], data_loaders[dconstants.VAL])
                             best_model_path = checkpoint_callback.best_model_path
                             self.model_registry[registry_config] = best_model_path
@@ -240,7 +240,11 @@ class ExperimentWrapper:
                         else:
                             print(f'Loading pre-trained model from {best_model_path}')
 
-                        model = model.load_from_checkpoint(best_model_path)
+                        print(model.state_dict().keys())
+                        print(torch.load(best_model_path)['state_dict'].keys())
+
+                        model = model.load_from_checkpoint(best_model_path, strict=False)
+
                         model.eval()
                         
 
