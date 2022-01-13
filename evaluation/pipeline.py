@@ -11,7 +11,7 @@ from plot.density import plot_2d_log_density, plot_density
 from plot.features import plot_2d_features
 from plot.util import plot_histogram, plot_histograms, plot_2d_histogram
 from plot.calibration import plot_calibration
-from model.density import get_density_model
+from model.density import get_density_model, FeatureSpaceDensityPerClass
 from model.dimensionality_reduction import DimensionalityReduction
 from evaluation.logging import log_figure, log_histogram, log_embedding, log_metrics
 from evaluation.features import inductive_feature_shift
@@ -19,6 +19,7 @@ from torch_geometric.loader import DataLoader
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
 import os.path as osp
+import data.util
 from data.util import label_binarize, data_get_summary, labels_in_dataset, vertex_intersection, labels_to_idx, graph_select_labels
 from data.base import SingleGraphDataset
 from data.transform import PerturbationTransform
@@ -465,26 +466,26 @@ class FeatureDensity(OODDetection):
     name = 'FeatureDensity'
 
     def __init__(self, gpus=0, fit_to=[dconstants.TRAIN], 
-        fit_to_ground_truth_labels=[dconstants.TRAIN], evaluate_on=[dconstants.OOD_VAL], separate_distributions_by='train_label',
-        separate_distributions_tolerance=0.0, kind='leave_out_classes', fit_to_mask_only=True,
+        fit_to_ground_truth_labels=[dconstants.TRAIN], fit_to_mask_only=True, fit_to_best_prediction=False,
+        fit_to_min_confidence = 0.0,
         **kwargs):
         super().__init__(
-            separate_distributions_by=separate_distributions_by,
-            separate_distributions_tolerance=separate_distributions_tolerance,
-            kind=kind,
-            evaluate_on=evaluate_on,
             **kwargs
         )
         self.gpus = gpus
         self.fit_to = fit_to
         self.fit_to_ground_truth_labels = fit_to_ground_truth_labels
         self.fit_to_mask_only = fit_to_mask_only
+        self.fit_to_best_prediction = fit_to_best_prediction
+        self.fit_to_min_confidence = fit_to_min_confidence
 
     @property
     def configuration(self):
         return super().configuration | {
             'Fit to' : self.fit_to,
             'Fit to mask only' : self.fit_to_mask_only,
+            'Use best prediction only' : self.fit_to_best_prediction,
+            'Use predictions with minimal confidence only' : self.fit_to_min_confidence,
             'Use ground truth labels for fit on' : self.fit_to_ground_truth_labels,
         }
 
@@ -499,7 +500,19 @@ class FeatureDensity(OODDetection):
         for idx, name in enumerate(self.fit_to):
             if name.lower() in self.fit_to_ground_truth_labels: # Override predictions with ground truth for training data, but only within the mask
                 predictions[idx][mask[idx]] = label_binarize(labels[idx][mask[idx]], num_classes=predictions[idx].size(1)).float()
-        return torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
+        features, predictions, labels, mask = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels), torch.cat(mask)
+        if self.fit_to_best_prediction:
+            predictions *= label_binarize(predictions.argmax(1)) # Mask such that only the best prediction is remaining
+        predictions[predictions < self.fit_to_min_confidence] = 0.0
+        # print(f'Support for each class {predictions.sum(0).tolist()}')
+
+        # # TODO: Remove this again, hacky way to try something out
+        # mask20 = torch.tensor(data.util.sample_uniformly(labels.numpy(), set(range(predictions.size(1))), 20, mask.numpy())).bool()
+        # predictions[mask20] = label_binarize(labels[mask20]).float()
+        # predictions[~(mask20 | mask)] = 0.0
+        # print((predictions.sum(1) > 0).sum())
+
+        return features, predictions, labels
 
     def _get_features_and_labels_to_evaluate(self, **kwargs):
         features, predictions, labels = run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], gpus=self.gpus, model_kwargs=self.model_kwargs_evaluate)
@@ -510,15 +523,10 @@ class FitFeatureDensityGrid(FeatureDensity):
 
     name = 'FitFeatureDensityGrid'
 
-    def __init__(self, fit_to=[dconstants.TRAIN], fit_to_ground_truth_labels=[dconstants.TRAIN], 
-                    evaluate_on=[dconstants.OOD_VAL], density_types={}, dimensionality_reductions={}, gpus=0,
-                    separate_distributions_by='ood-and-neighbourhood', separate_distributions_tolerance=0.0, seed=1337,
+    def __init__(self, density_types={}, dimensionality_reductions={}, seed=1337,
                     density_plots = ['pca', 'umap'],
                     **kwargs):
-        super().__init__(gpus=gpus, fit_to=fit_to, fit_to_ground_truth_labels=fit_to_ground_truth_labels, 
-                        separate_distributions_by=separate_distributions_by,
-                        separate_distributions_tolerance=separate_distributions_tolerance,
-                        evaluate_on=evaluate_on, **kwargs)
+        super().__init__(**kwargs)
         self.density_types = density_types
         self.dimensionality_reductions = dimensionality_reductions
         self.seed = seed
@@ -570,24 +578,24 @@ class FitFeatureDensityGrid(FeatureDensity):
                             **density_config,
                             )
                         density_model.fit(features_to_fit_reduced, predictions_to_fit)
-                        log_density = density_model(features_to_evaluate_reduced).cpu()
-                        is_finite_density = torch.isfinite(log_density)
-
                         pipeline_log(f'{self.name} fitted density {density_model.compressed_name}')
-                        proxy_name = f'{density_model.compressed_name}:{dim_reduction.compressed_name}'
-                        self.ood_detection(log_density[is_finite_density], labels_to_evaluate[is_finite_density],
-                            proxy_name,
-                            auroc_labels[is_finite_density], auroc_mask[is_finite_density], distribution_labels[is_finite_density],
-                            distribution_label_names, plot_proxy_log_scale=False, **kwargs
-                        )
-                        
-                        if self.log_plots:
-                            for plotting_type in self.density_plots:
-                                fig, ax = plot_density(features_to_fit_reduced, 
-                                    features_to_evaluate_reduced[is_finite_density], density_model, 
-                                    distribution_labels[is_finite_density], distribution_label_names, seed=self.seed, dimensionality_reduction=plotting_type, alpha=0.5)
-                                log_figure(kwargs['logs'], fig, f'{plotting_type}{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
-                                plt.close(fig)
+
+                        for eval_suffix, eval_kwargs in density_model.evaluation_kwargs:
+                            log_density = density_model(features_to_evaluate_reduced, **eval_kwargs).cpu()
+                            is_finite_density = torch.isfinite(log_density)
+                            proxy_name = f'{density_model.compressed_name}{eval_suffix}:{dim_reduction.compressed_name}'
+                            self.ood_detection(log_density[is_finite_density], labels_to_evaluate[is_finite_density],
+                                proxy_name,
+                                auroc_labels[is_finite_density], auroc_mask[is_finite_density], distribution_labels[is_finite_density],
+                                distribution_label_names, plot_proxy_log_scale=False, **kwargs
+                            )
+                            if self.log_plots:
+                                for plotting_type in self.density_plots:
+                                    fig, ax = plot_density(features_to_fit_reduced, 
+                                        features_to_evaluate_reduced[is_finite_density], density_model, 
+                                        distribution_labels[is_finite_density], distribution_label_names, seed=self.seed, dimensionality_reduction=plotting_type, alpha=0.5)
+                                    log_figure(kwargs['logs'], fig, f'{plotting_type}{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
+                                    plt.close(fig)
 
 
         return args, kwargs

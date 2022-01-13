@@ -65,6 +65,7 @@ default_configuration = {
             'min_delta' : 1e-3,
         },
         'gpus' : 1,
+        'weight_decay' : 0.0,
     },
     'evaluation' : {
         'pipeline' : [],

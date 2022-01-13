@@ -8,6 +8,7 @@ from model.spectral_norm import spectral_norm
 import pytorch_lightning as pl
 from metrics import accuracy
 from scipy.stats import ortho_group
+import model.constants as mconst
 
 class ResidualBlock(nn.Module):
     """ Wrapper for any convolution that implements a residual connection. 
@@ -274,7 +275,7 @@ def make_model_by_configuration(configuration, input_dim, output_dim):
     model : torch.nn.Module
         A torch model that takes a torch_geometric.data.Batch as an input and outputs a list that correpsond to embeddings in all layers.
     """
-    if configuration['model_type'] == 'gcn':
+    if configuration['model_type'] in mconst.GCN:
         return GCN(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
             use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
             cached=configuration['cached'], residual=configuration['residual'],

@@ -15,6 +15,7 @@ import configuration
 from util import format_name
 from util import suppress_stdout as context_supress_stdout
 from model.util import module_numel
+import model.constants as mconst
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification, Ensemble
 from data.gust_dataset import GustDataset
 from data.util import data_get_num_attributes, data_get_num_classes
@@ -148,12 +149,13 @@ class ExperimentWrapper:
         self.run_name_format_args = args
 
     @ex.capture(prefix="training")
-    def train(self, max_epochs, learning_rate, early_stopping, gpus, suppress_stdout=True):
+    def train(self, max_epochs, learning_rate, early_stopping, gpus, weight_decay=0.0, suppress_stdout=True):
         
         training_config = {
             'max_epochs' : max_epochs,
             'learning_rate' : learning_rate,
             'early_stopping' : early_stopping,
+            'weight_decay' : weight_decay,
             'gpus' : gpus,
         }
         # Setup config and name of the run(s)
@@ -189,13 +191,14 @@ class ExperimentWrapper:
                 pl.seed_everything(seed)
                 ensembles = []
                 for ensemble_idx in range(config['model']['num_ensemble_members']):
-
+                    
                     model = SemiSupervisedNodeClassification(
                         config['model'], 
                         data_get_num_attributes(data_dict[dconstants.TRAIN][0]), 
                         data_get_num_classes(data_dict[dconstants.TRAIN][0]), 
                         learning_rate=config['training']['learning_rate'],
                         self_loop_fill_value=config['model']['self_loop_fill_value'],
+                        weight_decay=config['training']['weight_decay'],
                     )
                     # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
                     

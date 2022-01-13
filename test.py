@@ -28,7 +28,7 @@ import data.constants as dconstants
 #                     split_type='stratified',
 #                     )
 
-num_splits, num_inits = 2, 1
+num_splits, num_inits = 2, 2
 
 
 ex = ExperimentWrapper(init_all=False, collection_name='model-test', run_id='gcn_64_32_residual')
@@ -69,7 +69,7 @@ ex.init_dataset(dataset='cora_full', num_dataset_splits=num_splits, train_portio
                     preprocessing='bag_of_words',
                     ood_type = dconstants.LEFT_OUT_CLASSES[0],
                     # ood_type = dconstants.PERTURBATION[0],
-                    setting = dconstants.TRANSDUCTIVE[0],
+                    setting = dconstants.HYBRID[0],
                     #preprocessing='word_embedding',
                     #language_model = 'bert-base-uncased',
                     #language_model = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
@@ -79,8 +79,8 @@ ex.init_dataset(dataset='cora_full', num_dataset_splits=num_splits, train_portio
                     )
 
 ex.init_model(model_type='gcn', hidden_sizes=[64], num_initializations=num_inits, weight_scale=1.4, 
-    use_spectral_norm=True, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
-    residual=True, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1,
+    use_spectral_norm=False, use_bias=True, activation='leaky_relu', leaky_relu_slope=0.01,
+    residual=False, freeze_residual_projection=False, num_ensemble_members=1, num_samples=1,
     use_spectral_norm_on_last_layer=False, self_loop_fill_value=1.0,
     #dropout=0.5, drop_edge=0.5,
     )
@@ -216,13 +216,30 @@ ex.init_evaluation(
         'type' : 'FitFeatureDensityGrid',
         'fit_to' : ['train'],
         'fit_to_ground_truth_labels' : ['train'],
-        'fit_to_mask_only' : True,
+        'fit_to_mask_only' : False,
+        'fit_to_best_prediction' : False,
+        'fit_to_min_confidence' : 0.99,
         'evaluate_on' : ['ood-val'],
         'density_types' : {
             'GaussianPerClass' : {
-                'diagonal_covariance' : [True],
-                'relative' : [False],
-                'mode' : ['weighted'],
+                'diagonal_covariance' : [True, False],
+            },
+            'NormalizingFlowPerClass' : {
+                'flow_type' : ['maf'],
+                'gpu' : [True],
+                'verbose' : [True],
+                'weight_decay' : [1e-3],
+            },
+            'NormalizingFlow' : {
+                'flow_type' : ['maf'],
+                'gpu' : [True],
+                'verbose' : [True],
+                'weight_decay' : [1e-3],
+            },
+            'GaussianMixture' : {
+                'number_components' : [-1],
+                'diagonal_covariance' : [True, False],
+                'initialization' : ['random', 'predictions'],
             },
         },
         'dimensionality_reductions' : {
@@ -578,7 +595,7 @@ results_path = (ex.train(max_epochs=1000, learning_rate=0.001, early_stopping={
     'mode' : 'min',
     'patience' : 100,
     'min_delta' : 1e-3,
-}, gpus=0, suppress_stdout=False))
+}, gpus=1, suppress_stdout=False, weight_decay=1e-3))
 
 with open(results_path) as f:
     print(json.load(f))

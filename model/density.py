@@ -11,6 +11,7 @@ import traceback
 import pyblaze.nn as xnn
 from pyblaze.utils.stdlib import flatten
 from model.normalizing_flow import NormalizingFlow
+from itertools import product
 
 def cov_and_mean(x, rowvar=False, bias=False, ddof=None, aweights=None):
     """Estimates covariance matrix like numpy.cov and also returns the weighted mean.
@@ -82,31 +83,69 @@ def cov_and_mean(x, rowvar=False, bias=False, ddof=None, aweights=None):
 
     return c.squeeze(), avg
 
+def _make_covariance_psd_symmetric(cov, eps=1e-6, tol=1e-6):
+    """ If a covariance matrix is not psd (numerical errors) and symmetric, a small value is added to its diagonal to make it psd.
 
-class FeatureSpaceDensityPerClass(torch.nn.Module):
+    Parameters:
+    -----------
+    cov : nn.parameters.Parameter, shape [D, D]
+        Covariance matrix.
+    eps : float
+        The small value to add to the diagonal. If it still is not psd after that, eps is multiplied by 10 and the process repeats.
+    tol : float
+        The minimal eigenvalue that is required for the covariance matrix.
+        
+    Returns:
+    --------
+    cov : torch.Tensor, shape [D, D]
+        Symmetric positive definite covariance.
+    """
+    # Make covariance psd in case of numerical inaccuracies
+    while not (np.allclose(cov.numpy(), cov.numpy().T) and
+              np.all(np.linalg.eigvalsh(cov.numpy()) > tol)):
+        print(f'Matrix not positive semi-definite. Adding {eps} to the diagnoal.')
+        cov += torch.eye(cov.numpy().shape[0]) * eps
+        cov = 0.5 * (cov + cov.T) # Hacky way to make the matrix symmetric without changing its values too much (the diagonal stays intact for sure)
+        eps *= 10
+    return cov
+
+class FeatureSpaceDensity(torch.nn.Module):
+    """ Base class to fit feature space densities. """
+
+    def __init__(self, evaluation_kwargs_grid={}):
+        super().__init__()
+        self.evaluation_kwargs_grid = evaluation_kwargs_grid
+
+    @property
+    def evaluation_kwargs(self):
+        result = []
+        keys = list(self.evaluation_kwargs_grid.keys())
+        for values in product(*[self.evaluation_kwargs_grid[k] for k in keys]):
+            kwargs = {key : values[idx] for idx, key in enumerate(keys)}
+            result.append(('-'.join([''] + [f'{kwarg}:{v}' for kwarg, v in kwargs.items()]), kwargs))
+        if len(result) == 0:
+            result.append(('', {})) # No specific evaluation modes with differing kwargs to `forward`
+        return result
+
+class FeatureSpaceDensityPerClass(FeatureSpaceDensity):
     """ Base module to fit a density per class. """
 
     def __init__(
         self,
         seed : int = 1337,
-        mode : str = 'weighted',
-        relative : bool = False,
+        evaluation_kwargs_grid = {
+            'mode' : ['max', 'weighted'],
+            'relative' : [True, False],
+        },
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(evaluation_kwargs_grid = evaluation_kwargs_grid, **kwargs)
         self.seed = seed
-        self.mode = mode.lower()
-        self.relative = relative
         self._fitted = False
     
     @property
     def _tags(self):
         tags = []
-        if self.relative:
-            tags.append('relative')
-        if self.mode == 'weighted':
-            tags.append('weighted')
-        elif self.mode == 'max':
-            tags.append('max')
         return tags
 
     def get_class_weight(self, class_idx, soft):
@@ -151,19 +190,21 @@ class FeatureSpaceDensityPerClass(torch.nn.Module):
             self.class_weights[label] = self.get_class_weight(label, soft)
             self.fit_class(label, features, soft)
 
-        if self.relative:
-            self.fit_class('all', features, soft)
-
+        self.fit_class('all', features, soft)
         self._fitted = True
 
     @torch.no_grad()
-    def forward(self, features):
+    def forward(self, features, mode='weighted', relative=False):
         """ Gets the density at all feature points.
         
         Parameters:
         -----------
         features : torch.Tensor, shape [N, D]
             Features to get the density of.
+        mode : 'weighted' or 'max'
+            If the per class densities are aggregated by weighting or by taking the max.
+        relative : bool
+            If given, the aggregated per class density is weighted against a background density fit to all classes.
         
         Returns:
         --------
@@ -179,146 +220,16 @@ class FeatureSpaceDensityPerClass(torch.nn.Module):
             weights.append(weight)
         log_densities, weights = torch.stack(log_densities), torch.stack(weights).view((-1, 1))
 
-        if self.relative: 
+        if relative: 
             # Subtract the class independet background density p(x)
             log_densities -= self.get_density_class('all', features)
         
-        if self.mode == 'weighted':
+        if mode == 'weighted':
             return torch.logsumexp(log_densities + torch.log(weights), 0) # Sum over `num_classes` axis
-        elif self.mode == 'max':
+        elif mode == 'max':
             return torch.max(log_densities, 0)[0]
         else:
-            raise RuntimeError(f'Unknown mode for {self.name} : {self.mode}')
-
-class FeatureSpaceDensityMixtureOfGaussiansPerClass(FeatureSpaceDensityPerClass):
-    """ Model that estimates feature space density fitting a Mixture of Gaussians per class. 
-    
-    Parameters:
-    -----------
-    diagonal_covariance : bool
-        If only a diagonal covariance is to be fitted.
-    relative : bool
-        If the relative log density log(p(x | c)) - log(p(x)) should be reported.
-    mode : 'weighted' or 'max'
-        Which density to report:
-            - 'weighted' : Report log(sum_c p(x | c) * p(c))
-            - 'max' : Report log(max_c p(x | c))
-    """
-
-    name = 'MixtureOfGaussiansPerClass'
-
-    def __init__(
-            self, 
-            diagonal_covariance = False,
-            relative = False,
-            mode = 'weighted',
-            seed = 1337,
-            number_components = 2,
-            **kwargs
-        ):
-        super().__init__()
-        self._fitted = False
-        self.diagonal_covariance = diagonal_covariance
-        self.relative = relative
-        self.mode = mode.lower()
-        self.number_components = number_components
-        self.seed = seed
-
-    def __str__(self):
-        return '\n'.join([
-            self.name,
-            f'\t Diagonal covariance : {self.diagonal_covariance}',
-            f'\t Relative : {self.relative}',
-            f'\t Mode : {self.mode}',
-            f'\t Number components : {self.number_components}',
-        ])
-
-    @property
-    def compressed_name(self):
-        tags = ['mogpc']
-        if self.diagonal_covariance:
-            tags.append('diag')
-        else:
-            tags.append('full')
-        if self.relative:
-            tags.append('relative')
-        if self.mode == 'weighted':
-            tags.append('weighted')
-        elif self.mode == 'max':
-            tags.append('max')
-        return '-'.join(tags)
-
-    @torch.no_grad()
-    def fit(self, features, labels):
-        """ Fits the density models to a set of features and labels. 
-        
-        Parameters:
-        -----------
-        features : torch.Tensor, shape [N, D]
-            Features matrix.
-        labels : torch.Tensor, shape [N, num_labels]
-            Soft class labels.
-        """
-        if self._fitted:
-            raise RuntimeError(f'MoGPC density model was already fitted.')
-
-        features = features.cpu().float()
-        self.densities = {}
-        self.coefs = dict()
-        if self.diagonal_covariance:
-            covariance_type = 'diag'
-        else:
-            self.diagonal_covariance = 'full'
-
-        hard = labels.argmax(1)
-        for label in range(labels.size(1)):
-            if labels[:, label].sum(0) == 0: # No observations of this label, might happen if it was excluded from training
-                continue
-            features_label = features[hard == label]
-            self.coefs[label] = (hard == label).sum(0) / labels.size(0)
-            self.densities[label] = GaussianMixture(n_components = self.number_components, random_state=self.seed, covariance_type = covariance_type)
-            self.densities[label].fit(features_label.numpy())
-
-        if self.relative:
-            self.densities['all'] = GaussianMixture(n_components = self.number_components, random_state=self.seed, covariance_type = covariance_type)
-            self.densities['all'].fit(features.numpy())
-
-        self._fitted = True
-
-    @torch.no_grad()
-    def forward(self, features):
-        """ Gets the density at all feature points.
-        
-        Parameters:
-        -----------
-        features : torch.Tensor, shape [N, D]
-            Features to get the density of.
-        
-        Returns:
-        --------
-        log_density : torch.Tensor, shape [N]
-            Log-density of the GMM at each feature point.
-        """
-        if not self._fitted:
-            raise RuntimeError(f'{self.name} density was not fitted to any data!')
-        features = features.cpu()
-
-        log_densities, weights = [], []
-        # Per component, weighted with component
-        for label, weight in self.coefs.items():
-            log_densities.append(torch.tensor(self.densities[label].score_samples(features.numpy())))
-            weights.append(weight)
-        log_densities, weights = torch.stack(log_densities), torch.stack(weights).view((-1, 1))
-
-        if self.relative:
-            log_densities -= torch.tensor(self.densities['all'].score_samples(features.numpy()))
-        
-        if self.mode == 'weighted':
-            return torch.logsumexp(log_densities + torch.log(weights), 0) # Sum over `num_classes` axis
-        elif self.mode == 'max':
-            return torch.max(log_densities, 0)[0]
-        else:
-            raise RuntimeError(f'Unknown mode for {self.name} : {self.mode}')
+            raise RuntimeError(f'Unknown mode for {self.name} : {mode}')
 
 class FeatureSpaceDensityGaussianPerClass(FeatureSpaceDensityPerClass):
     """ Model that estimates features space density fitting a Gaussian per class. 
@@ -368,25 +279,6 @@ class FeatureSpaceDensityGaussianPerClass(FeatureSpaceDensityPerClass):
         tags += self._tags
         return '-'.join(tags)
 
-    def _make_covariance_psd(self, cov, eps=1e-6, tol=1e-6):
-        """ If a covariance matrix is not psd (numerical errors), a small value is added to its diagonal to make it psd.
-        
-        Parameters:
-        -----------
-        cov : nn.parameters.Parameter, shape [D, D]
-            Covariance matrix.
-        eps : float
-            The small value to add to the diagonal. If it still is not psd after that, eps is multiplied by 10 and the process repeats.
-        tol : float
-            The minimal eigenvalue that is required for the covariance matrix.
-        """
-        # Make covariance psd in case of numerical inaccuracies
-        eps = 1e-6
-        while not (np.linalg.eigvals(cov.numpy()) > tol).all():
-            print(f'Covariance not positive semi-definite. Adding {eps} to the diagnoal.')
-            cov += torch.eye(cov.numpy().shape[0]) * eps
-            eps *= 10
-
     @torch.no_grad()
     def fit_class(self, class_idx, features, soft):
         """ Fits the density model for a given class. 
@@ -401,13 +293,13 @@ class FeatureSpaceDensityGaussianPerClass(FeatureSpaceDensityPerClass):
             Soft probabilities (scores) for assigning a sample to a class.
         """ 
         if class_idx == 'all':
-            self.covs[class_idx], self.means[class_idx] = cov_and_mean(features)
+            self.covs[class_idx], self.means[class_idx] = cov_and_mean(features, aweights=soft.sum(1))
         else:
             self.covs[class_idx], self.means[class_idx] = cov_and_mean(features, aweights=soft[:, class_idx])
         self.covs[class_idx] += torch.eye(features.size(1)) * self.prior
         if self.diagonal_covariance:
             self.covs[class_idx] *= torch.eye(features.size(1))
-        self._make_covariance_psd(self.covs[class_idx], eps=1e-8)
+        self.covs[class_idx] = _make_covariance_psd_symmetric(self.covs[class_idx], eps=1e-6)
 
     def get_density_class(self, class_idx, features):
         """ Gets the density for a given class.
@@ -430,49 +322,96 @@ class FeatureSpaceDensityGaussianPerClass(FeatureSpaceDensityPerClass):
                     features.cpu()
                 )
 
-class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
+class FeatureSpaceDensityMixtureOfGaussians(FeatureSpaceDensity):
     """ Model that estimates features space density fitting a Gaussian per class. """
 
     name = 'GaussianMixture'
 
     def __init__(
             self, 
-            number_components=5, 
+            number_components=-1, 
             seed=1337,
+            diagonal_covariance = False,
+            initialization = 'random',
             **kwargs
         ):
-        super().__init__()
+        super().__init__(**kwargs)
         self._fitted = False
         self.number_components = number_components
         self.seed = seed
+        self.diagonal_covariance = diagonal_covariance
+        self.initialization = initialization
         
-
     def __str__(self):
         return '\n'.join([
             self.name,
-            f'\t Number of components : {self.number_components}',
-            f'\t Seed : {self.seed}',
+            f'\tNumber of components : {self.number_components}',
+            f'\tSeed : {self.seed}',
+            f'\tDiagonal Covariance : {self.diagonal_covariance}',
+            f'\tInitialization method : {self.initialization}',
         ])
 
     @property
     def compressed_name(self):
-        return f'{self.number_components}-mog'
+        tags = ['mog', str(self.number_components)]
+        if self.diagonal_covariance:
+            tags.append('diag')
+        else:
+            tags.append('full')
+        tags.append(self.initialization)
+        return '-'.join(tags)
 
     @torch.no_grad()
-    def fit(self, features, labels):
+    def fit(self, features, soft):
         """ Fits the density models to a set of features and labels. 
         
         Parameters:
         -----------
         features : torch.Tensor, shape [N, D]
             Features matrix.
-        labels : torch.Tensor, shape [N, num_classes]
-            Soft class labels. Unused for this approach.
+        soft : torch.Tensor, shape [N, num_classes]
+            Soft class labels. Only used when initializing the GMM with `predictions`.
         """
-
         if self._fitted:
             raise RuntimeError(f'{self.name} density model was already fitted.')
-        self.gmm = GaussianMixture(n_components = self.number_components, random_state=self.seed)
+            
+        if self.number_components <= 0:
+            self.number_components = soft.size(1)
+
+        if self.diagonal_covariance:
+            covariance_type = 'diag'
+        else:
+            covariance_type = 'full'
+        if self.initialization.lower() == 'random':
+            weights = None
+            means = None
+            precisions = None
+        elif self.initialization.lower() == 'predictions':
+            if soft.size(1) != self.number_components:
+                raise RuntimeError(f'Cant initialize GMM with {self.number_components} components by {soft.size(1)} dimensional scores')
+                
+            weights = soft.sum(0)
+            weights /= weights.sum()
+            precisions, means = [], []
+            for class_idx in range(soft.size(1)):
+                cov, mean = cov_and_mean(features, aweights=soft[:, class_idx])
+                if self.diagonal_covariance:
+                    cov *= torch.eye(features.size(1))
+                cov = _make_covariance_psd_symmetric(cov, eps=1e-6)
+                precision = torch.inverse(cov)
+                means.append(mean)
+                precision = _make_covariance_psd_symmetric(precision, eps=1e-6)
+                if self.diagonal_covariance:
+                    precision = torch.diagonal(precision) # GMM only wants the diagonal as initialization
+                precisions.append(precision)
+                
+            weights, means, precisions = weights.numpy().astype(float), torch.stack(means, 0).numpy(), torch.stack(precisions, 0).numpy()
+            weights /= weights.sum() # This helps passing the weight normalization argument assertion in `GaussianMixture.fit`
+        else:
+            raise RuntimeError(f'Unsupported initialization method for GMM {self.initialization}') 
+
+        self.gmm = GaussianMixture(n_components = self.number_components, random_state=self.seed, covariance_type = covariance_type, 
+                                    weights_init = weights, means_init = means, precisions_init = precisions, verbose=0)
         self.gmm.fit(features.cpu().numpy())
         self._fitted = True
     
@@ -494,12 +433,12 @@ class FeatureSpaceDensityMixtureOfGaussians(torch.nn.Module):
             raise RuntimeError(f'{self.name} density was not fitted to any data!')
         log_likelihood = torch.tensor(self.gmm.score_samples(features.cpu().numpy()))
         return log_likelihood
-
+    
 class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
 
-    name = 'FeatureSpaceDensityNormalizingFlowPerClass'
+    name = 'NormalizingFlowPerClass'
 
-    def __init__(self, flow_type='maf', num_layers=2, hidden_dim=64, num_hidden=2, iterations=1000, seed=1337, gpu=False, verbose=False, *args, **kwargs):
+    def __init__(self, flow_type='maf', num_layers=2, hidden_dim=None, num_hidden=2, iterations='auto', seed=1337, gpu=True, weight_decay=1e-3, verbose=False, *args, **kwargs):
         super().__init__(**kwargs)
         self.seed = seed
         self.flow_type = flow_type
@@ -507,6 +446,7 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
         self.hidden_dim = hidden_dim
         self.num_hidden = num_hidden
         self.iterations = iterations
+        self.weight_decay = weight_decay
         self.gpu = gpu
         self.verbose = verbose
 
@@ -517,20 +457,20 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
     def __str__(self):
         return '\n'.join([
             self.name,
-            f'\t Flow type : {self.flow_type}',
-            f'\t Number of layers : {self.num_layers}',
-            f'\t Hidden dimensionality : {self.hidden_dim}',
-            f'\t Number of hidden units per layer : {self.num_hidden} '
-            f'\t Iterations : {self.iterations}',
-            f'\t On GPU : {self.gpu}'
+            f'\tFlow type : {self.flow_type}',
+            f'\tNumber of layers : {self.num_layers}',
+            f'\tHidden dimensionality : {self.hidden_dim}',
+            f'\tNumber of hidden units per layer : {self.num_hidden} ',
+            f'\tIterations : {self.iterations}',
+            f'\tWeight Decay : {self.weight_decay}',
+            f'\t On GPU : {self.gpu}',
         ])
 
     @property
     def compressed_name(self):
-        tags = ['nfpc', str(self.num_layers), str(self.flow_type)]
+        tags = ['nfpc', str(self.num_layers), str(self.flow_type), f'{self.num_hidden}', f'{self.hidden_dim}']
         tags += self._tags
         return '-'.join(tags)
-
 
     def fit_class(self, class_idx, features, soft):
         """ Fits the density model for a given class. 
@@ -552,7 +492,7 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
             torch.manual_seed(self.seed)
 
         self.flows[class_idx] = NormalizingFlow(self.flow_type, self.num_layers, features.size(1), seed=self.seed, num_hidden=self.num_hidden, 
-                hidden_dim = self.hidden_dim, gpu = self.gpu)
+                hidden_dim = self.hidden_dim, gpu = self.gpu, weight_decay = self.weight_decay)
         if class_idx == 'all':
             weights = torch.ones(features.size(0)).float()
         else:
@@ -576,11 +516,59 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
         """
         return self.flows[class_idx](features).cpu()
 
+class FeatureSpaceDensityNormalizingFlow(FeatureSpaceDensity):
+    """ Feature space Density that fits a normalizing flow to all samples. """
+
+    name = 'NormalizingFlow'
+
+    def __init__(self, flow_type='maf', num_layers=2, hidden_dim=64, num_hidden=2, iterations='auto', seed=1337, gpu=True, verbose=False, weight_decay=1e-3, *args, **kwargs):
+        super().__init__(**kwargs)
+        self.seed = seed
+        self.flow_type = flow_type
+        self.num_layers = num_layers
+        self.hidden_dim = hidden_dim
+        self.num_hidden = num_hidden
+        self.iterations = iterations
+        self.gpu = gpu
+        self.verbose = verbose
+        self.weight_decay = weight_decay
+
+        self._fitted = False
+
+    
+    def __str__(self):
+        return '\n'.join([
+            self.name,
+            f'\tFlow type : {self.flow_type}',
+            f'\tNumber of layers : {self.num_layers}',
+            f'\tHidden dimensionality : {self.hidden_dim}',
+            f'\tNumber of hidden units per layer : {self.num_hidden} ',
+            f'\tIterations : {self.iterations}',
+            f'\tWeight Decay : {self.weight_decay}',
+            f'\t On GPU : {self.gpu}',
+        ])
+
+    @property
+    def compressed_name(self):
+        tags = ['nf', str(self.num_layers), str(self.flow_type), f'{self.num_hidden}', f'{self.hidden_dim}']
+        return '-'.join(tags)
+
+    @torch.no_grad()
+    def fit(self, features, soft):
+        self.flow = NormalizingFlow(self.flow_type, self.num_layers, features.size(1), seed=self.seed, num_hidden=self.num_hidden, 
+                hidden_dim = self.hidden_dim, gpu = self.gpu, weight_decay = self.weight_decay)
+        self.flow.fit(features, weights=soft.sum(1), verbose=self.verbose, iterations=self.iterations)
+        self._fitted = True
+
+
+    def forward(self, features):
+        return self.flow(features).cpu()
 
 densities = [
     FeatureSpaceDensityGaussianPerClass,
     FeatureSpaceDensityMixtureOfGaussians,
     FeatureSpaceDensityNormalizingFlowPerClass,
+    FeatureSpaceDensityNormalizingFlow,
 ]
 
 def get_density_model(density_type='unspecified', **kwargs):

@@ -11,7 +11,7 @@ from torch_geometric.utils import remove_self_loops, add_self_loops
 class SemiSupervisedNodeClassification(pl.LightningModule):
     """ Wrapper for networks that perform semi supervised node classification. """
 
-    def __init__(self, backbone_configuration, num_input_features, num_classes, learning_rate=1e-2, self_loop_fill_value=1.0):
+    def __init__(self, backbone_configuration, num_input_features, num_classes, learning_rate=1e-2, self_loop_fill_value=1.0, weight_decay=0.0):
         super().__init__()
         # Get default configuration values (a bit hacky...)
         backbone_configuration = configuration.get_experiment_configuration({'model' : backbone_configuration})['model']
@@ -20,6 +20,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         self.backbone = make_model_by_configuration(backbone_configuration, num_input_features, num_classes)
         self.learning_rate = learning_rate
         self.self_loop_fill_value = self_loop_fill_value
+        self.weight_decay = weight_decay
 
     def forward(self, batch, *args, remove_edges=False, **kwargs):
 
@@ -38,8 +39,8 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
 
         return Prediction(self.backbone(batch, *args, **kwargs))
 
-    def configure_optimizers(self):  
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+    def configure_optimizers(self): 
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         return optimizer
     
     def cross_entropy_loss(self, logits, labels):

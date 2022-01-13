@@ -22,10 +22,12 @@ class NormalizingFlow(nn.Module):
         Dimensionality of the hidden flow layers. If `None`, it is set to `dim`.
     gpu : bool
         If GPU acceleration is to be used.
+    weight_decay : float
+        Weight decay regularization parameter.
 
     """
 
-    def __init__(self, flow_type, num_layers, dim, seed=1337, num_hidden=2, hidden_dim=None, gpu=True):
+    def __init__(self, flow_type, num_layers, dim, seed=1337, num_hidden=2, hidden_dim=None, gpu=True, weight_decay=1e-3):
         super().__init__()
         if seed is not None:
             torch.manual_seed(seed)
@@ -37,6 +39,7 @@ class NormalizingFlow(nn.Module):
             hidden_dim = self.dim
         self.hidden_dim = hidden_dim
         self.gpu = gpu
+        self.weight_decay = weight_decay
             
         if self.flow_type == 'radial':
             transformations = [xnn.RadialTransform(dim) for _ in range(self.num_layers)]
@@ -54,7 +57,7 @@ class NormalizingFlow(nn.Module):
 
         self.xflow = xnn.NormalizingFlow(transformations)
 
-    def fit(self, x, weights=None, iterations=50, verbose=False):
+    def fit(self, x, weights=None, iterations='auto', verbose=False):
         """ 
         Fits the normalizing flow to some samples.
     
@@ -73,6 +76,9 @@ class NormalizingFlow(nn.Module):
         """
         if weights is None:
             weights = torch.ones(x.size(0)).float()
+
+        if iterations == 'auto':
+            iterations = int(2.0 * weights.sum())
         
         if torch.cuda.is_available() and self.gpu:
             if verbose:
@@ -83,7 +89,7 @@ class NormalizingFlow(nn.Module):
         with torch.enable_grad():
             self.xflow.train()
             loss_fn = xnn.TransformedNormalLoss(reduction='none')
-            optimizer = torch.optim.Adam(self.xflow.parameters(), lr=1e-3)
+            optimizer = torch.optim.Adam(self.xflow.parameters(), lr=1e-3, weight_decay=self.weight_decay)
             all_iterations = range(iterations)
             if verbose:
                 all_iterations = tqdm(all_iterations)
