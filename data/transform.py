@@ -3,24 +3,27 @@ import numpy as np
 import torch_geometric.transforms as T
 from data.util import graph_select_labels, compress_labels
 from torch_geometric.data import Data
+import data.constants as dconstants
 
 class PerturbationTransform(T.BaseTransform):
     """ Perturbs certain vertices with noise. """
 
-    def __init__(self, noise_type='bernoulli', **kwargs):
+    def __init__(self, noise_type='bernoulli', seed=1337, **kwargs):
         self.noise_type = noise_type
+        self.seed = seed
         for k, v in kwargs.items():
             setattr(self, k, v)
     
     @torch.no_grad()
     def __call__(self, data):
+        torch.manual_seed(self.seed)
         idxs = torch.where(data.is_out_of_distribution)[0].numpy()
         noise = torch.zeros((idxs.shape[0], data.x.size(1)))
-        if self.noise_type.lower() in ('bernoulli', ):
+        if self.noise_type == dconstants.BERNOULLI:
             p = getattr(self, 'p', 0.5)
             noise = noise.bernoulli(p)
             noise /= noise.sum(dim=-1).unsqueeze(-1) + 1e-12
-        elif self.noise_type.lower() in ('gaussian', 'normal', 'white'):
+        elif self.noise_type == dconstants.NORMAL:
             scale = getattr(self, 'scale', 1.0)
             noise = noise.normal_()
             noise *= scale

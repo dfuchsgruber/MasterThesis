@@ -8,6 +8,7 @@ from data.transform import MaskTransform, MaskLabelsTransform, RemoveLabelsTrans
 from data.util import stratified_split_with_fixed_test_set_portion
 from data.split import uniform_split_with_fixed_test_portion
 import data.constants
+from configuration import DataConfiguration
 
 def _append_labels_transform(dataset, select_labels, remove_other_labels, compress_labels):
     """ Appends a transformation that only selects certain labels. 
@@ -36,25 +37,7 @@ def _append_labels_transform(dataset, select_labels, remove_other_labels, compre
 
 def _load_gust_data_from_configuration(config):
     """ Helper to load and split gust datasets. """
-    base_data = GustDataset(config['dataset'])[0]
-    mask, mask_test_fixed = stratified_split_with_fixed_test_set_portion(base_data.y.numpy(),  config['num_dataset_splits'],
-                                                           portion_train=config['train_portion'], 
-                                                           portion_val=config['val_portion'], 
-                                                           portion_test_fixed=config['test_portion_fixed'], 
-                                                           portion_test_not_fixed=config['test_portion'],
-                                                           )
     raise NotImplemented
-    # return [
-    #         {
-    #             name : GustDataset(config['dataset'], transform = MaskTransform(mask[type_idx, split_idx])) for name, type_idx in {
-    #                 data.constants.TRAIN : 0,
-    #                 data.constants.VAL : 1,
-    #                 data.constants.VAL_REDUCED : 1,
-    #                 data.constants.TEST : 2,
-    #                 data.constants.TEST_REDUCED : 2,
-    #             }.items()
-    #         } for split_idx in range(mask.shape[1])
-    #     ], GustDataset(config['dataset'], transform=MaskTransform(mask_test_fixed))
 
 def _print_stats(dataset, prefix=''):
     d = dataset[0]
@@ -74,55 +57,15 @@ def _print_datasets_stats(datasets, prefix=''):
         print(f'{prefix} ## {name} ##')
         _print_stats(datasets[idx], prefix=f'{prefix}\t')
 
-def load_data_from_configuration_stratified_split(config):
-    """ Loads datasets from a configuration and splits in a stratified manner it according to the global split.
-    
-    Parameters:
-    -----------
-    config : dict
-        The configuration from which to load data from.
-    
-    Returns:
-    --------
-    data_list : list
-        A list of different data splits. Each element is 4-tuple of data_train, data_val, data_val_all_classes, data_test.
-    data_test_fixed : torch_geometric.data.Dataset
-        Fixed test dataset that is consistent among all splits.
-    """
-    if config['type'].lower() in ('gust',):
-        data_list, dataset_fixed = _load_gust_data_from_configuration(config)
-    else:
-        raise RuntimeError(f'Unsupported dataset type {config["type"]}')
-
-    # _print_datasets_stats(data_list[0])
-
-    if config.get('train_labels', 'all') != 'all':
-        # Select only certain labels from training data
-        remove_other_labels = config.get('train_labels_remove_other', False)
-        compress_labels = config.get('train_labels_compress', True)
-        print(f'Reducing train labels to {config["train_labels"]}.\n\tRemove other vertices: {remove_other_labels}.\n\tCompressing labels: {compress_labels}.')
-        for datasets in data_list:
-            _append_labels_transform(datasets[data.constants.TRAIN], config['train_labels'], remove_other_labels, compress_labels)
-            _append_labels_transform(datasets[data.constants.VAL_REDUCED], config['train_labels'], remove_other_labels, compress_labels)
-            _append_labels_transform(datasets[data.constants.TEST_REDUCED], config['train_labels'], remove_other_labels, compress_labels)
-
-    if config.get('val_labels', 'all') != 'all':
-        # Select only certain labels from validation data
-        remove_other_labels = config.get('val_labels_remove_other', False)
-        compress_labels = config.get('val_labels_compress', True)
-        print(f'Reducing val labels to {config["val_labels"]}.\n\tRemove other vertices: {remove_other_labels}.\n\tCompressing labels: {compress_labels}.')
-        for datasets in data_list:
-            _append_labels_transform(datasets[data.constants.VAL], config['val_labels'], remove_other_labels, compress_labels)
-
-    return data_list, dataset_fixed
-
-def load_data_from_configuration_uniform_split(config):
+def load_data_from_configuration_uniform_split(config: DataConfiguration, num_splits):
     """ Loads datasets from a configuration and splits it according to the global split by uniformyl sampling for a fixed number of vertices per class.
     
     Parameters:
     -----------
     config : dict
         The configuration from which to load data from.
+    num_splits : int
+        How many splits to create.
     
     Returns:
     --------
@@ -131,39 +74,28 @@ def load_data_from_configuration_uniform_split(config):
     data_test_fixed : torch_geometric.data.Dataset
         Fixed test dataset that is consistent among all splits.
     """
-    if config['type'].lower() in ('gust',):
-        base_data = GustDataset(config['dataset'])[0]
-    elif config['type'].lower() in ('npz',):
-        base_data = NpzDataset.build(
-            config['dataset'], corpus_labels=config['corpus_labels'], min_token_frequency=config['min_token_frequency'],
-            preprocessing = config['preprocessing'], language_model=config['language_model'], normalize=config['normalize'],
-            vectorizer=config['vectorizer'],
-        )[0]
+    if config.type in ('gust',):
+        base_data = GustDataset(config.dataset)[0]
+    elif config.type in ('npz',):
+        base_data = NpzDataset.build(config)[0]
     else:
-        raise RuntimeError(f'Unsupported dataset type {config["type"]}')
+        raise RuntimeError(f'Unsupported dataset type {config.type}')
 
     return uniform_split_with_fixed_test_portion(
         base_data,
-        config['num_dataset_splits'],
-        num_samples = int(config['train_portion']),
-        portion_test_fixed = config['test_portion_fixed'],
-        train_labels = config['train_labels'],
-        setting = config['setting'],
-        left_out_class_labels = config['left_out_class_labels'],
-        base_labels = config['base_labels'],
-        drop_train = config['drop_train_vertices_portion'],
-        perturbation_budget = config['perturbation_budget'],
-        ood_type = config['ood_type'],
-        ood_sampling_strategy = config['ood_sampling_strategy'],
+        num_splits,
+        config
         )
 
-def load_data_from_configuration(config):
+def load_data_from_configuration(config: DataConfiguration, num_splits):
     """ Loads datasets from a configuration and splits it according to the global split.
     
     Parameters:
     -----------
     config : dict
         The configuration from which to load data from.
+    num_splits : int
+        How many splits to create.
     
     Returns:
     --------
@@ -172,12 +104,8 @@ def load_data_from_configuration(config):
     fixed_vertices : set
         The vertex ids (as in `data.vertex_to_idx`'s keys) of the common portion that will only be allocated to testing data. 
     """
-    split_type = config.get('split_type', 'stratified').lower()
-    if split_type == 'stratified':
-        # data_list, data_test_fixed = load_data_from_configuration_stratified_split(config)
-        raise RuntimeError(f'Stratified splitting is not supported fully.')
-    elif split_type == 'uniform':
-        return load_data_from_configuration_uniform_split(config)
+    if config.split_type == 'uniform':
+        return load_data_from_configuration_uniform_split(config, num_splits)
     else:
-        raise RuntimeError(f'Unsupported dataset split type {split_type}')
+        raise RuntimeError(f'Unsupported dataset split type {config.split_type}')
     

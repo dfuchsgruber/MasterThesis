@@ -1,7 +1,5 @@
 import numpy as np
 import torch
-from torch_geometric.data import Data
-from util import random_derangement
 
 def local_lipschitz_bounds(perturbations):
     """ Function that calculates local Lipschitz bounds given some random perturbations. 
@@ -31,7 +29,6 @@ def local_lipschitz_bounds(perturbations):
 
     return (means / xs).mean(), (meds / xs).mean(), (maxs / xs).max(), (mins / xs).min()
 
-
 @torch.no_grad()
 def feature_space_bounds(model, dataset):
     """ Gets bounds for the feature space in each dimension given a certain dataset. 
@@ -57,7 +54,6 @@ def feature_space_bounds(model, dataset):
         mins = torch.min(mins, features.min(dim=0)[0])
         maxs = torch.max(maxs, features.max(dim=0)[0])
     return mins, maxs
-
 
 @torch.no_grad()
 def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50), num_perturbations_per_sample=10, seed=None, model_kwargs={}):
@@ -102,7 +98,6 @@ def local_perturbations(model, dataset, perturbations=np.linspace(0.1, 5.0, 50),
         result[eps] = torch.cat(results_eps)
     return result
 
-
 def permute_features(x, num_permutations, per_sample=True, rng=None):
     """ Randomly permutes the features of a 2d tensor. 
     
@@ -131,7 +126,6 @@ def permute_features(x, num_permutations, per_sample=True, rng=None):
         x_shuffled[row][idxs[row]] = x_shuffled[row][swap[row]]
     return x_shuffled
     
-
 @torch.no_grad()
 def permutation_perturbations(model, dataset, num_permutations, num_perturbations_per_sample=10, seed=None, per_sample=True, model_kwargs={}):
     """ Locally perturbs data by permuting certain indices and see how much the logits are perturbed. 

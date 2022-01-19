@@ -142,3 +142,4 @@ dmypy.json
 cython_debug/
 
 data/raw/*
+.exported_datasets/*

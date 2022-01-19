@@ -5,21 +5,20 @@ import pytorch_lightning as pl
 from metrics import accuracy
 from model.gnn import make_model_by_configuration
 from model.prediction import Prediction
-import configuration
 from torch_geometric.utils import remove_self_loops, add_self_loops
+from configuration import ModelConfiguration
 
 class SemiSupervisedNodeClassification(pl.LightningModule):
     """ Wrapper for networks that perform semi supervised node classification. """
 
-    def __init__(self, backbone_configuration, num_input_features, num_classes, learning_rate=1e-2, self_loop_fill_value=1.0, weight_decay=0.0):
+    def __init__(self, backbone_configuration: ModelConfiguration, num_input_features, num_classes, learning_rate=1e-2, weight_decay=0.0):
         super().__init__()
         # Get default configuration values (a bit hacky...)
-        backbone_configuration = configuration.get_experiment_configuration({'model' : backbone_configuration})['model']
 
         self.save_hyperparameters()
         self.backbone = make_model_by_configuration(backbone_configuration, num_input_features, num_classes)
         self.learning_rate = learning_rate
-        self.self_loop_fill_value = self_loop_fill_value
+        self.self_loop_fill_value = backbone_configuration.self_loop_fill_value
         self.weight_decay = weight_decay
 
     def forward(self, batch, *args, remove_edges=False, **kwargs):

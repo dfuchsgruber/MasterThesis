@@ -4447,4 +4447,4 @@ slurm:
     cpus-per-task: 2
     gres: gpu:1
     mem: 16G
-    time: 0-72:00
+    time: 0-48:00

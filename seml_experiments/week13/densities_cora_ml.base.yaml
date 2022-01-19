@@ -10,7 +10,7 @@ slurm:
     gres: gpu:1       # num GPUs
     mem: 16G          # memory
     cpus-per-task: 2  # num cores
-    time: 0-72:00     # max time, D-HH:MM
+    time: 0-48:00     # max time, D-HH:MM
 
 
 ###### BEGIN PARAMETER CONFIGURATION ######

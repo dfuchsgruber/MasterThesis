@@ -1,11 +1,11 @@
-from util import dict_to_tuple
 import seml
-from copy import deepcopy
 import os
 import os.path as osp
 import random
 import shutil
-from configuration import get_experiment_configuration
+from configuration import ExperimentConfiguration
+from typing import List
+import logging
 
 COLLECTION = '_model_registry'
 
@@ -16,10 +16,6 @@ class ModelRegistry:
     -----------
     collection_name : str
         Which mongodb collection to use as regsitry.
-    keys_to_ignore : list
-        A list of keys that is removed from configurations before matching with the registry.
-        These should be keys in the configuration that don't affect the actual model.
-        To access nested dicts, use the dot-notation.
     directory : str
         The directory in which to put the checkpoint files.
     copy_checkpoints_to_registry: bool
@@ -27,18 +23,9 @@ class ModelRegistry:
     """
 
     def __init__(self, collection_name=COLLECTION, 
-                    keys_to_ignore=[
-                        'model.num_samples', 
-                        'evaluation', 
-                        'training.gpus',
-                        'training.jobs',
-                        'data.num_dataset_splits',
-                        'model.num_initializations',
-                        ],
                     directory_path='/nfs/students/fuchsgru/model_registry', copy_checkpoints_to_registry=True):
         self.database = seml.database
         self.collection_name = collection_name
-        self.keys_to_ignore = keys_to_ignore
         self.directory_path = directory_path 
         self.copy_checkpoints_to_registry = copy_checkpoints_to_registry
 
@@ -57,16 +44,11 @@ class ModelRegistry:
         shutil.copy2(cptk_path, dst)
         return dst
 
-    def _sanitze_config(self, base):
-        """ Removes the dict keys that are ignored by the model registry from a configuration. """
-        # It is esential, that also the configurations stored in the database are only considered as updates to the defaults.
-        # This way, if new default parameters are added, the configurations in the database still can be matched to new experiments.
-        return get_experiment_configuration(base, keys_to_ignore = self.keys_to_ignore)
-
     def items(self):
         """ Iterator for (cfg, path) pairs in the registry. """
         collection = self.database.get_collection(self.collection_name)
-        return [(doc['config'], doc['path']) for doc in collection.find()]
+        for doc in collection.find():
+            yield ExperimentConfiguration(doc['config'], doc['path'])
         
     def __iter__(self):
         collection = self.database.get_collection(self.collection_name)
@@ -76,23 +58,36 @@ class ModelRegistry:
         collection = self.database.get_collection(self.collection_name)
         return len([k for k in collection.find()])
 
-    def __getitem__(self, cfg):
+    def __getitem__(self, cfg: ExperimentConfiguration):
         """ Gets the path to a trained model with a given configuration set. """
         collection = self.database.get_collection(self.collection_name)
-        cfg_sanitized = self._sanitze_config(cfg)
         for doc in collection.find():
-            if self._sanitze_config(doc['config']) == cfg_sanitized:
+            if ExperimentConfiguration(**doc['config']).registry_configuration == cfg.registry_configuration:
                 return doc['path']
         return None
 
-    def __setitem__(self, cfg, cptk_path):
+    def remove(self, cfg: ExperimentConfiguration) -> List[str]:
+        """ Removes all experiment configurations from the registry that match."""
+        ids_to_delete = []
+        paths_to_delete = []
+        collection = self.database.get_collection(self.collection_name)
+        for doc in collection.find():
+            if cfg.registry_configuration == ExperimentConfiguration(**doc['config']).registry_configuration:
+                ids_to_delete.append(doc['_id'])
+                paths_to_delete.append(doc['path'])
+        for _id in ids_to_delete:
+            collection.delete_one({'_id' : _id})
+        return paths_to_delete
+
+    def __setitem__(self, cfg: ExperimentConfiguration, cptk_path):
         """ Sets the path of a trained model with a given configuration set. """
         collection = self.database.get_collection(self.collection_name)
-        if collection.delete_many({'config' : self._sanitze_config(cfg)}).deleted_count > 0:
-            print(f'Overwriting path for configuration.')
+        paths_overwritten = self.remove(cfg)
+        if len(paths_overwritten) > 0:
+            logging.info(f'Paths {paths_overwritten} were overwritten with {cptk_path}')
         if self.copy_checkpoints_to_registry:
             cptk_path = self._copy_checkpoint_to_new_file(cptk_path)
         collection.insert_one({
-            'config' : cfg,
+            'config' : cfg.registry_configuration,
             'path' : cptk_path,
         })

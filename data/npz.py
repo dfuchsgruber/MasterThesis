@@ -1,3 +1,4 @@
+import configuration
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.sparse as sp
@@ -237,29 +238,29 @@ class NpzDataset(SingleGraphDataset):
         return X, feature_to_idx
 
     @staticmethod
-    def build(name, corpus_labels='all', min_token_frequency=10, make_undirected=True, make_unweighted=True, select_lcc=True, remove_self_loops=True, transform=None,
-        preprocessing='bag_of_words', language_model="bert-base-uncased", normalize='l2', vectorizer='tf-idf'):
-        if name not in NpzDataset.raw_files:
-            raise RuntimeError(f'Npz dataset {name} does not exist.')
-        loader = np.load(NpzDataset.raw_files[name], allow_pickle=True)
-        A, vertices_to_keep = NpzDataset._load_graph(loader, make_undirected=make_undirected, select_lcc=select_lcc, remove_self_loops=remove_self_loops)
+    def build(config: configuration.DataConfiguration, transform=None):
+        if config.dataset not in NpzDataset.raw_files:
+            raise ValueError(f'Npz dataset {config.dataset} does not exist.')
+        loader = np.load(NpzDataset.raw_files[config.dataset], allow_pickle=True)
+        A, vertices_to_keep = NpzDataset._load_graph(loader, make_undirected=True, select_lcc=True, remove_self_loops=False)
         y = loader['labels'][vertices_to_keep]
         idx_to_label = loader['idx_to_class'].item()
         if 'attr_text' in loader:
             corpus = loader['attr_text']
         
         # Build the attribute matrix
-        if preprocessing.lower() in ('bag_of_words', 'bag-of-words'):
-            vectorizer = NpzDataset._build_vectorizer(corpus[vertices_to_keep], y, idx_to_label, corpus_labels=corpus_labels, min_token_frequency=min_token_frequency, normalize=normalize, vectorizer=vectorizer)
+        if config.preprocessing == 'bag_of_words':
+            vectorizer = NpzDataset._build_vectorizer(corpus[vertices_to_keep], y, idx_to_label, corpus_labels=config.corpus_labels, 
+                min_token_frequency=config.min_token_frequency, normalize=config.normalize, vectorizer=config.vectorizer)
             X, feature_to_idx = NpzDataset._vectorize(corpus[vertices_to_keep], vectorizer)
             X = X.todense()
             vertex_to_idx = NpzDataset._build_vertex_to_idx(loader['idx_to_node'].item(), vertices_to_keep)
-        elif preprocessing.lower() in ('word_embedding', 'word-embedding', 'embedding'):
-            X, feature_to_idx = load_embedded_word_features(name, language_model)
+        elif config.preprocessing == 'word_embedding':
+            X, feature_to_idx = load_embedded_word_features(config.dataset, config.language_model)
             X = X[vertices_to_keep]
             vertex_to_idx = NpzDataset._build_vertex_to_idx(loader['idx_to_node'].item(), vertices_to_keep)
         else:
-            raise RuntimeError(f'Unknown preprocessing for features of type {preprocessing}')
+            raise ValueError(f'Unknown preprocessing for features of type {config.preprocessing}')
 
         label_to_idx = {label : idx for idx, label in idx_to_label.items() if idx in y}
         y, label_to_idx, _ = data.util.compress_labels(y, label_to_idx)
