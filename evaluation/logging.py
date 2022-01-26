@@ -46,8 +46,8 @@ def log_figure(logs, fig, label, group, artifacts, save_artifact=None):
     """
     if save_artifact is not None:
         basename = osp.join(save_artifact, group + '-' + label)
-        fig.savefig(basename + '.pdf', format='pdf')
-        fig.savefig(basename + '.png', format='png')
+        fig.savefig(basename + '.pdf', format='pdf', bbox_inches="tight")
+        fig.savefig(basename + '.png', format='png', bbox_inches="tight")
         logs[group][label] = wandb.Image(basename + '.png')
         artifacts.append(basename + '.png') 
         artifacts.append(basename + '.pdf') 

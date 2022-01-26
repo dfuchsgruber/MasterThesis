@@ -3,11 +3,10 @@ import os
 import os.path as osp
 import random
 import shutil
-from configuration import ExperimentConfiguration
+from configuration import ExperimentConfiguration, DEFAULT_REGISTRY_COLLECTION_NAME
 from typing import List
 import logging
-
-COLLECTION = '_model_registry'
+import datetime
 
 class ModelRegistry:
     """ Model registry class that saves and loads trained model checkpoints. 
@@ -22,7 +21,7 @@ class ModelRegistry:
         If True, whenever a checkpoint is added to the registry, it is copied to `directory`.
     """
 
-    def __init__(self, collection_name=COLLECTION, 
+    def __init__(self, collection_name=DEFAULT_REGISTRY_COLLECTION_NAME, 
                     directory_path='/nfs/students/fuchsgru/model_registry', copy_checkpoints_to_registry=True):
         self.database = seml.database
         self.collection_name = collection_name
@@ -48,7 +47,7 @@ class ModelRegistry:
         """ Iterator for (cfg, path) pairs in the registry. """
         collection = self.database.get_collection(self.collection_name)
         for doc in collection.find():
-            yield ExperimentConfiguration(doc['config'], doc['path'])
+            yield ExperimentConfiguration(**doc['config']), doc['path']
         
     def __iter__(self):
         collection = self.database.get_collection(self.collection_name)
@@ -90,4 +89,5 @@ class ModelRegistry:
         collection.insert_one({
             'config' : cfg.registry_configuration,
             'path' : cptk_path,
+            'time' : str(datetime.datetime.now()),
         })

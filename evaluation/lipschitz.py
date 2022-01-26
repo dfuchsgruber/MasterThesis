@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+from torch_geometric.data import Data
+from util import random_derangement
 
 def local_lipschitz_bounds(perturbations):
     """ Function that calculates local Lipschitz bounds given some random perturbations. 

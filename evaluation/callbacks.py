@@ -122,3 +122,15 @@ def make_callback_get_mask(mask=True, cpu=True):
         return _mask
     return callback
 
+def make_callback_get_attribute(attribute_getter, mask=True, cpu=True):
+    """ Makes a callback that gets a certain attribute from the data and masks it if it is a Tensor. """
+    def callback(data, output):
+        value = attribute_getter(data, output)
+        if isinstance(value, torch.Tensor):
+            if mask:
+                value = value[data.mask]
+            if cpu:
+                value = value.cpu()
+        return value
+    return callback
+

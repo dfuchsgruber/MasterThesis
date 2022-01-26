@@ -112,6 +112,8 @@ class TrainingConfiguration(BaseConfiguration):
     weight_decay: float = attr.ib(default=1e-3, converter=float, validator=validators.ge(0))
     suppress_stdout: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
     train_model: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
+    self_training: bool = attr.ib(default=False, converter=bool)
+    num_warmup_epochs: int = attr.ib(default=50, converter=int)
 
 @attr.s
 class EvaluationConfiguration(BaseConfiguration):
@@ -122,6 +124,8 @@ class EvaluationConfiguration(BaseConfiguration):
     log_plots: bool = attr.ib(default=False, converter=bool)
     save_artifacts: bool = attr.ib(default=False, converter=bool)
 
+DEFAULT_REGISTRY_COLLECTION_NAME = 'model_registry'
+
 @attr.s
 class RunConfiguration(BaseConfiguration):
     """ Configuration for run names """
@@ -131,7 +135,7 @@ class RunConfiguration(BaseConfiguration):
     num_initializations: int =  attr.ib(default=1, validator=validators.gt(0), converter=int, metadata={'registry_attribute' : False})
     num_dataset_splits: int = attr.ib(default=1, validator=validators.ge(0), converter=int, metadata={'registry_attribute' : False})
 
-    model_registry_collection_name: str = attr.ib(default='_model_registry', converter=str, metadata={'registry_attribute' : False})
+    model_registry_collection_name: str = attr.ib(default=DEFAULT_REGISTRY_COLLECTION_NAME, converter=str, metadata={'registry_attribute' : False})
 
 @attr.s
 class _RegistryConfiguration(BaseConfiguration):

@@ -11,6 +11,7 @@ from metrics import accuracy
 from scipy.stats import ortho_group
 import model.constants as mconst
 from configuration import ModelConfiguration
+from typing import Callable
 
 class ResidualBlock(nn.Module):
     """ Wrapper for any convolution that implements a residual connection. 
@@ -31,8 +32,8 @@ class ResidualBlock(nn.Module):
         If a bias should be used for the input projection layer.
     """
 
-    def __init__(self, input_dim, output_dim, conv, use_spectral_norm=False, weight_scale=1.0, use_bias=False,
-        freeze_residual_projection=False, orthogonalize_residual_projection=False):
+    def __init__(self, input_dim: int, output_dim: int, conv: nn.Module, use_spectral_norm: bool = False, weight_scale: float = 1.0, use_bias: bool = False,
+        freeze_residual_projection: bool =False, orthogonalize_residual_projection: bool =False):
         super().__init__()
         self.conv = conv
         if input_dim != output_dim:
@@ -48,13 +49,13 @@ class ResidualBlock(nn.Module):
         else:
             self.input_projection = None
         
-    def forward(self, x, edge_index, **kwargs):
-        h = self.conv(x, edge_index, **kwargs)
+    def forward(self, x, *args, **kwargs):
+        h = self.conv(x, *args, **kwargs)
         if self.input_projection:
             x = self.input_projection(x)
         return x + h
 
-def _make_convolutions(input_dim, num_classes, cfg: ModelConfiguration, make_conv, *args, **kwargs):
+def _make_convolutions(input_dim: int, num_classes: int, cfg: ModelConfiguration, make_conv, *args, **kwargs):
     """ Makes convolutions from a class and a set of input, hidden and output dimensions. """
     all_dims = [input_dim] + list(cfg.hidden_sizes) + [num_classes]
     convs = []
@@ -66,7 +67,7 @@ def _make_convolutions(input_dim, num_classes, cfg: ModelConfiguration, make_con
             sn = cfg.use_spectral_norm
         conv = make_conv(in_dim, out_dim, *args, use_spectral_norm=sn, 
             weight_scale=cfg.weight_scale, **kwargs)
-        if cfg.residual:
+        if cfg.residual and idx < len(dims) - 1:
             conv = ResidualBlock(in_dim, out_dim, conv, use_spectral_norm=sn, weight_scale=cfg.weight_scale,
                 freeze_residual_projection=cfg.freeze_residual_projection, orthogonalize_residual_projection=False)
         convs.append(conv)
@@ -84,6 +85,17 @@ class LinearWithSpectralNormaliatzion(nn.Module):
     def forward(self, x):
         return self.linear(x)
 
+def _get_convolution_weights(conv: nn.Module) -> torch.Tensor:
+    """ Gets the weight matrix of a convolution. """
+    if isinstance(conv, ResidualBlock):
+        return _get_convolution_weights(conv.conv)
+    if isinstance(conv, torch_geometric.nn.GCNConv):
+        return conv.lin.weight.detach()
+    elif isinstance(conv, LinearWithSpectralNormaliatzion):
+        return conv.linear.weight.detach()
+    else:
+        raise NotImplementedError(f'Cant get weights for convolution of type {type(conv)}')
+
 class GCN(nn.Module):
     """ Vanilla GCN """
 
@@ -97,6 +109,7 @@ class GCN(nn.Module):
 
     @staticmethod
     def _make_conv_with_spectral_norm(input_dim, output_dim, *args, use_spectral_norm=False, weight_scale=1.0, **kwargs):
+        """ Method to create a convolution operator with spectral normalization """
         conv = torch_geometric.nn.GCNConv(input_dim, output_dim, *args, **kwargs, add_self_loops=False)
         if use_spectral_norm:
             conv.lin = spectral_norm(conv.lin, name='weight', rescaling=weight_scale)
@@ -107,7 +120,7 @@ class GCN(nn.Module):
         if self.drop_edge > 0:
             edge_index, edge_weight = dropout_adj(edge_index, edge_attr=edge_weight, p=self.drop_edge, 
                                             force_undirected=False, training=dropout)
-        embeddings = []
+        embeddings = [x]
         for num, layer in enumerate(self.convs):
             x = layer(x, edge_index, edge_weight=edge_weight)
             if num < len(self.convs) - 1:
@@ -116,6 +129,10 @@ class GCN(nn.Module):
                     x = F.dropout(x, p=self.dropout, inplace=False, training=dropout)
             embeddings.append(x)
         return embeddings
+
+    def get_output_weights(self):
+        """ Gets the weights of the output layer. """
+        return _get_convolution_weights(self.convs[-1])
 
 class GAT(nn.Module):
     """ Graph Attention Network """
@@ -133,7 +150,7 @@ class GAT(nn.Module):
 
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
-        embeddings = []
+        embeddings = [x]
         for num, layer in enumerate(self.convs):
             x = layer(x, edge_index)
             if num < len(self.convs) - 1:
@@ -158,7 +175,7 @@ class GraphSAGE(nn.Module):
 
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
-        embeddings = []
+        embeddings = [x]
         for num, layer in enumerate(self.convs):
             x = layer(x, edge_index)
             if num < len(self.convs) - 1:
@@ -184,7 +201,7 @@ class GIN(nn.Module):
 
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
-        embeddings = []
+        embeddings = [x]
         for num, layer in enumerate(self.convs):
             x = layer(x, edge_index)
             if num < len(self.convs) - 1:
@@ -205,7 +222,7 @@ class MLP(nn.Module):
 
     def forward(self, data):
         x = data.x
-        embeddings = []
+        embeddings = [x]
         for num, layer in enumerate(self.convs):
             x = layer(x)
             if num < len(self.convs) - 1:
@@ -216,30 +233,37 @@ class MLP(nn.Module):
 class APPNP(nn.Module):
     """ Approximate Page Rank diffusion after MLP feature transformation. """
 
-    def __init__(self, input_dim, num_classes, hidden_dims, activation=F.leaky_relu, 
-                    use_bias=True, use_spectral_norm=True, weight_scale=1.0, 
-                    diffusion_iterations=2, teleportation_probability=0.1, cached=True):
+    def __init__(self, input_dim, num_classes, cfg: ModelConfiguration,):
         super().__init__()
-        self.activation = activation
-
-        self.convs = _make_convolutions(input_dim, num_classes, hidden_dims, LinearWithSpectralNormaliatzion,
-                                                use_bias=use_bias, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale,)
-        self.appnp = torch_geometric.nn.APPNP(diffusion_iterations, teleportation_probability, cached=cached)
+        self.activation = make_activation_by_configuration(cfg)
+        self.convs = _make_convolutions(input_dim, num_classes, cfg, LinearWithSpectralNormaliatzion)
+        self.appnp = torch_geometric.nn.APPNP(cfg.diffusion_iterations, cfg.teleportation_probability, cached=cfg.cached)
 
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
-        embeddings = []
+        embeddings = [x]
         for num, layer in enumerate(self.convs):
             x = layer(x)
             if num < len(self.convs) - 1:
                 x = self.activation(x)
-            embeddings.append(x)
+                # Append either the undiffused features or the diffused features (penultimate layer)
+                if num == len(self.convs) - 2: # Feature layer
+                    embeddings.append(self.appnp(x, edge_index))
+                else:
+                    embeddings.append(x)
+            else:
+                # Don't append the undiffused logits to `embeddings`, as otherwise they will be interpreted as features
+                # TODO: Fix that, by not having -2 as the default layer for feature space, but instead make it model dependent
+                pass
 
         # Diffusion
         x = self.appnp(x, edge_index)
         embeddings.append(x)
-
         return embeddings
+
+    def get_output_weights(self):
+        """ Gets the weights of the output layer. """
+        return _get_convolution_weights(self.convs[-1])
 
 def make_activation_by_configuration(configuration: ModelConfiguration):
     """ Makes the activation function form a configuration dict. """
@@ -248,7 +272,7 @@ def make_activation_by_configuration(configuration: ModelConfiguration):
     elif configuration.activation == 'relu':
         return nn.ReLU()
     else:
-        raise RuntimeError(f'Unsupported activation function {configuration.activation}')
+        raise ValueError(f'Unsupported activation function {configuration.activation}')
 
 def make_model_by_configuration(cfg: ModelConfiguration, input_dim, output_dim):
     """ Makes a gnn model function form a configuration dict. 
@@ -282,10 +306,8 @@ def make_model_by_configuration(cfg: ModelConfiguration, input_dim, output_dim):
     # elif configuration['model_type'] == 'mlp':
     #     return MLP(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
     #         use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
-    # elif configuration['model_type'] == 'appnp':
-    #     return APPNP(input_dim, output_dim, configuration['hidden_sizes'], make_activation_by_configuration(configuration), 
-    #         use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'],
-    #         diffusion_iterations=configuration['diffusion_iterations'], teleportation_probability=configuration['teleportation_probability'],)
+    elif cfg.model_type == 'appnp':
+        return APPNP(input_dim, output_dim, cfg)
     else:
-        raise RuntimeError(f'Unsupported model type {configuration["model_type"]}')
+        raise RuntimeError(f'Unsupported model type {cfg.model_type}')
         

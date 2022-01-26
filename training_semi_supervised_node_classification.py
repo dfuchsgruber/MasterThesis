@@ -51,11 +51,22 @@ def config():
     if db_collection is not None:
         ex.observers.append(seml.create_mongodb_observer(db_collection, overwrite=overwrite))
 
+class SelfTrainingCallback(pl.callbacks.Callback):
+    """ Callback that activates self-training after a certain amounts of epochs. """
+
+    def __init__(self, num_warmup_epochs: int):
+        super().__init__()
+        self.num_warmup_epochs = num_warmup_epochs
+
+    def on_epoch_start(self, trainer: pl.Trainer, model: pl.LightningModule):
+        if trainer.current_epoch >= self.num_warmup_epochs:
+            model.self_training = True
+
 class ExperimentWrapper:
 
     def __init__(self, init_all=True, collection_name=None, run_id=None):
         if init_all:
-            self.init_all()
+            pass
         self.collection_name = collection_name
         self.run_id = run_id
 
@@ -133,11 +144,14 @@ class ExperimentWrapper:
                         patience=config.training.early_stopping.patience,
                         min_delta=config.training.early_stopping.min_delta,
                     )
+                    callbacks = []
+                    if config.training.self_training:
+                        callbacks.append(SelfTrainingCallback(config.training.num_warmup_epochs))
 
                     # Model training
                     with context_supress_stdout(supress=config.training.suppress_stdout), warnings.catch_warnings():
                         warnings.filterwarnings("ignore")
-                        trainer = pl.Trainer(max_epochs=config.training.max_epochs, deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ],
+                        trainer = pl.Trainer(max_epochs=config.training.max_epochs, deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ] + callbacks,
                                             logger=logger,
                                             progress_bar_refresh_rate=0,
                                             gpus=config.training.gpus,

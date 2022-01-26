@@ -9,6 +9,7 @@ from evaluation.util import run_model_on_datasets, get_data_loader
 from evaluation.logging import *
 import evaluation.callbacks
 from plot.util import plot_histograms
+from plot.neighbours import plot_against_fraction_id_nbs
 import configuration
 
 class OODSeparation(PipelineMember):
@@ -31,7 +32,33 @@ class OODSeparation(PipelineMember):
             'Separate distributions tolerance' : self.separate_distributions_tolerance,
         }
 
-    def _get_distribution_labels_perturbations(self, **kwargs):
+    def _get_fraction_id_nbs(self, mask=True, k = None, **kwargs):
+        """ Gets the fraction of id neighbours for each vertex in k hop neighbourhoods.
+
+        Parameters:
+        -----------
+        mask : bool
+            If given, only vertices in the masks of the `self.evaluate_on` datasets are used.
+        k : int or None
+            Consider k-hop neighbourhoods in 0, 1, ... k
+            If None is given, k is set to the receptive field of the underlying model configuration
+        
+        Returns:
+        --------
+        fraction_id_nbs : torch.Tensor, shape [N, k + 1]
+            The fraction of id neighbours for each vertex in a corresponding k-neighbourhood.
+        """ 
+        if k is None:
+            cfg: configuration.ExperimentConfiguration = kwargs['config']
+            k = len(cfg.model.hidden_sizes) + 1
+        fraction_id_nbs = evaluation.util.get_fraction_id_neighbours(
+            [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
+            k,
+            mask=mask
+        )
+        return fraction_id_nbs
+
+    def _get_distribution_labels_perturbations(self, mask=True, **kwargs):
         """ Gets labels for id vs ood where ood data is left out classes.
         
         Returns:
@@ -51,7 +78,7 @@ class OODSeparation(PipelineMember):
             run_model = False,
             callbacks = [
                 evaluation.callbacks.make_callback_count_neighbours_with_attribute(
-                    lambda data, outputs: data.is_out_of_distribution.numpy(), 0
+                    lambda data, outputs: data.is_out_of_distribution.numpy(), 0, mask=mask,
                 )
             ]
         )[0]
@@ -65,7 +92,7 @@ class OODSeparation(PipelineMember):
         }
         return auroc_labels, auroc_mask, distribution_labels, distribution_label_names
 
-    def _get_distribution_labels_leave_out_classes(self, **kwargs):
+    def _get_distribution_labels_leave_out_classes(self, mask=True, **kwargs):
         """ Gets labels for id vs ood where ood data is left out classes.
         
         Returns:
@@ -79,25 +106,18 @@ class OODSeparation(PipelineMember):
         distribution_label_names : dict
             Mapping that names all the labels in `distribution_labels`.
         """
-        # Classify vertices according to which distribution they belong to
-        cfg: configuration.ExperimentConfiguration = kwargs['config']
-        k = len(cfg.model.hidden_sizes) + 1
-        distribution_labels = evaluation.util.get_distribution_labels(
-            [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on],
-            k, # Receptive field of each vertex is num-hidden-layers + 1
-            mask = True,
-            threshold = self.separate_distributions_tolerance,
-        )
+        fraction_id_nbs = self._get_fraction_id_nbs(mask=mask, k=None, **kwargs)
+        distribution_labels = evaluation.util.get_distribution_labels(fraction_id_nbs,threshold = self.separate_distributions_tolerance,)
         auroc_labels, auroc_mask = evaluation.util.separate_distributions(distribution_labels, self.separate_distributions_by)
         distribution_label_names = {
-            econstants.OOD_CLASS_NO_ID_CLASS_NBS : f'ood, no id nbs in {k} hops', 
-            econstants.OOD_CLASS_ID_CLASS_NBS : f'ood, id nbs in {k}-hops',
-            econstants.ID_CLASS_NO_OOD_CLASS_NBS : f'id, no ood nbs in {k}-hops', 
-            econstants.ID_CLASS_ODD_CLASS_NBS : f'id, ood nbs in {k}-hops'
+            econstants.OOD_CLASS_NO_ID_CLASS_NBS : f'ood, no id nbs in {fraction_id_nbs.size(1)} hops', 
+            econstants.OOD_CLASS_ID_CLASS_NBS : f'ood, id nbs in {fraction_id_nbs.size(1)}-hops',
+            econstants.ID_CLASS_NO_OOD_CLASS_NBS : f'id, no ood nbs in {fraction_id_nbs.size(1)}-hops', 
+            econstants.ID_CLASS_ODD_CLASS_NBS : f'id, ood nbs in {fraction_id_nbs.size(1)}-hops'
         }
         return auroc_labels, auroc_mask, distribution_labels, distribution_label_names
 
-    def get_distribution_labels(self, **kwargs):
+    def get_distribution_labels(self, mask=True, **kwargs):
         """ Gets labels for id vs ood where ood data is left out classes.
 
         Parameters:
@@ -118,9 +138,9 @@ class OODSeparation(PipelineMember):
         """
         cfg: configuration.ExperimentConfiguration = kwargs['config']
         if cfg.data.ood_type == dconstants.LEFT_OUT_CLASSES:
-            return self._get_distribution_labels_leave_out_classes(**kwargs)
+            return self._get_distribution_labels_leave_out_classes(mask=mask, **kwargs)
         elif cfg.data.ood_type == dconstants.PERTURBATION:
-            return self._get_distribution_labels_perturbations(**kwargs)
+            return self._get_distribution_labels_perturbations(mask=mask, **kwargs)
         else:
             raise RuntimeError(f'Could not separate distribution labels (id vs ood) by unknown type {cfg.data.ood_type}.')
 
@@ -170,8 +190,9 @@ class OODDetection(OODSeparation):
         kwargs['metrics'][f'aucpr_{proxy_name}{self.suffix}'] = aucpr
         log_metrics(kwargs['logs'], {f'aucpr_{proxy_name}{self.suffix}' : aucpr}, f'{proxy_name}_plots')
 
+        # -------------- Different plots for an ood-detection proxy -------------
+        # Distribution of proxy per class label
         try:
-            # Log histograms and metrics label-wise
             if self.log_plots:
                 y = labels.cpu()
                 for label in torch.unique(y):
@@ -189,8 +210,9 @@ class OODDetection(OODSeparation):
                 pipeline_log(f'Evaluated {proxy_name}.')
                 plt.close(fig)
         except Exception as e:
-            pipeline_log(f'Could not create label-wise plots for {proxy_name}.')
+            pipeline_log(f'Could not create class label-wise plots for {proxy_name}.')
 
+        # Distribution of proxy per distribution label (id with pure id neighbours, id with non-pure id neighbours, ...)
         try:
             if self.log_plots:
                 fig, ax = plot_histograms(proxy.cpu(), distribution_labels.cpu(), 
@@ -202,6 +224,7 @@ class OODDetection(OODSeparation):
         except Exception as e:
             pipeline_log(f'Could not distribution label-wise plots for {proxy_name}.')
 
+        # Distribution of proxy for id and ood data that are considered for AUROC calculation (i.e. are in auroc_mask)
         try:
             if self.log_plots:
                 fig, ax = plot_histograms(proxy[auroc_mask].cpu(), auroc_labels[auroc_mask].cpu().long(), 
@@ -212,3 +235,14 @@ class OODDetection(OODSeparation):
                 plt.close(fig)
         except Exception as e:
             pipeline_log(f'Could not id vs ood plots for {proxy_name}. Reason {e}')
+
+        # Neighbourhood purity w.r.t. id neighbours for different hops
+        try:
+            if self.log_plots:
+                fraction_id_nbs = self._get_fraction_id_nbs(mask=True, k=None, **kwargs)
+                fig, axs = plot_against_fraction_id_nbs(fraction_id_nbs, proxy, y_label='Proxy', y_log_scale=plot_proxy_log_scale, k_min=1)
+                log_figure(kwargs['logs'], fig, f'{proxy_name}_by_fraction_id_nbs{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
+                pipeline_log(f'Saved {proxy_name} by fraction of id nbs to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_by_fraction_id_nbs{self.suffix}.pdf')))
+                plt.close(fig)
+        except Exception as e:
+            pipeline_log(f'Could not plot by fraction of id nbs for {proxy_name}. Reason {e}')

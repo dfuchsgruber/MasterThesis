@@ -30,12 +30,15 @@ config = ExperimentConfiguration(data = DataConfiguration(
                     #language_model = 'allenai/longformer-base-4096',
                     drop_train_vertices_portion = 0.1,
                     ood_sampling_strategy = dconstants.SAMPLE_ALL,
-                    ), run = {'num_dataset_splits' : 5})
+                    ), run = {'num_dataset_splits' : 5}, 
+                    model=ModelConfiguration(hidden_sizes=[64,])
+                    )
 
 data_list, fixed_vertices = load_data_from_configuration(config.data, config.run.num_dataset_splits)
 config.evaluation.pipeline = []
 
 if config.data.ood_type == dconstants.PERTURBATION:
+
     # For a perturbation experiment we create datasets for the bernoulli and gaussian perturbation case
     config.evaluation.pipeline += [
         {
@@ -89,6 +92,10 @@ config.evaluation.pipeline += [
         'type' : 'ExportData',
         'datasets' : 'all',
         'output_path' : './.exported_datasets/{data.dataset}/{data.setting}-{data.ood_type}/split-{registry.split_idx}.pkl',
+        # These settings will only be used when we are in the LoC setting
+        # Note that this depends on the model depth, so you might want to change: config.model.hidden_sizes
+        'separate_distributions_by' : 'ood-and-neighbours',
+        'separate_distributions_tolerance' : 0.1,
     }
 ]
 

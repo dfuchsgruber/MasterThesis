@@ -26,9 +26,9 @@ class LogInductiveFeatureShift(PipelineMember):
     @property
     def configuration(self):
         return super().configuration | {
-            'Dataset before shift' : {self.data_before},
-            'Dataset after shift' : {self.data_after},
-            'Feature Shift epislon' : {self.eps},
+            'Dataset before shift' : str(self.data_before),
+            'Dataset after shift' : str(self.data_after),
+            'Feature Shift epislon' : str(self.eps),
         }
     
     @torch.no_grad()
@@ -83,9 +83,9 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
     @property
     def configuration(self):
         return super().configuration | {
-            'Dataset before shift' : {self.data_before},
-            'Dataset after shift' : {self.data_after},
-            'Entropy calculation epsilon' : {self.eps},
+            'Dataset before shift' : self.data_before,
+            'Dataset after shift' : self.data_after,
+            'Entropy calculation epsilon' : self.eps,
         }
     
     @torch.no_grad()

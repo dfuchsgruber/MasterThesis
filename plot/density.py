@@ -9,135 +9,223 @@ from scipy.stats import binned_statistic_2d
 from openTSNE import TSNE
 import umap
 from util import is_outlier
+from typing import Tuple, Dict, Any, List, Iterable
 
 _tableaeu_colors = list(mcolors.TABLEAU_COLORS.keys())
 
 
-def plot_density(points_to_fit, points_to_eval, density_model, labels, label_names, 
-                seed=1337, bins=20, levels=20, dimensionality_reduction='umap', num_samples=50000,
-            sampling_stragey = 'random', alpha=0.5):
-    """ Creates a density plot for high dimensional points by using dimensionality reduction. 
-    Also visualizes the density by creating a meshgrid in 2d space
-    and using the inverse transform to find densities for these points or sampling.
+def get_dimensionality_reduction_to_plot(features_to_fit: np.ndarray, featues_to_evaluate: np.ndarray, 
+    dimensionality_reduction_types: Iterable[str], seed: int = 1337, num_bins: int = 20) -> Tuple[
+        Dict[str, np.ndarray], np.ndarray, Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+    """ Prepares dimensionality reductions to plot by calculating an embedding and creating a grid with inverse transform under the embedding.
     
     Parameters:
     -----------
-    points_to_fit : torch.Tensor, shape [N, D]
-        The points the density model was fit to.
-    points_to_eval : torch.Tensor, shape [N', D]
-        The points the density model is evaluated on.
-    density_model : nn.Module
-        A callable module that evaluates the density for points of shape (*, D)
-    labels : torch.Tensor, shape [N']
-        Labels for the points to evaluate.
-    label_names : dict
-        A  mapping that names the points to evaluate.
-    seed : int
-        The seed for the PCA.
-    bins : int
-        How many bins to use for the meshgrid.
-    levels : int
-        How many contour levels to plot.
-    dimensionality_reduction : 'pca' or 'tsne' or 'umap'
-        How to reduce the dimensionality of the points.
-    sampling_strategy : 'random', 'convex_combinations', 'normal'
-        How to sample points to find densities over a meshgrid in non invertible dimensionality reductions.
-    alpha : float
-        Alpha value for plots.
-
+    features_to_fit : ndarray, shape [N, D]
+        The features to fit
+    features_to_evaluate : ndarray, shape [N', D]
+        The features to evaluate.
+    dimensionality_reduction_types : Iterable[str]
+        Which dimensionality reductions to perform.
+    seed : int, optional
+        The seed for the dimensionality reductions.
+    num_bins : int, optional
+        The grid resolution in bins.
+    
     Returns:
     --------
-    plt.Figure
-        The plot.
-    plt.axis.Axes
-        The axis of the plot.
+    embeddings : dict
+        A mapping from `dimensionality_reduction_type` to np.ndarray, shape [N + N', 2] giving the embeddings of points.
+    is_train : np.ndarray, shape [N + N']
+        Boolean indicator for the points in `embeddings.values()` if they are part of the training data.
+    grids : dict
+        Mapping from `dimensionality_reduction_type` to np.ndarray, shape [num_bins, num_bins, 2] giving the embedded grid coordinates.
+    grid_inverses : dict
+        Mapping from `dimensionality_reduction_type` to np.ndarray, shape [num_bins, num_bins, D] giving the inverses of the grids.
     """
-    
-    bins_x, bins_y = bins, bins
-    dimensionality_reduction = dimensionality_reduction.lower()
-    sampling_stragey = sampling_stragey.lower()
-    points_to_fit = points_to_fit.cpu()
-    points_to_eval = points_to_eval.cpu()
-    points = torch.cat([points_to_fit, points_to_eval], 0)
-    
-    
-    if dimensionality_reduction == 'tsne':
-        proj = TSNE(random_state = seed).fit(points.numpy())
-    elif dimensionality_reduction == 'pca':
-        proj = PCA(n_components=2, random_state=seed)
-        proj.fit(points.numpy())
-    elif dimensionality_reduction == 'umap':
-        proj = umap.UMAP(random_state = seed)
-        proj.fit(points.numpy())
-    else:
-        raise RuntimeError(f'Unsupported dimensionality reduction {dimensionality_reduction}')
-    
-    emb_to_fit = proj.transform(points_to_fit)
-    emb_to_eval = proj.transform(points_to_eval)
-    emb = np.concatenate([emb_to_fit, emb_to_eval], 0)
-    
-    if hasattr(proj, 'inverse_transform'):
-        # Use the inverse transform of the projection
-        mins, maxs = emb.min(0), emb.max(0)
-        mins, maxs = mins - 0.1 * (maxs - mins), maxs + 0.05 * (maxs - mins) # Gives a margin for the density map
-        xx, yy = np.meshgrid(np.linspace(mins[0], maxs[0], bins_x), np.linspace(mins[1], maxs[1], bins_y), indexing='ij')
-        xx, yy = xx.reshape((-1, 1)), yy.reshape((-1, 1))
-        grid = np.concatenate((xx, yy), axis=-1)
-        
-        density_grid = density_model(torch.tensor(proj.inverse_transform(grid)).float()).cpu().numpy()
-        xx, yy, density_grid = xx.reshape((bins_x, bins_y)), yy.reshape((bins_x, bins_y)), density_grid.reshape((bins_x, bins_y))
-    else:
-        # Sample points within the box of the original data
-        mins, maxs = points.min(0)[0], points.max(0)[0]
-        mins, maxs = mins - 0.1 * (maxs - mins), maxs + 0.1 * (maxs - mins) # Gives a margin for the density map
-        if sampling_stragey == 'random':
-            samples = torch.rand(num_samples, points.size(1))
-            samples *= maxs - mins
-            samples += mins
-        elif sampling_stragey == 'convex_combinations':
-            k = 4 # This many points are in each convex combination
-            coefs_mask = torch.zeros(num_samples, emb.shape[0])
-            selected = torch.argsort(torch.randn(*coefs_mask.size()), 1)[:, :k]
-            for row in range(selected.size(0)):
-                coefs_mask[row][selected[row].tolist()] = 1.0
-            
-            coefs = torch.rand(*coefs_mask.size()) * coefs_mask
-            coefs /= 0.25 * coefs.sum(1)[:, None]
-            samples = coefs @ points
-        elif sampling_stragey == 'normal':
-            samples = torch.randn(num_samples, points.size(1))
-        
+    points_to_plot = np.concatenate([features_to_fit, featues_to_evaluate], 0)
+    is_train = np.concatenate([np.ones(features_to_fit.shape[0], dtype=bool), np.zeros(featues_to_evaluate.shape[0], dtype=bool)], 0)
+    plotting_projections, embeddings, grids, grid_inverses = {}, {}, {}, {}
+
+    for plotting_type in dimensionality_reduction_types:
+        if plotting_type.lower() == 'pca':
+            plotting_projections[plotting_type] = PCA(n_components=2, random_state=1337)
+            plotting_projections[plotting_type].fit(points_to_plot)
+        elif plotting_type.lower() == 'umap':
+            plotting_projections[plotting_type] = umap.UMAP(random_state = 1337)
+            plotting_projections[plotting_type].fit(points_to_plot)
         else:
-            raise RuntimeError(f'Unknown sampling strategy for high dimesional space {sampling_stragey}')
+            raise ValueError(f'Cant plot density with dimensionality reduction {plotting_type}')
+        embeddings[plotting_type] = plotting_projections[plotting_type].transform(points_to_plot)
+        mins, maxs = embeddings[plotting_type].min(0), embeddings[plotting_type].max(0)
+        mins, maxs = mins - 0.1 * (maxs - mins), maxs + 0.05 * (maxs - mins) # Gives a margin for the density map
         
-        samples = torch.cat([samples, points])
+        xx, yy = np.meshgrid(np.linspace(mins[0], maxs[0], num_bins), np.linspace(mins[1], maxs[1], num_bins), indexing='ij')
+
+        grids[plotting_type] = np.stack((xx, yy), axis=-1)
+        grid_inverses[plotting_type] = plotting_projections[plotting_type].inverse_transform(grids[plotting_type].reshape(-1, 2)).reshape((num_bins, num_bins, -1))
+
+    return embeddings, is_train, grids, grid_inverses
+
+
+def plot_density(embeddings_fit: np.ndarray, embeddings_eval: np.ndarray, grid: np.ndarray, density: np.ndarray, labels : np.ndarray, 
+                    label_names: Dict[int, str], levels: int = 20, alpha: float = 0.5, cmap='Reds', vmin=None, vmax=None, colors={}, cols=2):
+    
+    rows = int(np.ceil(len(label_names) / cols))
+
+    fig, axs = plt.subplots(rows, cols, figsize=(5 * rows, 5 * cols))
+    all_embeddings = np.concatenate([embeddings_fit, embeddings_eval], 0)
+    for idx, (label, name) in enumerate(label_names.items()):
+        ax = axs[idx // cols, idx % cols]
+        c = ax.contourf(grid[:, :, 0], grid[:, :, 1], density, cmap=cmap, levels=np.linspace(vmin, vmax, levels+1), extend='both', vmin=vmin, vmax=vmax)
+        #ax.scatter(samples_emb[:, 0], samples_emb[:, 1], c=density_samples)
+        ax.scatter(embeddings_fit[:, 0], embeddings_fit[:, 1], label='Fit', marker='1', alpha=alpha, c='tab:blue')
+        points_to_plot = embeddings_eval[(labels == label)]
+        ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label='Evaluate', marker='x', alpha=alpha, c='tab:orange')
+        ax.set_title(name)
+
+        # for label, name in label_names.items():
+        #     points_to_plot = embeddings_eval[(labels == label)]
+        #     ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label=name, marker='x', alpha=alpha, c=colors.get(label, None))
         
-        density_samples = density_model(samples).cpu().numpy()
-        samples_emb = proj.transform(samples.numpy())
+        emb_mins, emb_maxs = all_embeddings.min(0), all_embeddings.max(0)
+        emb_mins, emb_maxs = emb_mins - 0.05 * (emb_maxs - emb_mins), emb_maxs + 0.05 * (emb_maxs - emb_mins)
         
-        density_grid, bins_x, bins_y, _ = binned_statistic_2d(
-        samples_emb[:, 0], samples_emb[:, 1], density_samples, bins=(bins, bins))
-        density_grid = density_grid.T
-        bins_x, bins_y = 0.5 * (bins_x[1:] + bins_x[:-1]), 0.5 * (bins_y[1:] + bins_y[:-1])
-        xx, yy = np.meshgrid(bins_x, bins_y)
-    
-    
-    fig, ax = plt.subplots(1, 1)
-    c = ax.contourf(xx, yy, density_grid, cmap='Reds', levels=levels)
-    fig.colorbar(c, ax=ax)
-    #ax.scatter(samples_emb[:, 0], samples_emb[:, 1], c=density_samples)
-    ax.scatter(emb_to_fit[:, 0], emb_to_fit[:, 1], label='Fit', marker='1', alpha=alpha)
-    for label, name in label_names.items():
-        points_to_plot = emb_to_eval[labels == label]
-        ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label=name, marker='x', alpha=alpha)
-    
-    emb_mins, emb_maxs = emb.min(0), emb.max(0)
-    emb_mins, emb_maxs = emb_mins - 0.05 * (emb_maxs - emb_mins), emb_maxs + 0.05 * (emb_maxs - emb_mins)
-    
-    ax.set_xlim(left = emb_mins[0], right = emb_maxs[0])
-    ax.set_ylim(bottom = emb_mins[1], top = emb_maxs[1])
-    ax.legend()
+        ax.set_xlim(left = emb_mins[0], right = emb_maxs[0])
+        ax.set_ylim(bottom = emb_mins[1], top = emb_maxs[1])
+        # ax.legend()
+        #ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+    fig.colorbar(c, ax=axs.ravel().tolist(),location = 'left')
+
     return fig, ax
+    
+
+# def plot_density(points_to_fit, points_to_eval, density_model, labels, label_names, 
+#                 seed=1337, bins=20, levels=20, dimensionality_reduction='umap', num_samples=50000,
+#             sampling_stragey = 'random', alpha=0.5):
+#     """ Creates a density plot for high dimensional points by using dimensionality reduction. 
+#     Also visualizes the density by creating a meshgrid in 2d space
+#     and using the inverse transform to find densities for these points or sampling.
+    
+#     Parameters:
+#     -----------
+#     points_to_fit : torch.Tensor, shape [N, D]
+#         The points the density model was fit to.
+#     points_to_eval : torch.Tensor, shape [N', D]
+#         The points the density model is evaluated on.
+#     density_model : nn.Module
+#         A callable module that evaluates the density for points of shape (*, D)
+#     labels : torch.Tensor, shape [N']
+#         Labels for the points to evaluate.
+#     label_names : dict
+#         A  mapping that names the points to evaluate.
+#     seed : int
+#         The seed for the PCA.
+#     bins : int
+#         How many bins to use for the meshgrid.
+#     levels : int
+#         How many contour levels to plot.
+#     dimensionality_reduction : 'pca' or 'tsne' or 'umap'
+#         How to reduce the dimensionality of the points.
+#     sampling_strategy : 'random', 'convex_combinations', 'normal'
+#         How to sample points to find densities over a meshgrid in non invertible dimensionality reductions.
+#     alpha : float
+#         Alpha value for plots.
+
+#     Returns:
+#     --------
+#     plt.Figure
+#         The plot.
+#     plt.axis.Axes
+#         The axis of the plot.
+#     """
+    
+#     bins_x, bins_y = bins, bins
+#     dimensionality_reduction = dimensionality_reduction.lower()
+#     sampling_stragey = sampling_stragey.lower()
+#     points_to_fit = points_to_fit.cpu()
+#     points_to_eval = points_to_eval.cpu()
+#     points = torch.cat([points_to_fit, points_to_eval], 0)
+    
+    
+#     if dimensionality_reduction == 'tsne':
+#         proj = TSNE(random_state = seed).fit(points.numpy())
+#     elif dimensionality_reduction == 'pca':
+#         proj = PCA(n_components=2, random_state=seed)
+#         proj.fit(points.numpy())
+#     elif dimensionality_reduction == 'umap':
+#         proj = umap.UMAP(random_state = seed)
+#         proj.fit(points.numpy())
+#     else:
+#         raise RuntimeError(f'Unsupported dimensionality reduction {dimensionality_reduction}')
+    
+#     emb_to_fit = proj.transform(points_to_fit)
+#     emb_to_eval = proj.transform(points_to_eval)
+#     emb = np.concatenate([emb_to_fit, emb_to_eval], 0)
+    
+#     if hasattr(proj, 'inverse_transform'):
+#         # Use the inverse transform of the projection
+#         mins, maxs = emb.min(0), emb.max(0)
+#         mins, maxs = mins - 0.1 * (maxs - mins), maxs + 0.05 * (maxs - mins) # Gives a margin for the density map
+#         xx, yy = np.meshgrid(np.linspace(mins[0], maxs[0], bins_x), np.linspace(mins[1], maxs[1], bins_y), indexing='ij')
+#         xx, yy = xx.reshape((-1, 1)), yy.reshape((-1, 1))
+#         grid = np.concatenate((xx, yy), axis=-1)
+        
+#         density_grid = density_model(torch.tensor(proj.inverse_transform(grid)).float()).cpu().numpy()
+#         xx, yy, density_grid = xx.reshape((bins_x, bins_y)), yy.reshape((bins_x, bins_y)), density_grid.reshape((bins_x, bins_y))
+#     else:
+#         # Sample points within the box of the original data
+#         mins, maxs = points.min(0)[0], points.max(0)[0]
+#         mins, maxs = mins - 0.1 * (maxs - mins), maxs + 0.1 * (maxs - mins) # Gives a margin for the density map
+#         if sampling_stragey == 'random':
+#             samples = torch.rand(num_samples, points.size(1))
+#             samples *= maxs - mins
+#             samples += mins
+#         elif sampling_stragey == 'convex_combinations':
+#             k = 4 # This many points are in each convex combination
+#             coefs_mask = torch.zeros(num_samples, emb.shape[0])
+#             selected = torch.argsort(torch.randn(*coefs_mask.size()), 1)[:, :k]
+#             for row in range(selected.size(0)):
+#                 coefs_mask[row][selected[row].tolist()] = 1.0
+            
+#             coefs = torch.rand(*coefs_mask.size()) * coefs_mask
+#             coefs /= 0.25 * coefs.sum(1)[:, None]
+#             samples = coefs @ points
+#         elif sampling_stragey == 'normal':
+#             samples = torch.randn(num_samples, points.size(1))
+        
+#         else:
+#             raise RuntimeError(f'Unknown sampling strategy for high dimesional space {sampling_stragey}')
+        
+#         samples = torch.cat([samples, points])
+        
+#         density_samples = density_model(samples).cpu().numpy()
+#         samples_emb = proj.transform(samples.numpy())
+        
+#         density_grid, bins_x, bins_y, _ = binned_statistic_2d(
+#         samples_emb[:, 0], samples_emb[:, 1], density_samples, bins=(bins, bins))
+#         density_grid = density_grid.T
+#         bins_x, bins_y = 0.5 * (bins_x[1:] + bins_x[:-1]), 0.5 * (bins_y[1:] + bins_y[:-1])
+#         xx, yy = np.meshgrid(bins_x, bins_y)
+    
+    
+#     fig, ax = plt.subplots(1, 1)
+#     c = ax.contourf(xx, yy, density_grid, cmap='Reds', levels=levels)
+#     fig.colorbar(c, ax=ax)
+#     #ax.scatter(samples_emb[:, 0], samples_emb[:, 1], c=density_samples)
+#     ax.scatter(emb_to_fit[:, 0], emb_to_fit[:, 1], label='Fit', marker='1', alpha=alpha)
+#     for label, name in label_names.items():
+#         points_to_plot = emb_to_eval[labels == label]
+#         ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label=name, marker='x', alpha=alpha)
+    
+#     emb_mins, emb_maxs = emb.min(0), emb.max(0)
+#     emb_mins, emb_maxs = emb_mins - 0.05 * (emb_maxs - emb_mins), emb_maxs + 0.05 * (emb_maxs - emb_mins)
+    
+#     ax.set_xlim(left = emb_mins[0], right = emb_maxs[0])
+#     ax.set_ylim(bottom = emb_mins[1], top = emb_maxs[1])
+#     ax.legend()
+#     return fig, ax
 
 
 def plot_2d_log_density(points, labels, density_model, resolution=100, levels=10, label_names=None):

@@ -250,5 +250,22 @@ def get_cache_path():
 
     return os.path.join(xdg_cache_home, 'MasterThesis')
 
-# edge_list = torch.tensor([[0, 1, 2, 3, 5], [8, 3, 3, 3, 4]]).long()
-# print(get_k_hop_neighbourhood(edge_list, 0))
+def invert_mapping(d: Mapping) -> dict:
+    """ Inverts a dictionary. 
+    
+    Parameters:
+    -----------
+    d : dict
+        The dict to invert.
+    
+    Returns:
+    --------
+    inv : dict
+        The inverted dict.
+    """
+    inv = {}
+    for k, v in d.items():
+        if v in inv:
+            raise ValueError(f'Can not invert dict because two keys map to value {v}')
+        inv[v] = k
+    return inv

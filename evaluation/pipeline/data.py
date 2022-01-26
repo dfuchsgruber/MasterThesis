@@ -5,6 +5,7 @@ import os, re, pickle
 import os.path as osp
 
 from .base import *
+from .ood import OODSeparation
 import data.constants as dconstants
 from evaluation.util import get_data_loader
 from data.util import data_get_summary, labels_to_idx, graph_select_labels
@@ -106,16 +107,17 @@ class PerturbData(PipelineMember):
         return args, kwargs
 
 @register_pipeline_member
-class ExportData(PipelineMember):
+class ExportData(OODSeparation):
     """ Pipeline member that exports datasets. 
     In `output_path`, tokens encapsulated in {} will be replaced by values from the dataset configuration"""
     
     name = 'ExportData'
 
-    def __init__(self, datasets='all', output_path = './exported_datasets/{data.dataset}/{data.setting}-{data.ood_type}-{data.split_idx}.pkl', **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, datasets='all', ood_datasets=[dconstants.OOD_VAL, dconstants.OOD_TEST], output_path = './exported_datasets/{data.dataset}/{data.setting}-{data.ood_type}-{data.split_idx}.pkl', **kwargs):
+        super().__init__(evaluate_on=ood_datasets, **kwargs)
         self.datasets = datasets
         self.output_path = output_path
+        self.ood_datasets = ood_datasets
     
     @property
     def configuration(self):
@@ -126,9 +128,9 @@ class ExportData(PipelineMember):
 
     def __call__(self, *args, **kwargs):
         if self.datasets == 'all':
-            datasets = set(kwargs['data_loaders'].keys())
+            dataset_names = set(kwargs['data_loaders'].keys())
         else:
-            datasets = set(self.datasets)
+            dataset_names = set(self.datasets)
 
         cfg: configuration.ExperimentConfiguration = kwargs['config']
         # Substitute tokens encapsulated in {} with
@@ -141,12 +143,19 @@ class ExportData(PipelineMember):
             value = getattr(c, path[-1])
             output_path = output_path.replace(match, str(value))
 
+        datasets = {name : kwargs['data_loaders'][name].dataset[0] for name in dataset_names}
+        for name in self.ood_datasets:
+            # Get vertices that are used for AUROC calculation in our experiments.
+            self.evaluate_on = [name]
+            auroc_labels, auroc_mask, _, _ = self.get_distribution_labels(mask=False, **kwargs)
+            datasets[name].auroc_mask = auroc_mask
+            datasets[name].is_in_distribution = auroc_labels
+
         os.makedirs(osp.dirname(output_path), exist_ok=True)
         with open(output_path, 'wb+') as f:
             pickle.dump({
-                'data' : {name : kwargs['data_loaders'][name].dataset[0] for name in datasets},
+                'data' : datasets,
                 'configuration' : deepcopy(cfg.registry_configuration),
-                
             }, f)
 
         return args, kwargs

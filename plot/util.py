@@ -135,3 +135,14 @@ def plot_2d_histogram(x, y, bins=20, x_label='x', y_label='y', log_scale_x=False
     sns.histplot(df, x=x_label, y=y_label, ax=ax, bins=bins, kde=kde, 
                  stat='density', common_norm=False, log_scale=(log_scale_x, log_scale_y))
     return fig, ax
+
+
+def get_greyscale_colormap(min_: float = 0.3, max_: float = 1.0) -> mcolors.ListedColormap:
+    """ Gets a greyscale color map. """
+    N = 256
+    vals = np.ones((N, 3))
+    vals[:, 0] = np.linspace(0.1, 1, N)
+    vals[:, 1] = np.linspace(0.1, 1, N)
+    vals[:, 2] = np.linspace(0.1, 1, N)
+    return mcolors.ListedColormap(1-vals)
+

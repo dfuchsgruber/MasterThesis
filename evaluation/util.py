@@ -57,7 +57,40 @@ def run_model_on_datasets(model, data_loaders, gpus=0, callbacks=[
     return results
 
 
-def get_distribution_labels(data_loaders, k_max, mask=True, threshold=0.0):
+def get_fraction_id_neighbours(data_loaders, k_max, mask=True):
+    """ For each dataset gets the fraction of in distribution neighbours within a certain amount of hops. 
+    
+    Parameters:
+    -----------
+    data_loaders : list
+        List of data loaders to evaluate. Results will be concatenated from these.
+    k_max : int
+        How many hops to consider at most.
+    mask : bool
+        If True, results will be returned only on vertices within the mask of the data loaders.
+    
+    Returns:
+    --------
+    fraction : torch.Tensor, shape [N, k_max + 1]
+        The fraction of neighbours with the `in_distribution` attribute.
+    """
+    callbacks = []
+    for k in range(0, k_max + 1):
+        callbacks += [
+            evaluation.callbacks.make_callback_count_neighbours_with_attribute(lambda data, output: ~data.is_out_of_distribution.numpy(), k, mask=mask),
+            evaluation.callbacks.make_callback_count_neighbours(k, mask=mask)
+        ]
+    results = run_model_on_datasets(None, data_loaders, callbacks=callbacks, run_model=False)
+    num_id_nbs, num_nbs = results[0::2], results[1::2]
+    num_id_nbs = torch.stack([torch.cat(l, dim=0) for l in num_id_nbs]) # k + 1, N
+    num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k + 1, N
+    assert (num_nbs[0] == 1).all(), 'Each vertex should have only one 0-hop neighbour'
+    fraction = num_id_nbs / num_nbs
+    assert (fraction <= 1).all()
+    return fraction.permute(1, 0)
+
+
+def get_distribution_labels(fraction_id_nbs, threshold=0.0):
     """ Gets information about which vertices have the attribute `is_out_of_distribution`. It counts for each vertex how big the fraction
     of vertices with that attribute is in its k-neighbourhood. For a k-neighbourhood, a threshold `t_k = 1 - (threshold ** k)` is defined.
     
@@ -72,18 +105,13 @@ def get_distribution_labels(data_loaders, k_max, mask=True, threshold=0.0):
     
     Parameters:
     -----------
-    data_loaders : list
-        A list of data-loaders to get the information of.
-    k_max : int
-        The number of neighbours with an out-of-distribution class will be returned for k-hop neighbourhoods where k is in [1, 2, ... k_max]
-        Pass k_max = 0 to ignore neighbours.
-    mask : bool
-        If the information is to be extracted for only the vertices in a datasets mask or all vertices in the graph.
+    fraction_id_nbs : torch.Tensor, shape [N, k]
+        Fraction of id neighbours in each corresponding k-hop neighbourhood.
     threshold : float or list
         The fraction of neighbours that is ignored for the labeling. For example, if a vertex with an in-distribution attribute
         has less than theshold out-of-distribution-attribute neighbours, it will still be labeled `in distribution with only in distribution nbs`
         If a single value is given, then the cirterion for purity within the k-hop neighbourhood will be set to (1 - threshold)**k.
-        If a list is given, then this purity threshold within the k-hop neighbourhood will be 1-threshold[k - 1].
+        If a list is given, then this purity threshold within the k-hop neighbourhood will be 1-threshold[k].
 
         Use a value of `0.0` for a strict labeling.
 
@@ -92,39 +120,23 @@ def get_distribution_labels(data_loaders, k_max, mask=True, threshold=0.0):
     distribution_labels : torch.Tensor, [N]
         Each vertex in the dataset with its distribution label (according to `evaluation.constants`)
     """
-    callbacks = [
-        evaluation.callbacks.make_callback_count_neighbours_with_attribute(lambda data, output: ~data.is_out_of_distribution.numpy(), 0, mask=True)
-    ]
-    for k in range(1, k_max + 1):
-        callbacks += [
-            evaluation.callbacks.make_callback_count_neighbours_with_attribute(lambda data, output: ~data.is_out_of_distribution.numpy(), k, mask=True),
-            evaluation.callbacks.make_callback_count_neighbours(k, mask=True)
-        ]
-    results = run_model_on_datasets(None, data_loaders, callbacks=callbacks, run_model=False)
-
-    mask_is_id, num_id_nbs, num_nbs = results[0], results[1::2], results[2::2]
-
-    # Concatenate values over all datasets
-    mask_is_id = torch.cat(mask_is_id, dim=0) > 0 # N
-    num_id_nbs = torch.stack([torch.cat(l, dim=0) for l in num_id_nbs]) # k, N
-
-    # Calculate purity of each k-hop neighbourhood
-    num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k, N
-    fraction_id_nbs = (num_id_nbs / num_nbs).permute(1, 0) # N, k
     if isinstance(threshold, Iterable):
-        threshold = 1 - np.array(threshold)
+        threshold = 1 - torch.tensor(threshold)
+        assert threshold.size(0) == fraction_id_nbs.size(1)
     else:
-        threshold = np.array([(1 - threshold)**k for k in range(1, k_max + 1)])
-    threshold = torch.tensor(threshold)
-    mask_has_only_id_nbs = (fraction_id_nbs >= threshold).all(dim=1) # N
-    mask_has_only_ood_nbs = ((1 - fraction_id_nbs) >= threshold).all(dim=1) # N
+        threshold = torch.tensor([(1 - threshold)**k for k in range(0, fraction_id_nbs.size(1))])
+    assert threshold.size(0) == (fraction_id_nbs.size(1)), f'Threshold should have {fraction_id_nbs.size(1)} values, not {threshold.size(0)}'
+    assert np.allclose(threshold[0], 1.0), f'Threshold for 0-hop neighbourhood should be 1.0 not {threshold[0]}'
+    mask_id_nbs_pure = (fraction_id_nbs >= threshold[None, :]).all(dim=1) # Has a pure id-neighbourhood
+    mask_ood_nbs_pure = ((1 - fraction_id_nbs) >= threshold[None, :]).all(dim=1) # Has a pure ood-neighbourhood
+    mask_is_id = fraction_id_nbs[:, 0] > 0.5 # > 0 should also work
 
     # Plot the softmax-entropy distribution by train-label data i) with no non-train label neighbours ii) with at least one train label neighbour
     distribution_labels = torch.empty_like(mask_is_id).long()
-    distribution_labels[(~mask_is_id) & (mask_has_only_ood_nbs)] = evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS
-    distribution_labels[(~mask_is_id) & (~mask_has_only_ood_nbs)] = evaluation_constants.OOD_CLASS_ID_CLASS_NBS
-    distribution_labels[mask_is_id & (mask_has_only_id_nbs)] = evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS
-    distribution_labels[mask_is_id & (~mask_has_only_id_nbs)] = evaluation_constants.ID_CLASS_ODD_CLASS_NBS
+    distribution_labels[(~mask_is_id) & (mask_ood_nbs_pure)] = evaluation_constants.OOD_CLASS_NO_ID_CLASS_NBS
+    distribution_labels[(~mask_is_id) & (~mask_ood_nbs_pure)] = evaluation_constants.OOD_CLASS_ID_CLASS_NBS
+    distribution_labels[mask_is_id & (mask_id_nbs_pure)] = evaluation_constants.ID_CLASS_NO_OOD_CLASS_NBS
+    distribution_labels[mask_is_id & (~mask_id_nbs_pure)] = evaluation_constants.ID_CLASS_ODD_CLASS_NBS
 
     return distribution_labels
 

@@ -1,6 +1,8 @@
 import torch
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
+from util import is_outlier
+
 
 from .base import *
 import data.constants as dconstants
@@ -8,10 +10,12 @@ from .ood import OODDetection
 import evaluation.callbacks
 from evaluation.util import run_model_on_datasets, get_data_loader
 from evaluation.logging import *
+import evaluation.constants as econstants
 from data.util import label_binarize
 from model.dimensionality_reduction import DimensionalityReduction
 from model.density import get_density_model
-from plot.density import plot_density
+from plot.density import plot_density, get_dimensionality_reduction_to_plot
+from plot.util import get_greyscale_colormap
 
 class FeatureDensity(OODDetection):
     """ Superclass for pipeline members that fit a feature density. """
@@ -115,6 +119,12 @@ class FitFeatureDensityGrid(FeatureDensity):
                 features_to_fit_reduced = torch.from_numpy(dim_reduction.transform(features_to_fit))
                 features_to_evaluate_reduced = torch.from_numpy(dim_reduction.transform(features_to_evaluate))
 
+                # Get a 2d projection for plotting
+                if self.log_plots:
+                    embeddings, is_train, grids, grid_inverses = get_dimensionality_reduction_to_plot(features_to_fit.numpy(),
+                        features_to_evaluate_reduced.numpy(), self.density_plots)
+                    pipeline_log(f'Created plotting grids for reduction {dim_reduction.compressed_name}')
+
                 # Grid over feature space densities
                 for density_type, density_grid in self.density_types.items():
                     keys_density = list(density_grid.keys())
@@ -137,10 +147,22 @@ class FitFeatureDensityGrid(FeatureDensity):
                                 distribution_label_names, plot_proxy_log_scale=False, **kwargs
                             )
                             if self.log_plots:
+                                # Get bounds for the heatmap values
+                                log_density_fit = density_model(features_to_fit_reduced, **eval_kwargs).cpu()
+                                log_density_data = torch.cat([log_density_fit, log_density], 0).numpy()
+                                log_density_data = log_density_data[~is_outlier(log_density_data)]
+                                vmin, vmax = log_density_data.min(), log_density_data.max()
+                                vmin, vmax = vmin - 0.5 * (vmax - vmin), vmax + 0.5 * (vmax - vmin)
                                 for plotting_type in self.density_plots:
-                                    fig, ax = plot_density(features_to_fit_reduced, 
-                                        features_to_evaluate_reduced[is_finite_density], density_model, 
-                                        distribution_labels[is_finite_density], distribution_label_names, seed=self.seed, dimensionality_reduction=plotting_type, alpha=0.5)
+                                    bins_x, bins_y = grids[plotting_type].shape[0], grids[plotting_type].shape[1]
+                                    density_grid = density_model(
+                                        torch.Tensor(grid_inverses[plotting_type].reshape(bins_x * bins_y, -1)), **eval_kwargs).cpu().numpy().reshape((bins_x, bins_y))
+
+                                    embeddings_fit = embeddings[plotting_type][is_train]
+                                    embeddings_eval = embeddings[plotting_type][~is_train] 
+
+                                    fig, ax = plot_density(embeddings_fit, embeddings_eval[is_finite_density], grids[plotting_type], density_grid, 
+                                        distribution_labels[is_finite_density].numpy(), distribution_label_names, cmap=get_greyscale_colormap(), vmin=vmin, vmax=vmax, colors=econstants.DISTRIBUTION_COLORS)
                                     log_figure(kwargs['logs'], fig, f'{plotting_type}{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                                     plt.close(fig)
 

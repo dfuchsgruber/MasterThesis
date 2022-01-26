@@ -760,8 +760,13 @@ def vertex_intersection(first, second):
     idxs_first, idxs_second = [], []
     for vertex, idx_first in first.vertex_to_idx.items():
         if vertex in second.vertex_to_idx:
-            idxs_first.append(idx_first.item())
-            idxs_second.append(second.vertex_to_idx[vertex].item())
+            if isinstance(idx_first, torch.Tensor):
+                idx_first = idx_first.item()
+            idxs_first.append(idx_first)
+            idx_second = second.vertex_to_idx[vertex]
+            if isinstance(idx_second, torch.Tensor):
+                idx_second = idx_second.item()
+            idxs_second.append(idx_second)
     return np.array(idxs_first, dtype=int), np.array(idxs_second, dtype=int)
 
 def labels_in_dataset(data, mask=True):
