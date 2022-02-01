@@ -151,7 +151,7 @@ def build_experiments(cfg):
                         'type' : 'EvaluateFeatureSpaceDistance',
                         'fit_to' : ['train'],
                         'evaluate_on' : ['ood-val'],
-                        'log_plots' : True,
+                        'log_plots' : False,
                         'k' : 5,
                         'layer' : -2,
                     } | deepcopy(ood_args) | deepcopy(args)
@@ -200,7 +200,7 @@ def build_experiments(cfg):
                             'none' : {}
                         },
                         'name' : f'{ood_name}{fit_name}{suffix}',
-                        'log_plots' : True,
+                        'log_plots' : False,
                     } | deepcopy(args) | deepcopy(ood_args) | deepcopy(fit_args))
 
 

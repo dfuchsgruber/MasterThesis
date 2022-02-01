@@ -5,6 +5,7 @@ import numpy as np
 import networkx as nx
 from collections import Mapping
 import scipy.sparse as sp
+from typing import Dict, Any
 
 @contextmanager
 def suppress_stdout(supress=True):
@@ -311,3 +312,10 @@ def approximate_page_rank_matrix(edge_index: np.ndarray, num_vertices: int, diff
     for _ in range(diffusion_iterations):
         ppr = (alpha * np.eye(num_vertices)) + ((1 - alpha) * (A @ ppr))
     return ppr
+
+def aggregate_matching(flags: Dict[Any, bool]) -> Any:
+    """ If all values in the input dict match, it returns that value. Otherwise it raises an `RuntimeExpection`. """
+    if len(set(flags.values())) != 1:
+        raise RuntimeError(f'Not matching values in {flags}')
+    else:
+        return list(flags.values[0])

@@ -149,7 +149,7 @@ left-out-classes-no-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       separate_distributions_by: ood-and-neighbourhood
@@ -230,7 +230,7 @@ left-out-classes-no-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-no-edges
@@ -312,7 +312,7 @@ left-out-classes-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-fit-all-no-edges
@@ -393,7 +393,7 @@ left-out-classes-no-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-fit-best-no-edges
@@ -475,7 +475,7 @@ left-out-classes-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-fit-95-conf-no-edges
@@ -506,7 +506,7 @@ left-out-classes-no-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateFeatureSpaceDistance
@@ -585,7 +585,7 @@ left-out-classes-no-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: loc
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -665,7 +665,7 @@ left-out-classes-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: loc-fit-all
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -744,7 +744,7 @@ left-out-classes-no-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       name: loc-fit-best
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -824,7 +824,7 @@ left-out-classes-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       name: loc-fit-95-conf
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -893,7 +893,7 @@ left-out-classes-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       separate_distributions_by: ood-and-neighbourhood
@@ -974,7 +974,7 @@ left-out-classes-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-no-edges
@@ -1056,7 +1056,7 @@ left-out-classes-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-fit-all-no-edges
@@ -1137,7 +1137,7 @@ left-out-classes-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-fit-best-no-edges
@@ -1219,7 +1219,7 @@ left-out-classes-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: loc-fit-95-conf-no-edges
@@ -1250,7 +1250,7 @@ left-out-classes-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateFeatureSpaceDistance
@@ -1329,7 +1329,7 @@ left-out-classes-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: loc
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -1409,7 +1409,7 @@ left-out-classes-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: loc-fit-all
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -1488,7 +1488,7 @@ left-out-classes-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       name: loc-fit-best
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -1568,7 +1568,7 @@ left-out-classes-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       name: loc-fit-95-conf
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
@@ -1660,7 +1660,7 @@ perturbations-no-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       type: EvaluateFeatureSpaceDistance
@@ -1739,7 +1739,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: ber-no-edges
@@ -1819,7 +1819,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: ber-fit-all-no-edges
@@ -1898,7 +1898,7 @@ perturbations-no-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: ber-fit-best-no-edges
@@ -1978,7 +1978,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: ber-fit-95-conf-no-edges
@@ -2001,7 +2001,7 @@ perturbations-no-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
@@ -2078,7 +2078,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: ber
       type: FitFeatureDensityGrid
     - density_types:
@@ -2156,7 +2156,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: ber-fit-all
       type: FitFeatureDensityGrid
     - density_types:
@@ -2233,7 +2233,7 @@ perturbations-no-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       name: ber-fit-best
       type: FitFeatureDensityGrid
     - density_types:
@@ -2311,7 +2311,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       name: ber-fit-95-conf
       type: FitFeatureDensityGrid
     - evaluate_on:
@@ -2338,7 +2338,7 @@ perturbations-no-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       type: EvaluateFeatureSpaceDistance
@@ -2417,7 +2417,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: normal-no-edges
@@ -2497,7 +2497,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: normal-fit-all-no-edges
@@ -2576,7 +2576,7 @@ perturbations-no-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: normal-fit-best-no-edges
@@ -2656,7 +2656,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: normal-fit-95-conf-no-edges
@@ -2679,7 +2679,7 @@ perturbations-no-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
@@ -2756,7 +2756,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: normal
       type: FitFeatureDensityGrid
     - density_types:
@@ -2834,7 +2834,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: normal-fit-all
       type: FitFeatureDensityGrid
     - density_types:
@@ -2911,7 +2911,7 @@ perturbations-no-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       name: normal-fit-best
       type: FitFeatureDensityGrid
     - density_types:
@@ -2989,7 +2989,7 @@ perturbations-no-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       name: normal-fit-95-conf
       type: FitFeatureDensityGrid
     model.use_spectral_norm: false
@@ -3079,7 +3079,7 @@ perturbations-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       type: EvaluateFeatureSpaceDistance
@@ -3158,7 +3158,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: ber-no-edges
@@ -3238,7 +3238,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: ber-fit-all-no-edges
@@ -3317,7 +3317,7 @@ perturbations-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: ber-fit-best-no-edges
@@ -3397,7 +3397,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: ber-fit-95-conf-no-edges
@@ -3420,7 +3420,7 @@ perturbations-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
@@ -3497,7 +3497,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: ber
       type: FitFeatureDensityGrid
     - density_types:
@@ -3575,7 +3575,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: ber-fit-all
       type: FitFeatureDensityGrid
     - density_types:
@@ -3652,7 +3652,7 @@ perturbations-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       name: ber-fit-best
       type: FitFeatureDensityGrid
     - density_types:
@@ -3730,7 +3730,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       name: ber-fit-95-conf
       type: FitFeatureDensityGrid
     - evaluate_on:
@@ -3757,7 +3757,7 @@ perturbations-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       type: EvaluateFeatureSpaceDistance
@@ -3836,7 +3836,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: normal-no-edges
@@ -3916,7 +3916,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: normal-fit-all-no-edges
@@ -3995,7 +3995,7 @@ perturbations-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: normal-fit-best-no-edges
@@ -4075,7 +4075,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       model_kwargs_evaluate:
         remove_edges: true
       name: normal-fit-95-conf-no-edges
@@ -4098,7 +4098,7 @@ perturbations-spectral-norm:
       - train
       k: 5
       layer: -2
-      log_plots: true
+      log_plots: false
       type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
@@ -4175,7 +4175,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: true
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: normal
       type: FitFeatureDensityGrid
     - density_types:
@@ -4253,7 +4253,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.0
-      log_plots: true
+      log_plots: false
       name: normal-fit-all
       type: FitFeatureDensityGrid
     - density_types:
@@ -4330,7 +4330,7 @@ perturbations-spectral-norm:
       fit_to_ground_truth_labels:
       - train
       fit_to_mask_only: false
-      log_plots: true
+      log_plots: false
       name: normal-fit-best
       type: FitFeatureDensityGrid
     - density_types:
@@ -4408,7 +4408,7 @@ perturbations-spectral-norm:
       - train
       fit_to_mask_only: false
       fit_to_min_confidence: 0.95
-      log_plots: true
+      log_plots: false
       name: normal-fit-95-conf
       type: FitFeatureDensityGrid
     model.use_spectral_norm: true
@@ -4425,5 +4425,5 @@ slurm:
   sbatch_options:
     cpus-per-task: 2
     gres: gpu:1
-    mem: 64G
-    time: 0-96:00
+    mem: 32G
+    time: 0-08:00

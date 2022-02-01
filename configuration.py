@@ -1,6 +1,7 @@
 
 from collections.abc import Mapping
 import data.constants as dconstants
+import model.constants as mconstants
 import attr
 from attrs import validators
 from typing import List, Union, Optional, Any
@@ -24,15 +25,18 @@ class BaseConfiguration:
     def registry_configuration(self):
         return attr.asdict(self, filter = lambda a, v: a.metadata.get('registry_attribute', True))
 
-
 @attr.s
-class AutoencoderConfiguration(BaseConfiguration):
-    """ Configuration for the autoencoder component in a model model. """
-    # Auto-Encoder
+class ReconstructionConfiguration(BaseConfiguration):
+    """ Configuration for the reconstruction component in a model model. """
     loss_weight: float = attr.ib(default=0.0, converter=float) # If 0.0, no reconstruction will be applied
     sample: bool = attr.ib(default=True, converter=bool)
     num_samples: int = attr.ib(default=100, converter=int)
     seed: int = attr.ib(default=1337, converter=int)
+    reconstruction_type: str = attr.ib(default=mconstants.AUTOENCODER, converter=str, validator=validators.in_((
+        mconstants.AUTOENCODER, mconstants.TRIPLET, mconstants.ENERGY,
+    ))) 
+    cached: bool = attr.ib(default=True, converter=bool)
+    margin_constrastive_loss: float = attr.ib(default=0.0, converter=float)
 
 @attr.s
 class ModelConfiguration(BaseConfiguration):
@@ -40,19 +44,21 @@ class ModelConfiguration(BaseConfiguration):
     hidden_sizes: List[int] = attr.ib(default=[64,], validator=lambda s, a, v: all(isinstance(x, int) for x in v))
     weight_scale: Optional[float] = attr.ib(default=1.0, validator=attr.validators.instance_of(float), converter=float)
     use_spectral_norm: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
-    model_type: str = attr.ib(default='gcn', validator=validators.in_(('gcn', 'gat', 'gin', 'sage', 'appnp')), converter=lambda s: s.lower())
+    model_type: str = attr.ib(default='gcn', validator=validators.in_((
+        mconstants.GCN, mconstants.APPNP, mconstants.GAT, mconstants.GIN, mconstants.SAGE,
+        )), converter=lambda s: s.lower())
     use_bias: bool =  attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
-    activation: bool = attr.ib(default='leaky_relu', validator=validators.in_(('leaky_relu', )), converter=lambda s: s.lower())
+    activation: bool = attr.ib(default='leaky_relu', validator=validators.in_((mconstants.LEAKY_RELU, mconstants.RELU,)), converter=lambda s: s.lower())
     leaky_relu_slope: bool = attr.ib(default=1e-2, validator=attr.validators.instance_of(float), converter=float)
     residual: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     freeze_residual_projection: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     dropout: float = attr.ib(default=0.0, validator=validators.and_(validators.ge(0), validators.le(1)), converter=float)
     drop_edge: float = attr.ib(default=0.0, validator=validators.and_(validators.ge(0), validators.le(1)), converter=float)
     use_spectral_norm_on_last_layer: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
-    cached: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
+    cached: bool = attr.ib(default=True, validator=attr.validators.instance_of(bool), converter=bool) # Cache will be cleared and disabled after training
     self_loop_fill_value: float = attr.ib(default=1.0, converter=float)
 
-    autoencoder: AutoencoderConfiguration = attr.ib(default={}, converter=make_cls_converter(AutoencoderConfiguration))
+    reconstruction: ReconstructionConfiguration = attr.ib(default={}, converter=make_cls_converter(ReconstructionConfiguration))
 
     # GAT configuration
     num_heads: int = attr.ib(default=8, validator=lambda s, a, v: isinstance(v, int) and v > 0, converter=int)
@@ -149,7 +155,7 @@ class RunConfiguration(BaseConfiguration):
     num_dataset_splits: int = attr.ib(default=1, validator=validators.gt(0), converter=int, metadata={'registry_attribute' : False})
 
     # Split and initialization idx are not used in the registry
-    # Instead seeds are derived from them
+    # Instead seeds are derived from them and put in the registry to identify pre-trained models (i.e. find their checkpoints)
     split_idx: int = attr.ib(default=0, validator=validators.ge(0), converter=int, metadata={'registry_attribute' : False})
     initialization_idx: int = attr.ib(default=0, validator=validators.ge(0), converter=int, metadata={'registry_attribute' : False})
 

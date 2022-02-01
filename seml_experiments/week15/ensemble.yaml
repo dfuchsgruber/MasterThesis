@@ -56,8 +56,6 @@ fixed:
   - model:residual
   - model:use_spectral_norm
   - data:setting
-  run.num_dataset_splits: 5
-  run.num_initializations: 5
   training.early_stopping.min_delta: 1e-2
   training.early_stopping.mode: min
   training.early_stopping.monitor: val_loss
@@ -74,6 +72,22 @@ grid:
   model.residual:
     options:
     - false
+    type: choice
+  run.initialization_idx:
+    options:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    type: choice
+  run.split_idx:
+    options:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
     type: choice
 left-out-classes-no-spectral-norm:
   fixed:
@@ -137,41 +151,6 @@ left-out-classes-no-spectral-norm:
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateLogitEnergy
-    - density_types:
-        GaussianMixture:
-          diagonal_covariance:
-          - true
-          number_components:
-          - -1
-        GaussianPerClass:
-          covariance:
-          - eye
-          - diag
-          evaluation_kwargs_grid:
-          - mode:
-            - weighted
-            - max
-            relative:
-            - true
-            - false
-      dimensionality_reductions:
-        none: {}
-      evaluate_on:
-      - ood-val
-      fit_to:
-      - train
-      fit_to_best_prediction: false
-      fit_to_ground_truth_labels:
-      - train
-      fit_to_mask_only: true
-      fit_to_min_confidence: 0.0
-      log_plots: true
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: loc-no-edges
-      separate_distributions_by: ood-and-neighbourhood
-      separate_distributions_tolerance: 0.1
-      type: FitFeatureDensityGrid
     - evaluate_on:
       - ood-val
       name: loc
@@ -190,39 +169,6 @@ left-out-classes-no-spectral-norm:
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateLogitEnergy
-    - density_types:
-        GaussianMixture:
-          diagonal_covariance:
-          - true
-          number_components:
-          - -1
-        GaussianPerClass:
-          covariance:
-          - eye
-          - diag
-          evaluation_kwargs_grid:
-          - mode:
-            - weighted
-            - max
-            relative:
-            - true
-            - false
-      dimensionality_reductions:
-        none: {}
-      evaluate_on:
-      - ood-val
-      fit_to:
-      - train
-      fit_to_best_prediction: false
-      fit_to_ground_truth_labels:
-      - train
-      fit_to_mask_only: true
-      fit_to_min_confidence: 0.0
-      log_plots: true
-      name: loc
-      separate_distributions_by: ood-and-neighbourhood
-      separate_distributions_tolerance: 0.1
-      type: FitFeatureDensityGrid
     model.use_spectral_norm: false
     model.use_spectral_norm_on_last_layer: false
     model.weight_scale: 1.0
@@ -312,39 +258,6 @@ perturbations-no-spectral-norm:
         remove_edges: true
       name: ber-no-edges
       type: EvaluateLogitEnergy
-    - density_types:
-        GaussianMixture:
-          diagonal_covariance:
-          - true
-          number_components:
-          - -1
-        GaussianPerClass:
-          covariance:
-          - eye
-          - diag
-          evaluation_kwargs_grid:
-          - mode:
-            - weighted
-            - max
-            relative:
-            - true
-            - false
-      dimensionality_reductions:
-        none: {}
-      evaluate_on:
-      - ber
-      fit_to:
-      - train
-      fit_to_best_prediction: false
-      fit_to_ground_truth_labels:
-      - train
-      fit_to_mask_only: true
-      fit_to_min_confidence: 0.0
-      log_plots: true
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: ber-no-edges
-      type: FitFeatureDensityGrid
     - evaluate_on:
       - ber
       name: ber
@@ -357,37 +270,6 @@ perturbations-no-spectral-norm:
       - ber
       name: ber
       type: EvaluateLogitEnergy
-    - density_types:
-        GaussianMixture:
-          diagonal_covariance:
-          - true
-          number_components:
-          - -1
-        GaussianPerClass:
-          covariance:
-          - eye
-          - diag
-          evaluation_kwargs_grid:
-          - mode:
-            - weighted
-            - max
-            relative:
-            - true
-            - false
-      dimensionality_reductions:
-        none: {}
-      evaluate_on:
-      - ber
-      fit_to:
-      - train
-      fit_to_best_prediction: false
-      fit_to_ground_truth_labels:
-      - train
-      fit_to_mask_only: true
-      fit_to_min_confidence: 0.0
-      log_plots: true
-      name: ber
-      type: FitFeatureDensityGrid
     - evaluate_on:
       - normal
       model_kwargs_evaluate:
@@ -406,39 +288,6 @@ perturbations-no-spectral-norm:
         remove_edges: true
       name: normal-no-edges
       type: EvaluateLogitEnergy
-    - density_types:
-        GaussianMixture:
-          diagonal_covariance:
-          - true
-          number_components:
-          - -1
-        GaussianPerClass:
-          covariance:
-          - eye
-          - diag
-          evaluation_kwargs_grid:
-          - mode:
-            - weighted
-            - max
-            relative:
-            - true
-            - false
-      dimensionality_reductions:
-        none: {}
-      evaluate_on:
-      - normal
-      fit_to:
-      - train
-      fit_to_best_prediction: false
-      fit_to_ground_truth_labels:
-      - train
-      fit_to_mask_only: true
-      fit_to_min_confidence: 0.0
-      log_plots: true
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: normal-no-edges
-      type: FitFeatureDensityGrid
     - evaluate_on:
       - normal
       name: normal
@@ -451,37 +300,6 @@ perturbations-no-spectral-norm:
       - normal
       name: normal
       type: EvaluateLogitEnergy
-    - density_types:
-        GaussianMixture:
-          diagonal_covariance:
-          - true
-          number_components:
-          - -1
-        GaussianPerClass:
-          covariance:
-          - eye
-          - diag
-          evaluation_kwargs_grid:
-          - mode:
-            - weighted
-            - max
-            relative:
-            - true
-            - false
-      dimensionality_reductions:
-        none: {}
-      evaluate_on:
-      - normal
-      fit_to:
-      - train
-      fit_to_best_prediction: false
-      fit_to_ground_truth_labels:
-      - train
-      fit_to_mask_only: true
-      fit_to_min_confidence: 0.0
-      log_plots: true
-      name: normal
-      type: FitFeatureDensityGrid
     model.use_spectral_norm: false
     model.use_spectral_norm_on_last_layer: false
     model.weight_scale: 1.0

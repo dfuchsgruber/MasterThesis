@@ -5,11 +5,12 @@ import pytorch_lightning as pl
 from metrics import accuracy
 from model.gnn import make_model_by_configuration
 from model.prediction import Prediction
-from model.autoenconder import ReconstructionLoss
+from model.reconstruction import ReconstructionLoss
 from torch_geometric.utils import remove_self_loops, add_self_loops
 from configuration import ModelConfiguration
 import logging
 from sklearn.metrics import roc_auc_score
+from util import aggregate_matching
 
 def log_metrics(module: pl.LightningModule, metrics, prefix=None):
     if prefix is None:
@@ -32,9 +33,15 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         self.self_loop_fill_value = backbone_configuration.self_loop_fill_value
         self.weight_decay = weight_decay
         self._self_training = False
-        self.reconstruction_loss_weight = backbone_configuration.autoencoder.loss_weight
+        self.reconstruction_loss_weight = backbone_configuration.reconstruction.loss_weight
         if self.reconstruction_loss_weight > 0:
-            self.reconstruction_loss = ReconstructionLoss(backbone_configuration.autoencoder)
+            self.reconstruction_loss = ReconstructionLoss(backbone_configuration.reconstruction)
+
+    def clear_and_disable_cache(self):
+        """ Clears and disables the cache. """
+        self.backbone.clear_and_disable_cache()
+        if self.reconstruction_loss_weight > 0:
+            self.reconstruction_loss.clear_and_disable_cache()
 
     @property
     def self_training(self):
@@ -88,11 +95,10 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
 
         # Autoencoder
         if self.reconstruction_loss_weight > 0:
-            reco_logits, reco_target = self.reconstruction_loss(output.get_features(-2, average=True), batch.edge_index)
-            reco_loss = F.binary_cross_entropy_with_logits(reco_logits, reco_target, reduction='mean')
-            metrics['reconstruction_binary_cross_entropy'] =  reco_loss
-            metrics['reconstruction_auroc'] = roc_auc_score(reco_target.detach().cpu().numpy().astype(bool), reco_logits.detach().cpu().numpy())
-            loss += self.reconstruction_loss_weight * reco_loss
+            reco_loss, reco_proxy, reco_target = self.reconstruction_loss(output.get_features(-2, average=True), batch.edge_index)
+            metrics['reconstruction_loss'] =  reco_loss * self.reconstruction_loss_weight
+            metrics['reconstruction_auroc'] = roc_auc_score(reco_target.detach().cpu().numpy().astype(bool), reco_proxy.detach().cpu().numpy())
+            loss += reco_loss
 
         metrics['loss'] = loss
         return metrics
@@ -158,4 +164,8 @@ class Ensemble(pl.LightningModule):
             log_metrics(self, metrics, prefix=f'val_member_{idx}')
         logits = self(batch).get_logits(average=True)
         self.log('ensemble_accuracy', accuracy(logits[batch.mask], batch.y[batch.mask]))
-
+    
+    def clear_and_disable_cache(self):
+        """ Clears and disables the cache. """
+        for member in self.members:
+            member.clear_and_disable_cache()

@@ -146,34 +146,6 @@ def build_experiments(cfg):
                     #     'name' : f'{ood_name}{suffix}',
                     # } | deepcopy(args) | deepcopy(ood_args),
                 ]
-                for fit_name, fit_args in (
-                    ('', {'fit_to_mask_only' : True, 'fit_to_best_prediction' : False, 'fit_to_min_confidence' : 0.0,}),
-                    # ('-fit-all', {'fit_to_mask_only' : False, 'fit_to_best_prediction' : False, 'fit_to_min_confidence' : 0.0,}),
-                    # ('-fit-best', {'fit_to_mask_only' : False, 'fit_to_best_prediction' : True,}),
-                    # ('-fit-95-conf', {'fit_to_mask_only' : False, 'fit_to_best_prediction' : True, 'fit_to_min_confidence' : 0.95}),
-                ):
-                    pipeline.append({
-                        'type' : 'FitFeatureDensityGrid',
-                        'evaluate_on' : [ood_dataset],
-                        'fit_to' : ['train'],
-                        'fit_to_ground_truth_labels': ['train'],
-                        'density_types' : {
-                            'GaussianPerClass' : {
-                                'covariance' : ['eye', 'diag'],
-                                'evaluation_kwargs_grid' : [{'mode' : ['weighted', 'max'], 'relative' : [True, False,]}],
-                            },
-                            'GaussianMixture' : {
-                                'diagonal_covariance' : [True],
-                                'number_components' : [-1],
-                            }
-                        },
-                        'dimensionality_reductions' : {
-                            'none' : {}
-                        },
-                        'name' : f'{ood_name}{fit_name}{suffix}',
-                        'log_plots' : True,
-                    } | deepcopy(args) | deepcopy(ood_args) | deepcopy(fit_args))
-
 
         for spectral_norm in (False, ):
             subcfg = {

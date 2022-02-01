@@ -22,8 +22,6 @@ fixed:
     - model:residual
     - model:use_spectral_norm
     - data:setting
-  run.num_initializations: 5
-  run.num_dataset_splits: 5
     
   training.early_stopping.patience: 50
   training.early_stopping.mode: min
@@ -68,6 +66,13 @@ grid:
   data.setting:
     type: choice
     options: [transductive, hybrid]
+  run.split_idx:
+    type: choice
+    options: [0, 1, 2, 3, 4]
+  run.initialization_idx:
+    type: choice
+    options: [0, 1, 2, 3, 4]
+
 
 
 

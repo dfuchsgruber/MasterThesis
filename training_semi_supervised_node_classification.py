@@ -180,6 +180,7 @@ class ExperimentWrapper:
         # An ensemble of 1 model behaves just like one model of this type: 
         # Therefore we always deal with an "ensemble", even if there is only one member
         model = Ensemble(ensembles, config.ensemble.num_samples)
+        model.clear_and_disable_cache()
         val_metrics = {
             name : trainer.validate(model, data_loaders[name], ckpt_path=best_model_path)
             for name in (dconstants.VAL, )

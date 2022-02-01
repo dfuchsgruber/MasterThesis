@@ -4,7 +4,7 @@ import numpy as np
 import zlib
 
 _SEED_UPPER_BOUND = 0x100000000 # Upper bound for seeds
-DATA_SPLIT_SEED = 1337 # Seed that affects data splitting
+DATA_SPLIT_SEED = 1338 # Seed that affects data splitting
 DATA_SPLIT_FIXED_TEST_SEED = 1125387415 # Seed that is used to determine fixed test portions
 MODEL_INIT_SEED = 42 # Seed that affects model initialization
 
