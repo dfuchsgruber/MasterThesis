@@ -1,6 +1,7 @@
 import torch
 from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
 import matplotlib.pyplot as plt
+import logging
 
 from .base import *
 import data.constants as dconstants
@@ -110,10 +111,10 @@ class OODSeparation(PipelineMember):
         distribution_labels = evaluation.util.get_distribution_labels(fraction_id_nbs,threshold = self.separate_distributions_tolerance,)
         auroc_labels, auroc_mask = evaluation.util.separate_distributions(distribution_labels, self.separate_distributions_by)
         distribution_label_names = {
-            econstants.OOD_CLASS_NO_ID_CLASS_NBS : f'ood, no id nbs in {fraction_id_nbs.size(1)} hops', 
-            econstants.OOD_CLASS_ID_CLASS_NBS : f'ood, id nbs in {fraction_id_nbs.size(1)}-hops',
-            econstants.ID_CLASS_NO_OOD_CLASS_NBS : f'id, no ood nbs in {fraction_id_nbs.size(1)}-hops', 
-            econstants.ID_CLASS_ODD_CLASS_NBS : f'id, ood nbs in {fraction_id_nbs.size(1)}-hops'
+            econstants.OOD_CLASS_NO_ID_CLASS_NBS : f'OOD class, no ID class\nneighbours in {fraction_id_nbs.size(1) - 1} hops', 
+            econstants.OOD_CLASS_ID_CLASS_NBS : f'OOD class, ID class\nneighbours in {fraction_id_nbs.size(1) - 1} hops',
+            econstants.ID_CLASS_NO_OOD_CLASS_NBS : f'ID class, no OOD class\nneighbours in {fraction_id_nbs.size(1) - 1} hops', 
+            econstants.ID_CLASS_ODD_CLASS_NBS : f'ID class, OOD class\nneighbours in {fraction_id_nbs.size(1) - 1} hops',
         }
         return auroc_labels, auroc_mask, distribution_labels, distribution_label_names
 
@@ -183,12 +184,14 @@ class OODDetection(OODSeparation):
         roc_auc = roc_auc_score(auroc_labels[auroc_mask].cpu().long().numpy(), proxy[auroc_mask].cpu().numpy()) # higher proxy -> higher uncertainty
         kwargs['metrics'][f'auroc_{proxy_name}{self.suffix}'] = roc_auc
         log_metrics(kwargs['logs'], {f'auroc_{proxy_name}{self.suffix}' : roc_auc}, f'{proxy_name}_plots')
+        logging.info(f'auroc_{proxy_name}{self.suffix} : {roc_auc}')
 
         # Calculate the area under the PR curve
         precision, recall, _ = precision_recall_curve(auroc_labels[auroc_mask].cpu().long().numpy(), proxy[auroc_mask].cpu().numpy())
         aucpr = auc(recall, precision)
         kwargs['metrics'][f'aucpr_{proxy_name}{self.suffix}'] = aucpr
         log_metrics(kwargs['logs'], {f'aucpr_{proxy_name}{self.suffix}' : aucpr}, f'{proxy_name}_plots')
+        logging.info(f'aucpr_{proxy_name}{self.suffix} : {aucpr}')
 
         # -------------- Different plots for an ood-detection proxy -------------
         # Distribution of proxy per class label

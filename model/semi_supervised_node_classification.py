@@ -5,21 +5,36 @@ import pytorch_lightning as pl
 from metrics import accuracy
 from model.gnn import make_model_by_configuration
 from model.prediction import Prediction
+from model.autoenconder import ReconstructionLoss
 from torch_geometric.utils import remove_self_loops, add_self_loops
 from configuration import ModelConfiguration
 import logging
+from sklearn.metrics import roc_auc_score
+
+def log_metrics(module: pl.LightningModule, metrics, prefix=None):
+    if prefix is None:
+        prefix = []
+    elif isinstance(prefix, str):
+        prefix = [prefix]
+    else:
+        prefix = list(prefix)
+    for metric, value in metrics.items():
+        module.log('_'.join(prefix + [metric]), value)
 
 class SemiSupervisedNodeClassification(pl.LightningModule):
     """ Wrapper for networks that perform semi supervised node classification. """
 
     def __init__(self, backbone_configuration: ModelConfiguration, num_input_features, num_classes, learning_rate=1e-2, weight_decay=0.0,):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["backbone_configuration"])
         self.backbone = make_model_by_configuration(backbone_configuration, num_input_features, num_classes)
         self.learning_rate = learning_rate
         self.self_loop_fill_value = backbone_configuration.self_loop_fill_value
         self.weight_decay = weight_decay
         self._self_training = False
+        self.reconstruction_loss_weight = backbone_configuration.autoencoder.loss_weight
+        if self.reconstruction_loss_weight > 0:
+            self.reconstruction_loss = ReconstructionLoss(backbone_configuration.autoencoder)
 
     @property
     def self_training(self):
@@ -55,24 +70,44 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
     def cross_entropy_loss(self, logits, labels):
         return F.cross_entropy(logits, labels)
 
-    def training_step(self, batch, batch_idx):
-        logits = self(batch).get_logits(average=True)
+    def step(self, batch, batch_idx, is_training: bool=True):
+        metrics = {}
+        output = self(batch)
+        logits = output.get_logits(average=True)
         loss = self.cross_entropy_loss(logits[batch.mask], batch.y[batch.mask])
-        self.log('train_loss', loss)
-        self.log('train_accuracy', accuracy(logits[batch.mask], batch.y[batch.mask]))
-        if self.self_training:
+        metrics['cross_entropy'] = loss
+        metrics['accuracy'] =  accuracy(logits[batch.mask], batch.y[batch.mask])
+
+        # Self-training
+        if self.self_training and is_training:
             with torch.no_grad():
                 pred = logits.argmax(1)
             self_training_loss = self.cross_entropy_loss(logits[~batch.mask], pred[~batch.mask])
-            self.log('self_training_loss', self_training_loss)
+            metrics['self_training_cross_entropy'] =  self_training_loss
             loss += self_training_loss
-        return loss
-  
+
+        # Autoencoder
+        if self.reconstruction_loss_weight > 0:
+            reco_logits, reco_target = self.reconstruction_loss(output.get_features(-2, average=True), batch.edge_index)
+            reco_loss = F.binary_cross_entropy_with_logits(reco_logits, reco_target, reduction='mean')
+            metrics['reconstruction_binary_cross_entropy'] =  reco_loss
+            metrics['reconstruction_auroc'] = roc_auc_score(reco_target.detach().cpu().numpy().astype(bool), reco_logits.detach().cpu().numpy())
+            loss += self.reconstruction_loss_weight * reco_loss
+
+        metrics['loss'] = loss
+        return metrics
+
+    def training_step(self, batch, batch_idx):
+        metrics = self.step(batch, batch_idx, is_training=True)
+        log_metrics(self, metrics, prefix='train')
+        return metrics['loss']
+
+
     def validation_step(self, batch, batch_idx):
-        logits = self(batch).get_logits(average=True)
-        loss = self.cross_entropy_loss(logits[batch.mask], batch.y[batch.mask])
-        self.log('val_loss', loss)
-        self.log('val_accuracy', accuracy(logits[batch.mask], batch.y[batch.mask]))
+        metrics = self.step(batch, batch_idx, is_training=False)
+        log_metrics(self, metrics, prefix='val')
+        return metrics['loss']
+        
 
     def get_output_weights(self) -> torch.Tensor:
         """ Gets the weights of the output layer. """
@@ -118,8 +153,9 @@ class Ensemble(pl.LightningModule):
         return self.members[0].get_output_weights() 
   
     def validation_step(self, batch, batch_idx):
+        for idx, member in enumerate(self.members):
+            metrics = member.step(batch, batch_idx, is_training=False)
+            log_metrics(self, metrics, prefix=f'val_member_{idx}')
         logits = self(batch).get_logits(average=True)
-        loss = F.cross_entropy(logits[batch.mask], batch.y[batch.mask])
-        self.log('val_loss', loss)
-        self.log('val_accuracy', accuracy(logits[batch.mask], batch.y[batch.mask]))
+        self.log('ensemble_accuracy', accuracy(logits[batch.mask], batch.y[batch.mask]))
 

@@ -5,12 +5,12 @@ seml:
   project_root_dir: ../..
 
 slurm:
-  experiments_per_job: 2
+  experiments_per_job: 1
   sbatch_options:
     gres: gpu:1       # num GPUs
-    mem: 16G          # memory
+    mem: 32G          # memory
     cpus-per-task: 2  # num cores
-    time: 0-96:00     # max time, D-HH:MM
+    time: 0-08:00     # max time, D-HH:MM
 
 
 ###### BEGIN PARAMETER CONFIGURATION ######
@@ -22,8 +22,6 @@ fixed:
     - model:residual
     - model:use_spectral_norm
     - data:setting
-  run.num_initializations: 5
-  run.num_dataset_splits: 5
     
   training.early_stopping.patience: 50
   training.early_stopping.mode: min
@@ -57,6 +55,7 @@ fixed:
   model.use_spectral_norm_on_last_layer: false
 
   evaluation.ignore_exceptions: false
+  evaluation.log_plots: false
 
 grid:
   model.residual:
@@ -65,6 +64,11 @@ grid:
   data.setting:
     type: choice
     options: [transductive, hybrid]
-
+  run.split_idx:
+    type: choice
+    options: [0, 1, 2, 3, 4]
+  run.initialization_idx:
+    type: choice
+    options: [0, 1, 2, 3, 4]
 
 

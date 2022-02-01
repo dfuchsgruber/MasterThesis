@@ -73,7 +73,7 @@ def plot_density(embeddings_fit: np.ndarray, embeddings_eval: np.ndarray, grid: 
     
     rows = int(np.ceil(len(label_names) / cols))
 
-    fig, axs = plt.subplots(rows, cols, figsize=(5 * rows, 5 * cols))
+    fig, axs = plt.subplots(rows, cols, figsize=(5 * rows, 4 * cols), squeeze=False)
     all_embeddings = np.concatenate([embeddings_fit, embeddings_eval], 0)
     for idx, (label, name) in enumerate(label_names.items()):
         ax = axs[idx // cols, idx % cols]
@@ -82,6 +82,14 @@ def plot_density(embeddings_fit: np.ndarray, embeddings_eval: np.ndarray, grid: 
         ax.scatter(embeddings_fit[:, 0], embeddings_fit[:, 1], label='Fit', marker='1', alpha=alpha, c='tab:blue')
         points_to_plot = embeddings_eval[(labels == label)]
         ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label='Evaluate', marker='x', alpha=alpha, c='tab:orange')
+        ax.tick_params(
+            axis='both',          
+            which='both',      
+            bottom=False,
+            labelbottom=False,
+            labelleft=False,
+            left=False,
+        )
         ax.set_title(name)
 
         # for label, name in label_names.items():

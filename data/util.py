@@ -4,11 +4,7 @@ import scipy.sparse as sp
 from torch_geometric.data import Dataset, Data
 from data.base import SingleGraphDataset
 import torch
-from warnings import warn
 import data.constants as data_constants
-from copy import deepcopy
-
-from seed import data_split_seeds_iterator
 
 class SamplingError(Exception):
     """ Error to throw when vertices cant be sampled from a configuration. """ 
@@ -353,16 +349,7 @@ def stratified_split_with_fixed_test_set_portion(ys, num_splits, portion_train=0
     mask_fixed : ndarray, shape [N]
         Mask for test data that is fixed among all splits.
     """
-    it = data_split_seeds_iterator()
-    seeds = [next(it) for _ in range(num_splits + 1)]
-
-    assert np.allclose(portion_train + portion_val + portion_test_not_fixed + portion_test_fixed, 1.0), f'Dataset splits dont add to 1.0'
-    norm = portion_train + portion_val + portion_test_not_fixed
-    mask_non_fixed, mask_fixed = stratified_split(ys, seeds[0:1], [norm, 1 - norm])[:, 0, :]
-
-    mask = np.zeros((3, num_splits, ys.shape[0]), bool)
-    mask[:, :, mask_non_fixed] = stratified_split(ys[mask_non_fixed], seeds[1:], sizes=np.array([portion_train, portion_val, portion_test_not_fixed]) / norm)
-    return mask, mask_fixed
+    raise NotImplemented
 
 def split_from_mask_stratified(mask, y, sizes=[0.05, 0.95], rng = None):
     """ Splits into subsets from a mask that roughly preserve the distribution of labels.

@@ -83,7 +83,7 @@ def cov_and_mean(x, rowvar=False, bias=False, ddof=None, aweights=None):
 
     return c.squeeze(), avg
 
-def _make_covariance_psd_symmetric(cov, eps=1e-6, tol=1e-6):
+def _make_covariance_psd_symmetric(cov, eps=1e-12, tol=1e-6):
     """ If a covariance matrix is not psd (numerical errors) and symmetric, a small value is added to its diagonal to make it psd.
 
     Parameters:
@@ -103,7 +103,7 @@ def _make_covariance_psd_symmetric(cov, eps=1e-6, tol=1e-6):
     # Make covariance psd in case of numerical inaccuracies
     while not (np.allclose(cov.numpy(), cov.numpy().T) and
               np.all(np.linalg.eigvalsh(cov.numpy()) > tol)):
-        print(f'Matrix not positive semi-definite. Adding {eps} to the diagnoal.')
+        # print(f'Matrix not positive semi-definite. Adding {eps} to the diagnoal.')
         cov += torch.eye(cov.numpy().shape[0]) * eps
         cov = 0.5 * (cov + cov.T) # Hacky way to make the matrix symmetric without changing its values too much (the diagonal stays intact for sure)
         eps *= 10
@@ -236,46 +236,36 @@ class FeatureSpaceDensityGaussianPerClass(FeatureSpaceDensityPerClass):
     
     Parameteres:
     ------------
-    diagonal_covariance : bool
-        If only a diagonal covariance is to be fitted.
-    prior : float
+    covariance : str
+        Restrictions on the covariance.
+    regularization : float
         Value to add to the diagonal of the covariance of each gaussian.
-    relative : bool
-        If the relative log density log(p(x | c)) - log(p(x)) should be reported.
-    mode : 'weighted' or 'max'
-        Which density to report:
-            - 'weighted' : Report log(sum_c p(x | c) * p(c))
-            - 'max' : Report log(max_c p(x | c))
     """
 
     name = 'GaussianPerClass'
 
     def __init__(
             self, 
-            diagonal_covariance = False,
-            prior=0.0,
+            covariance='diag',
+            regularization = False,
             **kwargs
         ):
         super().__init__(**kwargs)
-        self.diagonal_covariance = diagonal_covariance
-        self.prior = prior
+        self.covariance = covariance
+        self.regularization = regularization
         self.covs = dict()
         self.means = dict()
 
     def __str__(self):
         return '\n'.join([
             self.name,
-            f'\t Diagonal covariance : {self.diagonal_covariance}'
-            f'\t Prior: {self.prior}',
+            f'\tCovariance type : {self.diagonal_covariance}'
+            f'\tRegularization: {self.regularization}',
         ])
 
     @property
     def compressed_name(self):
-        tags = ['gpc']
-        if self.diagonal_covariance:
-            tags.append('diag')
-        else:
-            tags.append('full')
+        tags = ['gpc', str(self.covariance)]
         tags += self._tags
         return '-'.join(tags)
 
@@ -296,9 +286,18 @@ class FeatureSpaceDensityGaussianPerClass(FeatureSpaceDensityPerClass):
             self.covs[class_idx], self.means[class_idx] = cov_and_mean(features, aweights=soft.sum(1))
         else:
             self.covs[class_idx], self.means[class_idx] = cov_and_mean(features, aweights=soft[:, class_idx])
-        self.covs[class_idx] += torch.eye(features.size(1)) * self.prior
-        if self.diagonal_covariance:
+        self.covs[class_idx] += torch.eye(features.size(1)) * self.regularization
+        if self.covariance.lower() in ('diag', 'diagonal'):
             self.covs[class_idx] *= torch.eye(features.size(1))
+        elif self.covariance.lower() in ('eye', 'identity', 'id'):
+            self.covs[class_idx] = torch.eye(features.size(1))
+        elif self.covariance.lower() in ('full'):
+            pass
+        elif self.covariance.lower() in ('iso'):
+            scale = torch.diag(self.covs[class_idx]).mean()
+            self.covs[class_idx] = scale * torch.eye(features.size(1))
+        else:
+            raise ValueError(f'Unsupported covariance type {self.covariance}')
         self.covs[class_idx] = _make_covariance_psd_symmetric(self.covs[class_idx], eps=1e-6)
 
     def get_density_class(self, class_idx, features):

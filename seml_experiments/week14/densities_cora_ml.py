@@ -58,16 +58,16 @@ def build_experiments(cfg):
                 'perturbation_type' : 'noise',
                 'name' : 'noise',
             },
-            {
-                'type' : 'EvaluateEmpircalLowerLipschitzBounds',
-                'num_perturbations' : 10,
-                'min_perturbation' : .1,
-                'max_perturbation' : 10.0,
-                'num_perturbations_per_sample' : 5,
-                'seed' : 1337,
-                'perturbation_type' : 'derangement',
-                'name' : 'derangement',
-            },
+            # {
+            #     'type' : 'EvaluateEmpircalLowerLipschitzBounds',
+            #     'num_perturbations' : 10,
+            #     'min_perturbation' : .1,
+            #     'max_perturbation' : 10.0,
+            #     'num_perturbations_per_sample' : 5,
+            #     'seed' : 1337,
+            #     'perturbation_type' : 'derangement',
+            #     'name' : 'derangement',
+            # },
         ]
 
         if ood_type == 'perturbations':
@@ -116,13 +116,13 @@ def build_experiments(cfg):
                         'evaluate_on' : [ood_dataset],
                         'name' : f'{ood_name}{suffix}',
                     } | deepcopy(args) | deepcopy(ood_args),
-                    {
-                        'type' : 'VisualizeIDvsOOD',
-                        'fit_to' : ['train'],
-                        'evaluate_on' : [ood_dataset],
-                        'dimensionality_reductions': ['pca', 'tsne'],
-                        'name' : f'{ood_name}{suffix}',
-                    } | deepcopy(args) | deepcopy(ood_args),
+                    # {
+                    #     'type' : 'VisualizeIDvsOOD',
+                    #     'fit_to' : ['train'],
+                    #     'evaluate_on' : [ood_dataset],
+                    #     'dimensionality_reductions': ['pca', 'tsne'],
+                    #     'name' : f'{ood_name}{suffix}',
+                    # } | deepcopy(args) | deepcopy(ood_args),
                     {
                         'type' : 'EvaluateSoftmaxEntropy',
                         'evaluate_on' : [ood_dataset],
@@ -133,19 +133,30 @@ def build_experiments(cfg):
                         'evaluate_on' : [ood_dataset],
                         'name' : f'{ood_name}{suffix}',
                     } | deepcopy(args) | deepcopy(ood_args),
-                    {
-                        'type' : 'LogInductiveFeatureShift',
-                        'data_before' : 'train',
-                        'data_after' : ood_dataset,
-                        'name' : f'{ood_name}{suffix}',
-                    } | deepcopy(args) | deepcopy(ood_args),
-                    {
-                        'type' : 'LogInductiveSoftmaxEntropyShift',
-                        'data_before' : 'train',
-                        'data_after' : ood_dataset,
-                        'name' : f'{ood_name}{suffix}',
-                    } | deepcopy(args) | deepcopy(ood_args),
+                    # {
+                    #     'type' : 'LogInductiveFeatureShift',
+                    #     'data_before' : 'train',
+                    #     'data_after' : ood_dataset,
+                    #     'name' : f'{ood_name}{suffix}',
+                    # } | deepcopy(args) | deepcopy(ood_args),
+                    # {
+                    #     'type' : 'LogInductiveSoftmaxEntropyShift',
+                    #     'data_before' : 'train',
+                    #     'data_after' : ood_dataset,
+                    #     'name' : f'{ood_name}{suffix}',
+                    # } | deepcopy(args) | deepcopy(ood_args),
                 ]
+                pipeline.append(
+                    {
+                        'type' : 'EvaluateFeatureSpaceDistance',
+                        'fit_to' : ['train'],
+                        'evaluate_on' : ['ood-val'],
+                        'log_plots' : True,
+                        'k' : 5,
+                        'layer' : -2,
+                    } | deepcopy(ood_args) | deepcopy(args)
+                )
+
                 for fit_name, fit_args in (
                     ('', {'fit_to_mask_only' : True, 'fit_to_best_prediction' : False, 'fit_to_min_confidence' : 0.0,}),
                     ('-fit-all', {'fit_to_mask_only' : False, 'fit_to_best_prediction' : False, 'fit_to_min_confidence' : 0.0,}),
@@ -159,7 +170,7 @@ def build_experiments(cfg):
                         'fit_to_ground_truth_labels': ['train'],
                         'density_types' : {
                             'GaussianPerClass' : {
-                                'diagonal_covariance' : [True, False],
+                                'covariance' : ['full', 'diag', 'eye', 'iso'],
                                 'evaluation_kwargs_grid' : [{'mode' : ['weighted', 'max'], 'relative' : [False, True]}],
                             },
                             'GaussianMixture' : {

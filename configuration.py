@@ -24,6 +24,16 @@ class BaseConfiguration:
     def registry_configuration(self):
         return attr.asdict(self, filter = lambda a, v: a.metadata.get('registry_attribute', True))
 
+
+@attr.s
+class AutoencoderConfiguration(BaseConfiguration):
+    """ Configuration for the autoencoder component in a model model. """
+    # Auto-Encoder
+    loss_weight: float = attr.ib(default=0.0, converter=float) # If 0.0, no reconstruction will be applied
+    sample: bool = attr.ib(default=True, converter=bool)
+    num_samples: int = attr.ib(default=100, converter=int)
+    seed: int = attr.ib(default=1337, converter=int)
+
 @attr.s
 class ModelConfiguration(BaseConfiguration):
     """ Configuration for model initialization """ 
@@ -41,6 +51,8 @@ class ModelConfiguration(BaseConfiguration):
     use_spectral_norm_on_last_layer: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     cached: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     self_loop_fill_value: float = attr.ib(default=1.0, converter=float)
+
+    autoencoder: AutoencoderConfiguration = attr.ib(default={}, converter=make_cls_converter(AutoencoderConfiguration))
 
     # GAT configuration
     num_heads: int = attr.ib(default=8, validator=lambda s, a, v: isinstance(v, int) and v > 0, converter=int)
@@ -102,6 +114,7 @@ class EarlyStoppingConfiguration(BaseConfiguration):
     monitor: str = attr.ib(default='val_loss')
     min_delta: float = attr.ib(default=1e-3, validator=validators.ge(0), converter=float)
 
+
 @attr.s
 class TrainingConfiguration(BaseConfiguration):
     """ Configuration for training a model. """
@@ -133,14 +146,20 @@ class RunConfiguration(BaseConfiguration):
     args: List[str] = attr.ib(default=[], metadata={'registry_attribute' : False})
 
     num_initializations: int =  attr.ib(default=1, validator=validators.gt(0), converter=int, metadata={'registry_attribute' : False})
-    num_dataset_splits: int = attr.ib(default=1, validator=validators.ge(0), converter=int, metadata={'registry_attribute' : False})
+    num_dataset_splits: int = attr.ib(default=1, validator=validators.gt(0), converter=int, metadata={'registry_attribute' : False})
 
+    # Split and initialization idx are not used in the registry
+    # Instead seeds are derived from them
+    split_idx: int = attr.ib(default=0, validator=validators.ge(0), converter=int, metadata={'registry_attribute' : False})
+    initialization_idx: int = attr.ib(default=0, validator=validators.ge(0), converter=int, metadata={'registry_attribute' : False})
+
+    use_pretrained_model: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
     model_registry_collection_name: str = attr.ib(default=DEFAULT_REGISTRY_COLLECTION_NAME, converter=str, metadata={'registry_attribute' : False})
 
 @attr.s
 class _RegistryConfiguration(BaseConfiguration):
     """ Configuration for the model registry. Values should never be initialized manually as they are not really configuration and more information. """
-    split_idx: int = attr.ib(default=0, converter=int, validator=validators.ge(0))
+    split_seed: int = attr.ib(default=0)
     model_seed: int = attr.ib(default=0)
 
 @attr.s

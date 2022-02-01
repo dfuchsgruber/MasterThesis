@@ -26,14 +26,11 @@ from model.semi_supervised_node_classification import SemiSupervisedNodeClassifi
 from data.util import data_get_num_attributes, data_get_num_classes
 from data.construct import load_data_from_configuration
 import data.constants as dconstants
-from seed import model_seeds_iterator
 from evaluation.pipeline import Pipeline
 from evaluation.logging import finish as finish_logging, build_table
 from model_registry import ModelRegistry
 import configuration
-
-NAME_SPLIT, NAME_INIT = 'split', 'init'
-SPLIT_INIT_GROUP = 'split_and_init'
+import seed
 
 os.environ['WANDB_START_METHOD'] = 'thread'
 
@@ -87,11 +84,13 @@ class ExperimentWrapper:
             l.warn(f'Requested {config.training.gpus} GPU devices but none are available. Not using GPU.')
             config.training.gpus = 0
 
+        l.info(f'Logging to collection {self.collection_name}')
+
         model_registry = ModelRegistry(collection_name=config.run.model_registry_collection_name)
 
-        # Data loading
-        data_list, fixed_vertices = load_data_from_configuration(config.data, config.run.num_dataset_splits)
-        model_seeds = model_seeds_iterator()
+        data_split_seed = seed.data_split_seeds()[config.run.split_idx]
+        model_seed_generator = iter(seed.SeedIterator(seed.model_seeds()[config.run.initialization_idx]))
+        data_dict, fixed_vertices = load_data_from_configuration(config.data, data_split_seed)
 
         run_name = format_name(config.run.name, config.run.args, attr.asdict(config))
         # One global logger for all splits and initializations
@@ -102,125 +101,118 @@ class ExperimentWrapper:
         all_logs = [] # Logs from each run
         all_artifacts = [] # Paths to all artifacts generated during evaluation
 
+        # Build evaluation pipeline
+        pipeline = Pipeline(config.evaluation.pipeline, config.evaluation, gpus=config.training.gpus, 
+            ignore_exceptions=config.evaluation.ignore_exceptions)
+
         # Iterating over all dataset splits
         result = defaultdict(list)
-        for split_idx, data_dict in enumerate(data_list):
 
-            data_loaders = {
-                name : DataLoader(data, batch_size=1, shuffle=False) for name, data in data_dict.items()
-            }
-            config.registry.split_idx = split_idx
+        data_loaders = {
+            name : DataLoader(data, batch_size=1, shuffle=False) for name, data in data_dict.items()
+        }
+        config.registry.split_seed = data_split_seed
 
-            # Re-initializing the model multiple times to average over results
-            for reinitialization in range(config.run.num_initializations):
-                ensembles = []
-                for ensemble_idx in range(config.ensemble.num_members):
-                    model_seed = next(model_seeds)
+        ensembles = []
+        for ensemble_idx in range(config.ensemble.num_members):
+            model_seed = next(model_seed_generator)
 
-                    config.registry.model_seed = model_seed
+            config.registry.model_seed = model_seed
 
-                    pl.seed_everything(model_seed)
-                    model = SemiSupervisedNodeClassification(
-                        config.model, 
-                        data_get_num_attributes(data_dict[dconstants.TRAIN][0]), 
-                        data_get_num_classes(data_dict[dconstants.TRAIN][0]), 
-                        learning_rate=config.training.learning_rate,
-                        weight_decay=config.training.weight_decay,
-                    )
-                    # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
-                    
-                    artifact_dir = osp.join(run_artifact_dir, f'{split_idx}-{reinitialization}-{ensemble_idx}')
-                    os.makedirs(artifact_dir, exist_ok=True)
-
-                    checkpoint_callback = ModelCheckpoint(
-                        artifact_dir,
-                        monitor=config.training.early_stopping.monitor,
-                        mode=config.training.early_stopping.mode,
-                        save_top_k=1,
-                    )
-                    early_stopping_callback = EarlyStopping(
-                        monitor=config.training.early_stopping.monitor,
-                        mode=config.training.early_stopping.mode,
-                        patience=config.training.early_stopping.patience,
-                        min_delta=config.training.early_stopping.min_delta,
-                    )
-                    callbacks = []
-                    if config.training.self_training:
-                        callbacks.append(SelfTrainingCallback(config.training.num_warmup_epochs))
-
-                    # Model training
-                    with context_supress_stdout(supress=config.training.suppress_stdout), warnings.catch_warnings():
-                        warnings.filterwarnings("ignore")
-                        trainer = pl.Trainer(max_epochs=config.training.max_epochs, deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ] + callbacks,
-                                            logger=logger,
-                                            progress_bar_refresh_rate=0,
-                                            gpus=config.training.gpus,
-                                            )
-                        best_model_path = model_registry[config]
-                        if best_model_path is None:
-                            l.info(f'Could not find pre-trained model.')
-                            trainer.fit(model, data_loaders[dconstants.TRAIN], data_loaders[dconstants.VAL])
-                            best_model_path = checkpoint_callback.best_model_path
-                            model_registry[config] = best_model_path
-                            os.remove(best_model_path) # Clean the checkpoint from the artifact directory
-                            best_model_path = model_registry[config]
-                        else:
-                            l.info(f'Loading pre-trained model from {best_model_path}')
-
-                        model = model.load_from_checkpoint(best_model_path, strict=False)
-                        model.eval()
-                        
-                    # Add the model to the ensemble
-                    ensembles.append(model.eval())
-
-                # An ensemble of 1 model behaves just like one model of this type: 
-                # Therefore we always deal with an "ensemble", even if there is only one member
-                model = Ensemble(ensembles, config.ensemble.num_samples)
-                val_metrics = {
-                    name : trainer.validate(model, data_loaders[name], ckpt_path=best_model_path)
-                    for name in (dconstants.VAL, )
-                }
-                for name, metrics in val_metrics.items():
-                    for val_metric in metrics:
-                        for metric, value in val_metric.items():
-                            result[f'{metric}-{name}-{ensemble_idx}'].append(value)
-                
-
-                # Build evaluation pipeline
-                pipeline = Pipeline(config.evaluation.pipeline, config.evaluation, gpus=config.training.gpus, 
-                    ignore_exceptions=config.evaluation.ignore_exceptions)
-
-                # Run evaluation pipeline
-                l.info(f'Executing pipeline...')
-                if config.evaluation.print_pipeline:
-                    l.info(str(pipeline))
-                logs = defaultdict(dict)
-                
-                # Create a group that will just log the split and initaliation idx
-                logs[SPLIT_INIT_GROUP] = {
-                    NAME_SPLIT : split_idx, NAME_INIT : reinitialization 
-                }
-
-                pipeline_metrics = {} # Metrics logged by the pipeline
-                pipeline(
-                    model=model,
-                    data_loaders = data_loaders,
-                    logger=logger,
-                    config=config,
-                    artifact_directory=artifact_dir,
-                    split_idx = split_idx,
-                    initialization_idx = reinitialization,
-                    logs=logs,
-                    metrics=pipeline_metrics,
-                    ensemble_members=ensembles,
-                    artifacts=all_artifacts,
-                )
-
-                all_logs.append(logs)
-                for metric, value in pipeline_metrics.items():
-                    result[metric].append(value)
+            pl.seed_everything(model_seed)
+            model = SemiSupervisedNodeClassification(
+                config.model, 
+                data_get_num_attributes(data_dict[dconstants.TRAIN][0]), 
+                data_get_num_classes(data_dict[dconstants.TRAIN][0]), 
+                learning_rate=config.training.learning_rate,
+                weight_decay=config.training.weight_decay,
+            )
+            # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
             
-            plt.close('all')
+            artifact_dir = osp.join(run_artifact_dir, f'{config.run.split_idx}-{config.run.initialization_idx}-{ensemble_idx}')
+            os.makedirs(artifact_dir, exist_ok=True)
+
+            checkpoint_callback = ModelCheckpoint(
+                artifact_dir,
+                monitor=config.training.early_stopping.monitor,
+                mode=config.training.early_stopping.mode,
+                save_top_k=1,
+            )
+            early_stopping_callback = EarlyStopping(
+                monitor=config.training.early_stopping.monitor,
+                mode=config.training.early_stopping.mode,
+                patience=config.training.early_stopping.patience,
+                min_delta=config.training.early_stopping.min_delta,
+            )
+            callbacks = []
+            if config.training.self_training:
+                callbacks.append(SelfTrainingCallback(config.training.num_warmup_epochs))
+
+            # Model training
+            with context_supress_stdout(supress=config.training.suppress_stdout), warnings.catch_warnings():
+                warnings.filterwarnings("ignore")
+                trainer = pl.Trainer(max_epochs=config.training.max_epochs, deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ] + callbacks,
+                                    logger=logger,
+                                    progress_bar_refresh_rate=0,
+                                    gpus=config.training.gpus,
+                                    )
+                if config.run.use_pretrained_model:
+                    best_model_path = model_registry[config]
+                    if best_model_path is None:
+                        l.info(f'Could not find pre-trained model.')
+                else:
+                    best_model_path = None
+                if best_model_path is None:
+                    trainer.fit(model, data_loaders[dconstants.TRAIN], data_loaders[dconstants.VAL])
+                    best_model_path = checkpoint_callback.best_model_path
+                    model_registry[config] = best_model_path
+                    os.remove(best_model_path) # Clean the checkpoint from the artifact directory
+                    best_model_path = model_registry[config]
+                else:
+                    l.info(f'Loading pre-trained model from {best_model_path}')
+
+                model = model.load_from_checkpoint(best_model_path, strict=False, backbone_configuration=config.model)
+                model.eval()
+                
+            # Add the model to the ensemble
+            ensembles.append(model.eval())
+
+        # An ensemble of 1 model behaves just like one model of this type: 
+        # Therefore we always deal with an "ensemble", even if there is only one member
+        model = Ensemble(ensembles, config.ensemble.num_samples)
+        val_metrics = {
+            name : trainer.validate(model, data_loaders[name], ckpt_path=best_model_path)
+            for name in (dconstants.VAL, )
+        }
+        for name, metrics in val_metrics.items():
+            for val_metric in metrics:
+                for metric, value in val_metric.items():
+                    result[f'{metric}-{name}-{ensemble_idx}'].append(value)
+
+        # Run evaluation pipeline
+        l.info(f'Executing pipeline...')
+        if config.evaluation.print_pipeline:
+            l.info(str(pipeline))
+        logs = defaultdict(dict)
+
+        pipeline_metrics = {} # Metrics logged by the pipeline
+        pipeline(
+            model=model,
+            data_loaders = data_loaders,
+            logger=logger,
+            config=config,
+            artifact_directory=artifact_dir,
+            logs=logs,
+            metrics=pipeline_metrics,
+            ensemble_members=ensembles,
+            artifacts=all_artifacts,
+        )
+
+        all_logs.append(logs)
+        for metric, value in pipeline_metrics.items():
+            result[metric].append(value)
+        
+        plt.close('all')
 
         # Build wandb table for everything that was logged by the pipeline
         build_table(logger, all_logs)
@@ -236,8 +228,7 @@ class ExperimentWrapper:
             for path in all_artifacts:
                 os.remove(path)
 
-        # To not bloat the MongoDB logs, we just return a path to all metrics
-        return {'results' : metrics_path, 'configuration' : attr.asdict(config)}
+        return {'results' : {metric : values for metric, values in result.items()}, 'configuration' : attr.asdict(config)}
 
 
 # We can call this command, e.g., from a Jupyter notebook with init_all=False to get an "empty" experiment wrapper,

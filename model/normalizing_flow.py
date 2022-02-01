@@ -101,6 +101,8 @@ class NormalizingFlow(nn.Module):
                 loss.backward()
                 optimizer.step()
                 # print(f'{iter} : {loss.item():.2f}')
+        
+        del optimizer
 
     def forward(self, x):
         self.xflow.eval()

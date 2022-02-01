@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import networkx as nx
 from collections import Mapping
+import scipy.sparse as sp
 
 @contextmanager
 def suppress_stdout(supress=True):
@@ -269,3 +270,44 @@ def invert_mapping(d: Mapping) -> dict:
             raise ValueError(f'Can not invert dict because two keys map to value {v}')
         inv[v] = k
     return inv
+
+def approximate_page_rank_matrix(edge_index: np.ndarray, num_vertices: int, diffusion_iterations: int = 16, 
+        alpha: float = 0.2, edge_weights=None, add_self_loops: bool = False):
+    """ Calculates the approximate page rank matrix for a given graph. 
+    
+    Parameters:
+    -----------
+    edge_index : ndarray, shape [2, E]
+        Edge indices.
+    num_vertices : int
+        Number of vertices in the graph.
+    diffusion_iterations : int, default: 16
+        How many diffusion iterations to perform
+    alpha : float, default: 0.2
+        Teleportation probability (higher means more focus on a vertex itself)
+    edge_weights : ndarray, shape [E], optional
+        Edge weights. If not given, ones are used.
+    add_self_loops : bool, deault: False
+        If self loops should be added.
+
+    Returns:
+    --------
+    pi : ndarray, shape [N, N]
+        Approximate page rank matrix.
+    """
+    if edge_weights is None:
+        edge_weights = np.ones(edge_index.shape[1])
+    A = sp.coo_matrix((edge_weights, edge_index), shape=(num_vertices, num_vertices)).tocsr()
+
+    # Normalize adjacency
+    if add_self_loops:
+        A += sp.coo_matrix(np.eye(A.shape[0]))
+    degrees = A.sum(axis=0)[0].tolist()
+    D = sp.diags(degrees, [0])
+    D = D.power(-0.5)
+    A = D.dot(A).dot(D)
+
+    ppr = np.ones((num_vertices, num_vertices)) / num_vertices
+    for _ in range(diffusion_iterations):
+        ppr = (alpha * np.eye(num_vertices)) + ((1 - alpha) * (A @ ppr))
+    return ppr

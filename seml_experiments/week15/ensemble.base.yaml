@@ -1,0 +1,73 @@
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week15_ensemble
+  output_dir: /nfs/students/fuchsgru/seml_output/week15
+  project_root_dir: ../..
+
+slurm:
+  experiments_per_job: 1
+  sbatch_options:
+    gres: gpu:1       # num GPUs
+    mem: 64G          # memory
+    cpus-per-task: 2  # num cores
+    time: 0-96:00     # max time, D-HH:MM
+
+
+###### BEGIN PARAMETER CONFIGURATION ######
+
+
+
+fixed:
+  run.args:
+    - model:residual
+    - model:use_spectral_norm
+    - data:setting
+  run.num_initializations: 5
+  run.num_dataset_splits: 5
+    
+  training.early_stopping.patience: 50
+  training.early_stopping.mode: min
+  training.early_stopping.monitor: val_loss
+  training.early_stopping.min_delta: 1e-2
+  training.max_epochs: 1000
+  training.gpus: 1
+  training.learning_rate: 0.001
+
+  data.dataset: cora_full
+  # Select a subgraph of cora_full that contains all AI and OS papers
+  data.base_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning', 'Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
+  data.corpus_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
+  data.train_labels: ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning']
+  data.left_out_class_labels: ['Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance']
+  data.ood_sampling_strategy: all
+  data.preprocessing: bag_of_words
+  data.train_portion : 20
+  data.test_portion_fixed : 0.2
+  data.split_type: uniform
+  data.type: npz
+  data.drop_train_vertices_portion: 0.1
+
+  model.use_bias: true
+  model.activation: leaky_relu
+  model.leaky_relu_slope: 0.01
+  model.model_type: gcn
+  model.freeze_residual_projection: false
+  model.hidden_sizes: [64]
+  model.weight_scale: 3.0
+  model.use_spectral_norm_on_last_layer: false
+
+  evaluation.ignore_exceptions: false
+  evaluation.log_plots: false
+
+  ensemble.num_members: 5
+  
+grid:
+  model.residual:
+    type: choice
+    options: [false,]
+  data.setting:
+    type: choice
+    options: [transductive, hybrid]
+
+
+

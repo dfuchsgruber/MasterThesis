@@ -9,16 +9,16 @@ import data.constants as dconstants
 from .ood import OODDetection
 from evaluation.util import run_model_on_datasets, get_data_loader
 from evaluation.logging import *
+from .feature_space_density import FeatureDensity
 
 @register_pipeline_member
-class EvaluateFeatureSpaceDistance(OODDetection):
+class EvaluateFeatureSpaceDistance(FeatureDensity):
 
     name = 'EvaluateFeatureSpaceDistance'
 
-    def __init__(self, gpus=0, fit_to=[dconstants.TRAIN], p=2, k='all', layer=-2, **kwargs):
+    def __init__(self, gpus=0, p=2, k='all', layer=-2, **kwargs):
         super().__init__(**kwargs)
         self.gpus = gpus
-        self.fit_to = fit_to
         self.p = p
         self.k = k
         self.layer = layer
@@ -26,7 +26,6 @@ class EvaluateFeatureSpaceDistance(OODDetection):
     @property
     def configuration(self):
         return super().configuration | {
-            'Fit to' : self.fit_to,
             'Norm' : self.p,
             'Num neighbours to consider' : self.k,
             'Features from layer' : self.layer,
@@ -34,31 +33,31 @@ class EvaluateFeatureSpaceDistance(OODDetection):
 
     @torch.no_grad()
     def __call__(self, *args, **kwargs):
-        features_fit = [torch.cat(x, 0) for x in run_model_on_datasets(
-            kwargs['model'], 
-            [get_data_loader(name, kwargs['data_loaders']) for name in self.fit_to], 
-            gpus=self.gpus, model_kwargs=self.model_kwargs_fit,
-            callbacks=[
-                make_callback_get_features(layer=self.layer),
-            ]
-        )][0]
-        features_eval, labels_eval = [torch.cat(x, 0) for x in run_model_on_datasets(
-            kwargs['model'], 
-            [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on], 
-            gpus=self.gpus, model_kwargs=self.model_kwargs_fit,
-            callbacks=[
-                make_callback_get_features(layer=self.layer),
-                make_callback_get_ground_truth(),
-            ]
-        )]
-        distances = torch.cdist(features_eval, features_fit, p=self.p) # [num_eval x num_train]
+
+        self._get_features_and_labels_to_fit(**kwargs)
+        features_to_fit, predictions_to_fit, labels_to_fit = self._get_features_and_labels_to_fit(**kwargs)
+        features_to_evaluate, predictions_to_evaluate, labels_to_evaluate = self._get_features_and_labels_to_evaluate(**kwargs)
+        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
+
+
+        torch.save({
+            'features_fit' : features_to_fit,
+            'predictions_fit' : predictions_to_fit,
+            'labels_fit' : labels_to_fit,
+            'features_eval' : features_to_evaluate,
+            'predictions_eval' : predictions_to_evaluate,
+            'labels_eval' : labels_to_evaluate,
+        }, 'features_debug.pt')
+
+        
+        distances = torch.cdist(features_to_evaluate, features_to_fit, p=self.p) # [num_eval x num_train]
         distances_sorted, _ = torch.sort(distances, dim=-1)
         if self.k != 'all':
             distances_sorted = distances_sorted[:, :self.k]
         proxy = distances_sorted.mean(-1) # [num_eval]
 
         auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
-        self.ood_detection(-torch.Tensor(proxy), labels_eval,
+        self.ood_detection(-torch.Tensor(proxy), labels_to_evaluate,
                                 'feature-distance',
                                 auroc_labels, auroc_mask, distribution_labels,
                                 distribution_label_names, plot_proxy_log_scale=False, **kwargs

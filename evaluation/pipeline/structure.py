@@ -12,6 +12,7 @@ from evaluation.util import run_model_on_datasets, get_data_loader
 from evaluation.logging import *
 from evaluation.callbacks import make_callback_get_data, make_callback_get_ground_truth, make_callback_get_mask
 from data.util import vertex_intersection
+from util import approximate_page_rank_matrix
 
 @register_pipeline_member
 class EvaluateStructure(OODDetection):
@@ -63,28 +64,10 @@ class EvaluateStructure(OODDetection):
         is_fit_intersection_eval = np.zeros(data_eval.x.size(0), dtype=bool)
         is_fit_intersection_eval[idx_intersection_eval] = data_fit.mask.numpy()[idx_intersection_fit]
 
-        N = data_eval.x.size(0)
-        A = sp.coo_matrix((np.ones(data_eval.edge_index.size(1)), data_eval.edge_index.numpy()), shape=(N, N)).tocsr()
-        # Normalize adjacency
-        # A += sp.coo_matrix(np.eye(A.shape[0]))
-        degrees = A.sum(axis=0)[0].tolist()
-        D = sp.diags(degrees, [0])
-        D = D.power(-0.5)
-        A = D.dot(A).dot(D)
+        ppr = torch.Tensor(approximate_page_rank_matrix(data_eval.edge_index.numpy(), data_eval.x.size(0), 
+            diffusion_iterations = self.diffusion_iterations, alpha = self.teleportation_probability))
 
-        ppr = np.ones((N, N)) / N
-        for _ in range(self.diffusion_iterations):
-            ppr = (self.teleportation_probability * np.eye(N)) + ((1 - self.teleportation_probability) * (A @ ppr))
-        ppr = torch.Tensor(ppr)
         diffused = torch.matmul(ppr, torch.Tensor(is_fit_intersection_eval.reshape(-1, 1)).float()).squeeze()
-
-
-
-        # appnp = tg.nn.APPNP(self.diffusion_iterations, self.teleportation_probability, cached=False)
-        # with torch.no_grad():
-        #     # Diffuse the mask in `data_fit`
-        #     diffused = appnp(torch.Tensor(is_fit_intersection_eval.reshape(-1, 1)).float(), data_eval.edge_index).squeeze()
-        
         diffused = diffused[data_eval.mask]
 
         auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)

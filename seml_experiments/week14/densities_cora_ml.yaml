@@ -41,6 +41,7 @@ fixed:
   data.train_portion: 20
   data.type: npz
   evaluation.ignore_exceptions: false
+  evaluation.log_plots: false
   model.activation: leaky_relu
   model.freeze_residual_projection: false
   model.hidden_sizes:
@@ -54,8 +55,6 @@ fixed:
   - model:residual
   - model:use_spectral_norm
   - data:setting
-  run.num_dataset_splits: 5
-  run.num_initializations: 5
   training.early_stopping.min_delta: 1e-2
   training.early_stopping.mode: min
   training.early_stopping.monitor: val_loss
@@ -73,6 +72,22 @@ grid:
     options:
     - true
     - false
+    type: choice
+  run.initialization_idx:
+    options:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    type: choice
+  run.split_idx:
+    options:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
     type: choice
 left-out-classes-no-spectral-norm:
   fixed:
@@ -104,14 +119,6 @@ left-out-classes-no-spectral-norm:
       perturbation_type: noise
       seed: 1337
       type: EvaluateEmpircalLowerLipschitzBounds
-    - max_perturbation: 10.0
-      min_perturbation: 0.1
-      name: derangement
-      num_perturbations: 10
-      num_perturbations_per_sample: 5
-      perturbation_type: derangement
-      seed: 1337
-      type: EvaluateEmpircalLowerLipschitzBounds
     - evaluate_on:
       - ood-val
       model_kwargs_evaluate:
@@ -120,19 +127,6 @@ left-out-classes-no-spectral-norm:
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - ood-val
-      fit_to:
-      - train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: loc-no-edges
-      separate_distributions_by: ood-and-neighbourhood
-      separate_distributions_tolerance: 0.1
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - ood-val
       model_kwargs_evaluate:
@@ -149,22 +143,18 @@ left-out-classes-no-spectral-norm:
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateLogitEnergy
-    - data_after: ood-val
-      data_before: train
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
       model_kwargs_evaluate:
         remove_edges: true
-      name: loc-no-edges
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
-      type: LogInductiveFeatureShift
-    - data_after: ood-val
-      data_before: train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: loc-no-edges
-      separate_distributions_by: ood-and-neighbourhood
-      separate_distributions_tolerance: 0.1
-      type: LogInductiveSoftmaxEntropyShift
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -176,9 +166,11 @@ left-out-classes-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -256,9 +248,11 @@ left-out-classes-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -336,9 +330,11 @@ left-out-classes-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -415,9 +411,11 @@ left-out-classes-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -490,17 +488,6 @@ left-out-classes-no-spectral-norm:
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - ood-val
-      fit_to:
-      - train
-      name: loc
-      separate_distributions_by: ood-and-neighbourhood
-      separate_distributions_tolerance: 0.1
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - ood-val
       name: loc
@@ -513,18 +500,16 @@ left-out-classes-no-spectral-norm:
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateLogitEnergy
-    - data_after: ood-val
-      data_before: train
-      name: loc
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
-      type: LogInductiveFeatureShift
-    - data_after: ood-val
-      data_before: train
-      name: loc
-      separate_distributions_by: ood-and-neighbourhood
-      separate_distributions_tolerance: 0.1
-      type: LogInductiveSoftmaxEntropyShift
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -536,9 +521,11 @@ left-out-classes-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -614,9 +601,11 @@ left-out-classes-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -692,9 +681,11 @@ left-out-classes-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -769,9 +760,11 @@ left-out-classes-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -870,14 +863,6 @@ left-out-classes-spectral-norm:
       perturbation_type: noise
       seed: 1337
       type: EvaluateEmpircalLowerLipschitzBounds
-    - max_perturbation: 10.0
-      min_perturbation: 0.1
-      name: derangement
-      num_perturbations: 10
-      num_perturbations_per_sample: 5
-      perturbation_type: derangement
-      seed: 1337
-      type: EvaluateEmpircalLowerLipschitzBounds
     - evaluate_on:
       - ood-val
       model_kwargs_evaluate:
@@ -886,19 +871,6 @@ left-out-classes-spectral-norm:
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - ood-val
-      fit_to:
-      - train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: loc-no-edges
-      separate_distributions_by: ood-and-neighbourhood
-      separate_distributions_tolerance: 0.1
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - ood-val
       model_kwargs_evaluate:
@@ -915,22 +887,18 @@ left-out-classes-spectral-norm:
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateLogitEnergy
-    - data_after: ood-val
-      data_before: train
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
       model_kwargs_evaluate:
         remove_edges: true
-      name: loc-no-edges
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
-      type: LogInductiveFeatureShift
-    - data_after: ood-val
-      data_before: train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: loc-no-edges
-      separate_distributions_by: ood-and-neighbourhood
-      separate_distributions_tolerance: 0.1
-      type: LogInductiveSoftmaxEntropyShift
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -942,9 +910,11 @@ left-out-classes-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1022,9 +992,11 @@ left-out-classes-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1102,9 +1074,11 @@ left-out-classes-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1181,9 +1155,11 @@ left-out-classes-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1256,17 +1232,6 @@ left-out-classes-spectral-norm:
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - ood-val
-      fit_to:
-      - train
-      name: loc
-      separate_distributions_by: ood-and-neighbourhood
-      separate_distributions_tolerance: 0.1
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - ood-val
       name: loc
@@ -1279,18 +1244,16 @@ left-out-classes-spectral-norm:
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
       type: EvaluateLogitEnergy
-    - data_after: ood-val
-      data_before: train
-      name: loc
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
       separate_distributions_by: ood-and-neighbourhood
       separate_distributions_tolerance: 0.1
-      type: LogInductiveFeatureShift
-    - data_after: ood-val
-      data_before: train
-      name: loc
-      separate_distributions_by: ood-and-neighbourhood
-      separate_distributions_tolerance: 0.1
-      type: LogInductiveSoftmaxEntropyShift
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -1302,9 +1265,11 @@ left-out-classes-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1380,9 +1345,11 @@ left-out-classes-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1458,9 +1425,11 @@ left-out-classes-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1535,9 +1504,11 @@ left-out-classes-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1653,14 +1624,6 @@ perturbations-no-spectral-norm:
       perturbation_type: noise
       seed: 1337
       type: EvaluateEmpircalLowerLipschitzBounds
-    - max_perturbation: 10.0
-      min_perturbation: 0.1
-      name: derangement
-      num_perturbations: 10
-      num_perturbations_per_sample: 5
-      perturbation_type: derangement
-      seed: 1337
-      type: EvaluateEmpircalLowerLipschitzBounds
     - base_data: ood-val
       dataset_name: ber
       parameters:
@@ -1679,17 +1642,6 @@ perturbations-no-spectral-norm:
         remove_edges: true
       name: ber-no-edges
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - ber
-      fit_to:
-      - train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: ber-no-edges
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - ber
       model_kwargs_evaluate:
@@ -1702,18 +1654,16 @@ perturbations-no-spectral-norm:
         remove_edges: true
       name: ber-no-edges
       type: EvaluateLogitEnergy
-    - data_after: ber
-      data_before: train
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
       model_kwargs_evaluate:
         remove_edges: true
-      name: ber-no-edges
-      type: LogInductiveFeatureShift
-    - data_after: ber
-      data_before: train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: ber-no-edges
-      type: LogInductiveSoftmaxEntropyShift
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -1725,9 +1675,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1803,9 +1755,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1881,9 +1835,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -1958,9 +1914,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2029,15 +1987,6 @@ perturbations-no-spectral-norm:
       - ber
       name: ber
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - ber
-      fit_to:
-      - train
-      name: ber
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - ber
       name: ber
@@ -2046,14 +1995,14 @@ perturbations-no-spectral-norm:
       - ber
       name: ber
       type: EvaluateLogitEnergy
-    - data_after: ber
-      data_before: train
-      name: ber
-      type: LogInductiveFeatureShift
-    - data_after: ber
-      data_before: train
-      name: ber
-      type: LogInductiveSoftmaxEntropyShift
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -2065,9 +2014,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2141,9 +2092,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2217,9 +2170,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2292,9 +2247,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2363,17 +2320,6 @@ perturbations-no-spectral-norm:
         remove_edges: true
       name: normal-no-edges
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - normal
-      fit_to:
-      - train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: normal-no-edges
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - normal
       model_kwargs_evaluate:
@@ -2386,18 +2332,16 @@ perturbations-no-spectral-norm:
         remove_edges: true
       name: normal-no-edges
       type: EvaluateLogitEnergy
-    - data_after: normal
-      data_before: train
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
       model_kwargs_evaluate:
         remove_edges: true
-      name: normal-no-edges
-      type: LogInductiveFeatureShift
-    - data_after: normal
-      data_before: train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: normal-no-edges
-      type: LogInductiveSoftmaxEntropyShift
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -2409,9 +2353,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2487,9 +2433,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2565,9 +2513,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2642,9 +2592,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2713,15 +2665,6 @@ perturbations-no-spectral-norm:
       - normal
       name: normal
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - normal
-      fit_to:
-      - train
-      name: normal
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - normal
       name: normal
@@ -2730,14 +2673,14 @@ perturbations-no-spectral-norm:
       - normal
       name: normal
       type: EvaluateLogitEnergy
-    - data_after: normal
-      data_before: train
-      name: normal
-      type: LogInductiveFeatureShift
-    - data_after: normal
-      data_before: train
-      name: normal
-      type: LogInductiveSoftmaxEntropyShift
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -2749,9 +2692,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2825,9 +2770,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2901,9 +2848,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -2976,9 +2925,11 @@ perturbations-no-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -3092,14 +3043,6 @@ perturbations-spectral-norm:
       perturbation_type: noise
       seed: 1337
       type: EvaluateEmpircalLowerLipschitzBounds
-    - max_perturbation: 10.0
-      min_perturbation: 0.1
-      name: derangement
-      num_perturbations: 10
-      num_perturbations_per_sample: 5
-      perturbation_type: derangement
-      seed: 1337
-      type: EvaluateEmpircalLowerLipschitzBounds
     - base_data: ood-val
       dataset_name: ber
       parameters:
@@ -3118,17 +3061,6 @@ perturbations-spectral-norm:
         remove_edges: true
       name: ber-no-edges
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - ber
-      fit_to:
-      - train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: ber-no-edges
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - ber
       model_kwargs_evaluate:
@@ -3141,18 +3073,16 @@ perturbations-spectral-norm:
         remove_edges: true
       name: ber-no-edges
       type: EvaluateLogitEnergy
-    - data_after: ber
-      data_before: train
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
       model_kwargs_evaluate:
         remove_edges: true
-      name: ber-no-edges
-      type: LogInductiveFeatureShift
-    - data_after: ber
-      data_before: train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: ber-no-edges
-      type: LogInductiveSoftmaxEntropyShift
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -3164,9 +3094,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -3242,9 +3174,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -3320,9 +3254,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -3397,9 +3333,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -3468,15 +3406,6 @@ perturbations-spectral-norm:
       - ber
       name: ber
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - ber
-      fit_to:
-      - train
-      name: ber
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - ber
       name: ber
@@ -3485,14 +3414,14 @@ perturbations-spectral-norm:
       - ber
       name: ber
       type: EvaluateLogitEnergy
-    - data_after: ber
-      data_before: train
-      name: ber
-      type: LogInductiveFeatureShift
-    - data_after: ber
-      data_before: train
-      name: ber
-      type: LogInductiveSoftmaxEntropyShift
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -3504,9 +3433,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -3580,9 +3511,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -3656,9 +3589,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -3731,9 +3666,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -3802,17 +3739,6 @@ perturbations-spectral-norm:
         remove_edges: true
       name: normal-no-edges
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - normal
-      fit_to:
-      - train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: normal-no-edges
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - normal
       model_kwargs_evaluate:
@@ -3825,18 +3751,16 @@ perturbations-spectral-norm:
         remove_edges: true
       name: normal-no-edges
       type: EvaluateLogitEnergy
-    - data_after: normal
-      data_before: train
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
       model_kwargs_evaluate:
         remove_edges: true
-      name: normal-no-edges
-      type: LogInductiveFeatureShift
-    - data_after: normal
-      data_before: train
-      model_kwargs_evaluate:
-        remove_edges: true
-      name: normal-no-edges
-      type: LogInductiveSoftmaxEntropyShift
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -3848,9 +3772,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -3926,9 +3852,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -4004,9 +3932,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -4081,9 +4011,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -4152,15 +4084,6 @@ perturbations-spectral-norm:
       - normal
       name: normal
       type: EvaluateAccuracy
-    - dimensionality_reductions:
-      - pca
-      - tsne
-      evaluate_on:
-      - normal
-      fit_to:
-      - train
-      name: normal
-      type: VisualizeIDvsOOD
     - evaluate_on:
       - normal
       name: normal
@@ -4169,14 +4092,14 @@ perturbations-spectral-norm:
       - normal
       name: normal
       type: EvaluateLogitEnergy
-    - data_after: normal
-      data_before: train
-      name: normal
-      type: LogInductiveFeatureShift
-    - data_after: normal
-      data_before: train
-      name: normal
-      type: LogInductiveSoftmaxEntropyShift
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: true
+      type: EvaluateFeatureSpaceDistance
     - density_types:
         GaussianMixture:
           diagonal_covariance:
@@ -4188,9 +4111,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -4264,9 +4189,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -4340,9 +4267,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -4415,9 +4344,11 @@ perturbations-spectral-norm:
           number_components:
           - -1
         GaussianPerClass:
-          diagonal_covariance:
-          - true
-          - false
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
           evaluation_kwargs_grid:
           - mode:
             - weighted
@@ -4490,9 +4421,9 @@ seml:
   output_dir: /nfs/students/fuchsgru/seml_output/week14
   project_root_dir: ../..
 slurm:
-  experiments_per_job: 2
+  experiments_per_job: 1
   sbatch_options:
     cpus-per-task: 2
     gres: gpu:1
-    mem: 16G
+    mem: 64G
     time: 0-96:00

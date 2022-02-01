@@ -239,15 +239,14 @@ class APPNP(nn.Module):
         self.convs = _make_convolutions(input_dim, num_classes, cfg, LinearWithSpectralNormaliatzion)
         self.appnp = torch_geometric.nn.APPNP(cfg.diffusion_iterations, cfg.teleportation_probability, cached=cfg.cached)
 
-    def forward(self, data):
+    def forward(self, data, store_diffused_features=True):
         x, edge_index = data.x, data.edge_index
         embeddings = [x]
         for num, layer in enumerate(self.convs):
             x = layer(x)
             if num < len(self.convs) - 1:
                 x = self.activation(x)
-                # Append either the undiffused features or the diffused features (penultimate layer)
-                if num == len(self.convs) - 2: # Feature layer
+                if store_diffused_features:
                     embeddings.append(self.appnp(x, edge_index))
                 else:
                     embeddings.append(x)

@@ -6,10 +6,9 @@ import configuration
 import pandas as pd
 import numpy as np
 
-num_splits, num_inits = 1, 1
+split_idx, init_idx = 0, 0
 
-
-ex = ExperimentWrapper(init_all=False, collection_name='model-test', run_id='gcn_64_32_residual')
+ex = ExperimentWrapper(init_all=False, collection_name='test', run_id='gcn_64_32_residual')
 data_cfg = configuration.DataConfiguration(
                     dataset='cora_full', 
                     train_portion=20, test_portion_fixed=0.2,
@@ -34,8 +33,15 @@ data_cfg = configuration.DataConfiguration(
 spectral_norm_cfg = {
     'use_spectral_norm' : True,
     'residual' : True,
-     'weight_scale' : 0.9,
+     'weight_scale' : 0.5,
 }
+
+autoencoder_cfg = {
+    'loss_weight' : 1.0,
+    'sample' : True,
+    'num_samples' : 1000,
+}
+
 
 model_cfg = configuration.ModelConfiguration(
     model_type='gcn', 
@@ -49,7 +55,8 @@ model_cfg = configuration.ModelConfiguration(
     freeze_residual_projection=False, 
     use_spectral_norm_on_last_layer=False, 
     self_loop_fill_value=1.0, 
-    #**spectral_norm_cfg,
+    # autoencoder = autoencoder_cfg,
+    **spectral_norm_cfg,
     )
 
 run_cfg = configuration.RunConfiguration(
@@ -58,8 +65,9 @@ run_cfg = configuration.RunConfiguration(
         'model:model_type', 'model:hidden_sizes', 'model:weight_scale', 'data:setting', 'data:ood_type',
     ],
     model_registry_collection_name = 'model_registry',
-    num_initializations = num_inits,
-    num_dataset_splits = num_splits,
+    split_idx = split_idx,
+    initialization_idx = init_idx,
+    # use_pretrained_model = False,
 )
 
 self_training = {
@@ -94,38 +102,6 @@ evaluation_cfg = configuration.EvaluationConfiguration(
     log_plots = True,
     pipeline = [
         {
-            'type' : 'EvaluateFeatureSpaceDistance',
-            'fit_to' : ['train'],
-            'evaluate_on' : ['ood-val'],
-            'log_plots' : True,
-            'separate_distributions_by' : ood_separation,
-            'separate_distributions_tolerance' : 0.1,
-            'k' : 5,
-            'layer' : -2,
-        },
-        {
-            'type' : 'EvaluateFeatureSpaceDistance',
-            'fit_to' : ['train'],
-            'evaluate_on' : ['ood-val'],
-            'log_plots' : True,
-            'separate_distributions_by' : ood_separation,
-            'separate_distributions_tolerance' : 0.1,
-            'k' : 5,
-            'layer' : 0,
-            'name' : 'input'
-        },
-        {
-            'type' : 'EvaluateStructure',
-            'fit_to' : ['train'],
-            'evaluate_on' : ['ood-val'],
-            'log_plots' : True,
-            'separate_distributions_by' : ood_separation,
-            'separate_distributions_tolerance' : 0.1,
-            'diffusion_iterations' : 16,
-            'teleportation_probability' : 0.2,
-        },
-        
-        {
             'type' : 'FitFeatureDensityGrid',
             'fit_to' : ['train'],
             'fit_to_ground_truth_labels' : ['train'],
@@ -133,11 +109,18 @@ evaluation_cfg = configuration.EvaluationConfiguration(
             'fit_to_best_prediction' : False,
             'fit_to_min_confidence' : 0.99,
             'evaluate_on' : ['ood-val'],
+            'diffuse_features' : False,
+            'diffusion_iterations' : 16,
+            'teleportation_probability' : 0.2,
             'density_types' : {
                 'GaussianPerClass' : {
-                    'diagonal_covariance' : [True],
-                    'evaluation_kwargs_grid' : [{'mode' : ['weighted',], 'relative' : [False,]}]
+                    'evaluation_kwargs_grid' : [{'mode' : ['max', 'weighted'], 'relative' : [False, True]}],
+                    'covariance' : ['full', 'diag', 'eye', 'iso'],
                 },
+                'GaussianMixture' : {
+                    'diagonal_covariance' : [True],
+                    'number_components' : [-1],
+                }
             },
             'dimensionality_reductions' : {
                 'none' : {
@@ -147,6 +130,37 @@ evaluation_cfg = configuration.EvaluationConfiguration(
             'separate_distributions_by' : ood_separation,
             'separate_distributions_tolerance' : 0.1,
         },
+        {
+            'type' : 'EvaluateFeatureSpaceDistance',
+            'fit_to' : ['train'],
+            'evaluate_on' : ['ood-val'],
+            'log_plots' : True,
+            'separate_distributions_by' : ood_separation,
+            'separate_distributions_tolerance' : 0.1,
+            'k' : 5,
+            'layer' : -2,
+        },
+        # {
+        #     'type' : 'EvaluateFeatureSpaceDistance',
+        #     'fit_to' : ['train'],
+        #     'evaluate_on' : ['ood-val'],
+        #     'log_plots' : True,
+        #     'separate_distributions_by' : ood_separation,
+        #     'separate_distributions_tolerance' : 0.1,
+        #     'k' : 5,
+        #     'layer' : 0,
+        #     'name' : 'input'
+        # },
+        # {
+        #     'type' : 'EvaluateStructure',
+        #     'fit_to' : ['train'],
+        #     'evaluate_on' : ['ood-val'],
+        #     'log_plots' : True,
+        #     'separate_distributions_by' : ood_separation,
+        #     'separate_distributions_tolerance' : 0.1,
+        #     'diffusion_iterations' : 16,
+        #     'teleportation_probability' : 0.2,
+        # },
         # {
         #     'type' : 'EvaluateAccuracy',
         #     'evaluate_on' : [dconstants.OOD_VAL],
@@ -161,27 +175,29 @@ evaluation_cfg = configuration.EvaluationConfiguration(
         # {
         #     'type' : 'PrintDatasetSummary',
         #     'evaluate_on' : ['train', 'val', 'ood-val'],
-        # },{
-        #     'type' : 'EvaluateSoftmaxEntropy',
-        #     'evaluate_on' : ['ood-val'],
-        #     'separate_distributions_by' : ood_separation,
-        #     'separate_distributions_tolerance' : 0.1,
-        # },{
+        # },
+        {
+            'type' : 'EvaluateSoftmaxEntropy',
+            'evaluate_on' : ['ood-val'],
+            'separate_distributions_by' : ood_separation,
+            'separate_distributions_tolerance' : 0.1,
+        },
+        # {
         #     'type' : 'EvaluateLogitEnergy',
         #     'evaluate_on' : ['ood-val'],
         #     'separate_distributions_by' : ood_separation,
         #     'separate_distributions_tolerance' : 0.1,
         #     'kind' : 'leave_out_classes',
         # },
-        # {
-        #     'type' : 'VisualizeIDvsOOD',
-        #     'fit_to' : ['train'],
-        #     'evalaute_on' : ['ood-val'],
-        #     'separate_distributions_by' : ood_separation,
-        #     'separate_distributions_tolerance' : 0.1,
-        #     'kind' : 'leave_out_classes',
-        #     'dimensionality_reductions' : ['pca', 'tsne',],
-        # },
+        {
+            'type' : 'VisualizeIDvsOOD',
+            'fit_to' : ['train'],
+            'evalaute_on' : ['ood-val'],
+            'separate_distributions_by' : ood_separation,
+            'separate_distributions_tolerance' : 0.1,
+            'kind' : 'leave_out_classes',
+            'dimensionality_reductions' : ['pca', 'tsne',],
+        },
         # {
         #     'type' : 'LogInductiveFeatureShift',
         #     'data_before' : 'train',
@@ -202,11 +218,7 @@ evaluation_cfg = configuration.EvaluationConfiguration(
 
 out = ex.train(model=model_cfg, data = data_cfg, training=training_cfg, run=run_cfg, evaluation=evaluation_cfg, ensemble=ensemble_cfg)
 
-with open(out['results']) as f:
-    results = json.load(f)
-print(results)
-
 print()
-df = pd.DataFrame({k : {'Mean' : np.mean(v), 'Std' : np.std(v)} for k, v in results.items()})
+df = pd.DataFrame({k : {'Mean' : np.mean(v), 'Std' : np.std(v)} for k, v in out['results'].items()})
 print(df.T.to_markdown())
 print()
