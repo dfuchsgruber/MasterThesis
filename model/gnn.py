@@ -13,7 +13,7 @@ from typing import Callable
 from util import aggregate_matching
 
 from model.nn import *
-
+from model.prediction import *
 
 
 def _get_convolution_weights(conv: nn.Module) -> torch.Tensor:
@@ -64,7 +64,12 @@ class GCN(nn.Module):
                 if self.dropout > 0:
                     x = F.dropout(x, p=self.dropout, inplace=False, training=dropout)
             embeddings.append(x)
-        return embeddings
+        return Prediction(
+            embeddings, 
+            inputs = data.x,
+            logits = x,
+            soft = F.softmax(x, dim=1),
+            )
 
     def get_output_weights(self):
         """ Gets the weights of the output layer. """
@@ -179,26 +184,28 @@ class APPNP(nn.Module):
         """ Clears and disables the cache. """
         self.appnp.clear_and_disable_cache()
 
-    def forward(self, data, store_diffused_features=True):
+    def forward(self, data):
         x, edge_index = data.x, data.edge_index
-        embeddings = [x]
+        embeddings, embeddings_diffused = [x], [x]
         for num, layer in enumerate(self.convs):
             x = layer(x)
             if num < len(self.convs) - 1:
                 x = self.activation(x)
-                if store_diffused_features:
-                    embeddings.append(self.appnp(x, edge_index))
-                else:
-                    embeddings.append(x)
-            else:
-                # Don't append the undiffused logits to `embeddings`, as otherwise they will be interpreted as features
-                # TODO: Fix that, by not having -2 as the default layer for feature space, but instead make it model dependent
-                pass
+            embeddings.append(x)
+            embeddings_diffused.append(self.appnp(x, edge_index))
+        logits = x
 
         # Diffusion
-        x = self.appnp(x, edge_index)
-        embeddings.append(x)
-        return embeddings
+        logits_diffused = self.appnp(logits, edge_index)
+        embeddings_diffused.append(logits_diffused)
+        return Prediction(
+            embeddings_diffused,
+            inputs = data.x,
+            logits = logits_diffused,
+            logits_undiffused = logits,
+            soft = F.softmax(logits_diffused, dim=1),
+            soft_undiffused = F.softmax(x, dim=1),
+        )
 
     def get_output_weights(self):
         """ Gets the weights of the output layer. """

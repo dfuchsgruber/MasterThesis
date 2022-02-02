@@ -2,17 +2,41 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+from collections import defaultdict
+import logging
+
+from util import all_equal
+
+from typing import List, Optional, Dict
+from torch import Tensor
+
+# --- By convention, use those names for key-attributes
+LOGITS = 'logits'
+INPUTS = 'input'
+SOFT = 'soft'
+
+# --- Normalizations for scores
 
 class Prediction:
-    """ Summarizes the predictions of a model ensemble. Is also used for single models. """
+    """ Summarizes the predictions of a model ensemble. Is also used for single models. 
+    
+    Parameters:
+    -----------
+    features : List[Tensor]
+        Features from all layers.
+        By convention, features[0] should be input features.
+        By convention, features[-2] should be encodings.
+        By convention, features[-1] should be logit-like objects.
+        If these conventions are not met, pass attributes SOFT, LOGITS or INPUT
+    """
 
     @staticmethod
-    def collate(predictions):
+    def collate(predictions: List[Prediction]) -> Prediction:
         """ Collates several predictions into one. 
         
         Parameters:
         -----------
-        predictions : list
+        predictions : List[Prediction]
             The predictions to collate
 
         Returns:
@@ -21,28 +45,54 @@ class Prediction:
             The collated prediction.
         """
         agg = Prediction(None)
-        for pred in predictions:
-            for features in pred.features:
-                agg.add(features)
+
+        if not all_equal([len(p.features) for p in predictions]):
+            raise RuntimeError(f'Trying to aggregate predictions with differing feature sizes.')
+        if not all_equal([set(p.attributes.keys()) for p in predictions]):
+            raise RuntimeError(f'Trying to aggregate predictions with differing attributes.')
+
+        for p in predictions:
+            agg.features += p.features
+            for k, v in p.attributes.items():
+                agg.attributes[k] += v
         return agg
 
-    def __init__(self, features):
+    def __init__(self, features: Optional[List[Tensor]]=None, **kwargs):
+        self.clear()
+        if features:
+            self.features.append(features)
+        self.attributes = defaultdict(list)
+        for k, v in kwargs.items():
+            self.attributes[k].append([v])
+        
+    def clear(self):
+        """ Clears the predictions. """
         self.features = []
-        if features is not None:
-            self.add(features)
+        self.attributes = defaultdict(list)
 
-    def add(self, features):
-        """ Adds one prediction to the ensemble prediction.
+    def get_inputs(self, average: bool = True) -> Tensor:
+        """ Gets inputs stored in the prediction. 
         
         Parameters:
         -----------
-        features : list
-            Features per layer to add to the prediction.
-         """
-        self.features.append(features)
+        average : bool, optional, default: False
+            If set, all different inputs are averaged.
 
-    def __add__(self, other):
-        p = Prediction(self.features + other.features)
+        Returns:
+        --------
+        features : Tensor, shape [N, D, (num_members)]
+            Inputs.
+        """
+        if INPUTS in self.attributes:
+            inputs = self.attributes[INPUTS]
+        else:
+            inputs = [features[0] for features in self.features]
+        if average and len(inputs) > 1:
+            logging.warn(f'Accessing inputs of a prediction with {len(inputs)} members and averaging. This is probably not wanted...')
+        inputs = torch.stack(inputs, dim=-1)
+        if average:
+            inputs = inputs.mean(-1)
+        return inputs
 
 
     def get_features(self, layer, average=True):
@@ -65,7 +115,45 @@ class Prediction:
         if average:
             features = features.mean(-1)
         return features
+    
+    def get_logits(self, average: bool = True) -> Tensor:
+        """ Gets logits stored in the prediction. 
+        
+        Parameters:
+        -----------
+        average : bool, optional, default: False
+            If set, all different logits are averaged.
 
-    def get_logits(self, average=True):
-        return self.get_features(-1, average=average)
+        Returns:
+        --------
+        logits : Tensor, shape [N, D, (num_members)]
+            Logits.
+        """
+        if LOGITS in self.attributes:
+            logits = self.attributes[LOGITS]
+        else:
+            logits = [features[-1] for features in self.features]
+        logits = torch.stack(logits, dim=-1)
+        if average:
+            logits = logits.mean(-1)
+        return logits
 
+    def get(self, attribute, average: bool = True) -> Tensor:
+        """ Gets an attribute stored in the prediction. 
+        
+        Parameters:
+        -----------
+        average : bool, optional, default: False
+            If set, all different attributes are averaged.
+
+        Returns:
+        --------
+        attr : Tensor, shape [N, D, (num_members)]
+            Requested attribute.
+        """
+        if attribute not in self.attributes:
+            raise ValueError(f'Prediction has no attribute {attribute}')
+        attr = torch.stack(self.attributes[attribute], dim=-1)
+        if average:
+            attr = attr.mean(-1)
+        return attr

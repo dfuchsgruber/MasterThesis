@@ -53,7 +53,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
             logging.info(f'Self-training in model changed to {value}')
             self._self_training = value
 
-    def forward(self, batch, *args, remove_edges=False, **kwargs):
+    def forward(self, batch, *args, remove_edges=False, **kwargs) -> Prediction:
 
         edge_index, edge_weight = batch.edge_index, batch.edge_weight
         
@@ -68,7 +68,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         batch.edge_index = edge_index
         batch.edge_weight = edge_weight
 
-        return Prediction(self.backbone(batch, *args, **kwargs))
+        return self.backbone(batch, *args, **kwargs)
 
     def configure_optimizers(self): 
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)

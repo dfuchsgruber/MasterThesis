@@ -5,7 +5,7 @@ import numpy as np
 import networkx as nx
 from collections import Mapping
 import scipy.sparse as sp
-from typing import Dict, Any
+from typing import Dict, Any, Iterable
 
 @contextmanager
 def suppress_stdout(supress=True):
@@ -319,3 +319,8 @@ def aggregate_matching(flags: Dict[Any, bool]) -> Any:
         raise RuntimeError(f'Not matching values in {flags}')
     else:
         return list(flags.values[0])
+
+def all_equal(x: Iterable) -> bool:
+    """ Checks if all elements in an iterable are the same"""
+    x = list(x)
+    return all(i == x[0] for i in x)

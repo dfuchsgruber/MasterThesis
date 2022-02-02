@@ -70,6 +70,14 @@ class ModelConfiguration(BaseConfiguration):
     # GIN configuration
     normalize: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
 
+    # Graph-Post-Net configuration
+    latent_size: int = attr.ib(default=16, converter=int)
+    use_batched_flow: bool = attr.ib(default=True, converter=bool)
+    num_radial: int = attr.ib(default=10, converter=int)
+    num_maf: int = attr.ib(default=0, converter=int)
+    num_gaussians: int = attr.ib(default=0, converter=int)
+    alpha_evidence_scale: str = attr.ib(default='latent-new', converter='str')
+
 @attr.s
 class DataConfiguration(BaseConfiguration):
     """ Configuration for dataset splitting and building. """
