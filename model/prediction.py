@@ -7,13 +7,8 @@ import logging
 
 from util import all_equal
 
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from torch import Tensor
-
-# --- By convention, use those names for key-attributes
-LOGITS = 'logits'
-INPUTS = 'input'
-SOFT = 'soft'
 
 # --- Normalizations for scores
 
@@ -31,7 +26,7 @@ class Prediction:
     """
 
     @staticmethod
-    def collate(predictions: List[Prediction]) -> Prediction:
+    def collate(predictions: List[Any]) -> Any:
         """ Collates several predictions into one. 
         
         Parameters:
@@ -63,7 +58,7 @@ class Prediction:
             self.features.append(features)
         self.attributes = defaultdict(list)
         for k, v in kwargs.items():
-            self.attributes[k].append([v])
+            self.attributes[k].append(v)
         
     def clear(self):
         """ Clears the predictions. """
@@ -83,8 +78,8 @@ class Prediction:
         features : Tensor, shape [N, D, (num_members)]
             Inputs.
         """
-        if INPUTS in self.attributes:
-            inputs = self.attributes[INPUTS]
+        if 'inputs' in self.attributes:
+            inputs = self.attributes['inputs']
         else:
             inputs = [features[0] for features in self.features]
         if average and len(inputs) > 1:
@@ -129,10 +124,10 @@ class Prediction:
         logits : Tensor, shape [N, D, (num_members)]
             Logits.
         """
-        if LOGITS in self.attributes:
-            logits = self.attributes[LOGITS]
+        if 'logits' in self.attributes:
+            logits = self.attributes['logits']
         else:
-            logits = [features[-1] for features in self.features]
+            logits = [f[-1] for f in self.features]
         logits = torch.stack(logits, dim=-1)
         if average:
             logits = logits.mean(-1)

@@ -137,12 +137,14 @@ def plot_2d_histogram(x, y, bins=20, x_label='x', y_label='y', log_scale_x=False
     return fig, ax
 
 
-def get_greyscale_colormap(min_: float = 0.3, max_: float = 1.0) -> mcolors.ListedColormap:
+def get_greyscale_colormap(min_: float = 0.1, max_: float = 1.0, invert=True) -> mcolors.ListedColormap:
     """ Gets a greyscale color map. """
     N = 256
     vals = np.ones((N, 3))
-    vals[:, 0] = np.linspace(0.1, 1, N)
-    vals[:, 1] = np.linspace(0.1, 1, N)
-    vals[:, 2] = np.linspace(0.1, 1, N)
+    vals[:, 0] = np.linspace(min_, max_, N)
+    vals[:, 1] = np.linspace(min_, max_, N)
+    vals[:, 2] = np.linspace(min_, max_, N)
+    if invert:
+        vals = 1-vals
     return mcolors.ListedColormap(1-vals)
 

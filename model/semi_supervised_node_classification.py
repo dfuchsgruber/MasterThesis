@@ -53,7 +53,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
             logging.info(f'Self-training in model changed to {value}')
             self._self_training = value
 
-    def forward(self, batch, *args, remove_edges=False, **kwargs) -> Prediction:
+    def forward(self, batch, *args, remove_edges: bool=False, sample: bool=None, **kwargs) -> Prediction:
 
         edge_index, edge_weight = batch.edge_index, batch.edge_weight
         
@@ -68,7 +68,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         batch.edge_index = edge_index
         batch.edge_weight = edge_weight
 
-        return self.backbone(batch, *args, **kwargs)
+        return self.backbone(batch, *args, sample=sample, **kwargs)
 
     def configure_optimizers(self): 
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
@@ -100,6 +100,11 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
             metrics['reconstruction_auroc'] = roc_auc_score(reco_target.detach().cpu().numpy().astype(bool), reco_proxy.detach().cpu().numpy())
             loss += reco_loss
 
+        # Additional model losses (such as Bayesian KL divergence)
+        for name, value in self.backbone.losses(output).items():
+            metrics[name] = value
+            loss += value
+            
         metrics['loss'] = loss
         return metrics
 
@@ -129,22 +134,32 @@ class Ensemble(pl.LightningModule):
         List of torch modules that output predictions.
     num_samples : int
         How many samples to draw from each member.
-    sample_during_training : bool
-        If multiple samples will be drawn and averaged even during training (also averages gradients). Defaults to False.
+    sample_at_eval : bool
+        If samples should be drawn by default at evaluation time. Setting it to `True` will enable dropout etc.
+        Can be overriden by passing `sample = None` to forward pass.
     """
 
-    def __init__(self, members, num_samples=1, sample_during_training=False):
+    def __init__(self, members, num_samples=1, sample_at_eval=False):
         super().__init__()
         self.num_samples = num_samples
         self.members = nn.ModuleList(list(members))
-        self.sample_during_training = sample_during_training
+        self.sample_at_eval = sample_at_eval
 
-    def forward(self, *args, **kwargs):
-        if self.training and not self.sample_during_training:
-            num_samples = 1 # Don't sample during training
-        else:
+    def forward(self, *args, sample: bool=None, **kwargs):
+        if self.training:
+            raise RuntimeError(f'Ensemble is in training mode. Members should be trained separately and switched to eval mode.')
+        if sample is None:
+            sample = self.sample_at_eval # Fallback
+        if sample:
             num_samples = self.num_samples
-        return Prediction.collate([Prediction.collate(member(*args, **kwargs) for member in self.members) for _ in range(num_samples)])
+        else:
+            num_samples = 1
+
+        all_predictions = []
+        for member in self.members:
+            for _ in range(num_samples):
+                all_predictions.append(member(*args, sample=sample, **kwargs))
+        return Prediction.collate(all_predictions)
 
     def configure_optimizers(self):  
         raise RuntimeError(f'Ensemble members should be trained by themselves.')

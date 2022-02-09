@@ -1,4 +1,5 @@
 from typing import Union
+from model.bayesian import sample_normal
 from sacred import Experiment
 import numpy as np
 import torch
@@ -88,31 +89,29 @@ class ExperimentWrapper:
 
         model_registry = ModelRegistry(collection_name=config.run.model_registry_collection_name)
 
+        # Data Loading
         data_split_seed = seed.data_split_seeds()[config.run.split_idx]
+        config.registry.split_seed = data_split_seed
         model_seed_generator = iter(seed.SeedIterator(seed.model_seeds()[config.run.initialization_idx]))
         data_dict, fixed_vertices = load_data_from_configuration(config.data, data_split_seed)
+        data_loaders = {
+            name : DataLoader(data, batch_size=1, shuffle=False) for name, data in data_dict.items()
+        }
 
+        # Setup logging
         run_name = format_name(config.run.name, config.run.args, attr.asdict(config))
-        # One global logger for all splits and initializations
         logger = WandbLogger(save_dir=config.logging.logging_dir, project=str(self.collection_name), name=f'{run_name}')
         logger.log_hyperparams(attr.asdict(config))
-
         run_artifact_dir = artifact_dir = osp.join(config.logging.artifact_dir, str(self.collection_name), f'{run_name}')
         all_logs = [] # Logs from each run
         all_artifacts = [] # Paths to all artifacts generated during evaluation
 
-        # Build evaluation pipeline
+        # Setup evaluation pipeline
         pipeline = Pipeline(config.evaluation.pipeline, config.evaluation, gpus=config.training.gpus, 
             ignore_exceptions=config.evaluation.ignore_exceptions)
 
-        # Iterating over all dataset splits
+        # Training
         result = defaultdict(list)
-
-        data_loaders = {
-            name : DataLoader(data, batch_size=1, shuffle=False) for name, data in data_dict.items()
-        }
-        config.registry.split_seed = data_split_seed
-
         ensembles = []
         for ensemble_idx in range(config.ensemble.num_members):
             model_seed = next(model_seed_generator)
@@ -179,7 +178,7 @@ class ExperimentWrapper:
 
         # An ensemble of 1 model behaves just like one model of this type: 
         # Therefore we always deal with an "ensemble", even if there is only one member
-        model = Ensemble(ensembles, config.ensemble.num_samples)
+        model = Ensemble(ensembles, config.ensemble.num_samples, sample_at_eval=config.evaluation.sample)
         model.clear_and_disable_cache()
         val_metrics = {
             name : trainer.validate(model, data_loaders[name], ckpt_path=best_model_path)
@@ -198,7 +197,7 @@ class ExperimentWrapper:
 
         pipeline_metrics = {} # Metrics logged by the pipeline
         pipeline(
-            model=model,
+            model=model.eval(),
             data_loaders = data_loaders,
             logger=logger,
             config=config,

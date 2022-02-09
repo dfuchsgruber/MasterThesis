@@ -68,20 +68,87 @@ def get_dimensionality_reduction_to_plot(features_to_fit: np.ndarray, featues_to
     return embeddings, is_train, grids, grid_inverses
 
 
-def plot_density(embeddings_fit: np.ndarray, embeddings_eval: np.ndarray, grid: np.ndarray, density: np.ndarray, labels : np.ndarray, 
-                    label_names: Dict[int, str], levels: int = 20, alpha: float = 0.5, cmap='Reds', vmin=None, vmax=None, colors={}, cols=2):
+def plot_density(embeddings_fit: np.ndarray, embeddings_eval: np.ndarray, grid: np.ndarray, 
+                 density: np.ndarray, labels : np.ndarray, 
+                    label_names: Dict[int, str], levels: int = 20, 
+                 alpha: float = 0.5, cmap='Reds', vmin=None, vmax=None, colors={}, cols=2,
+                label_order = None, legend_labels = None, color_fit=None, legend_x=1.08):
+
+    """ Makes a 2d density plot that contains points that were used to fitting and one subplot for each label that is to be evaluated.
+    
+    Parameters:
+    -----------
+    embeddings_fit : ndarray, shape [N_fit, 2]
+        Points used for fitting. Will be in every subplot.
+    embeddings_eval : ndarray, shape [N_eval, 2]
+        Points used for evaluation.
+    grid : ndarray, shape [nx, ny, 2]
+        Grid coordinates for the density plot.
+    density : ndarray, shape [nx, ny]
+        Values for the density grid.
+    labels : ndarray, shape [N_eval]
+        Labels for data used in evaluation. Each label gets its own subplot.
+    label_names : Dict[Any, str].
+        Names for each label in `labels`.
+    levels : int, optional, default: 20
+        Number of levels to include int he density contour plot.
+    alpha : float, optional, default: 0.5
+        Alpha value for scatter points.
+    cmap : Union[str, mcolors.Colormap]
+        The colormap to use for the density contour plot.
+    vmin : float, optional
+        Minimal value to plot in the density. If not given, the minimum of `density` is used.
+    vmax : float, optional
+        Maximal value to plot in the density. If not given, the maximum of `density` is used.
+    colors : dict, optional
+        Mapping from label to color. If None is given, default plt colors are used.
+    cols : int, default: 2
+        How many columns to use for subplots.
+    label_order : list, optional
+        Order in which the labels will be plotted. If None, labels `label_names` will be sorted.
+    legend_labels : Union[Dict, List, Tuple]
+        Which labels will be part of the legend. If None, all labels in `label_names` will be used.
+        If a dict is given, the values will be used to annotate the legend.
+    color_fit : Union[str, Iterable], optional
+        The color used for the embedding points used for fitting.
+
+    Returns:
+    --------
+    fig : plt.Figure
+        The figure
+    axs : ndarray
+        The axes of the plot. 
+    """ 
     
     rows = int(np.ceil(len(label_names) / cols))
-
-    fig, axs = plt.subplots(rows, cols, figsize=(5 * rows, 4 * cols), squeeze=False)
+    
+    if vmax is None:
+        vmax = density.max()
+    if vmin is None:
+        vmin = density.min()
+    if label_order is None:
+        label_order = sorted([l for l in label_names.keys() if l in label_names])
+    if legend_labels is None:
+        legend_labels =  dict(label_names)
+    
+    fig, axs = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows), squeeze=False)
     all_embeddings = np.concatenate([embeddings_fit, embeddings_eval], 0)
-    for idx, (label, name) in enumerate(label_names.items()):
+    
+    legend_handles = []
+    label_fit_in_handles = False # The Label "fit" should only be included once in the legend
+    
+    for idx, label in enumerate(label_order):
+        name = label_names[label]
+        if isinstance(legend_labels, dict) and label in legend_labels:
+            legend_label = legend_labels[label]
+        else:
+            legend_label = name
+
         ax = axs[idx // cols, idx % cols]
         c = ax.contourf(grid[:, :, 0], grid[:, :, 1], density, cmap=cmap, levels=np.linspace(vmin, vmax, levels+1), extend='both', vmin=vmin, vmax=vmax)
-        #ax.scatter(samples_emb[:, 0], samples_emb[:, 1], c=density_samples)
-        ax.scatter(embeddings_fit[:, 0], embeddings_fit[:, 1], label='Fit', marker='1', alpha=alpha, c='tab:blue')
+        ax.scatter(embeddings_fit[:, 0], embeddings_fit[:, 1], label='Fit' if not label_fit_in_handles else None, marker='1', alpha=alpha, color=color_fit)
         points_to_plot = embeddings_eval[(labels == label)]
-        ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label='Evaluate', marker='x', alpha=alpha, c='tab:orange')
+        ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label=legend_label, marker='x', alpha=alpha, color=colors.get(label, None))
         ax.tick_params(
             axis='both',          
             which='both',      
@@ -92,21 +159,24 @@ def plot_density(embeddings_fit: np.ndarray, embeddings_eval: np.ndarray, grid: 
         )
         ax.set_title(name)
 
-        # for label, name in label_names.items():
-        #     points_to_plot = embeddings_eval[(labels == label)]
-        #     ax.scatter(points_to_plot[:, 0], points_to_plot[:, 1], label=name, marker='x', alpha=alpha, c=colors.get(label, None))
-        
         emb_mins, emb_maxs = all_embeddings.min(0), all_embeddings.max(0)
         emb_mins, emb_maxs = emb_mins - 0.05 * (emb_maxs - emb_mins), emb_maxs + 0.05 * (emb_maxs - emb_mins)
         
         ax.set_xlim(left = emb_mins[0], right = emb_maxs[0])
         ax.set_ylim(bottom = emb_mins[1], top = emb_maxs[1])
-        # ax.legend()
-        #ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+        
+        if label in legend_labels:
+            legend_handles.append(ax.get_legend_handles_labels())
+            label_fit_in_handles = True
+    
+    lines, labels = [sum(lol, []) for lol in zip(*legend_handles)]
+    fig.legend(lines, labels, loc = 'upper right', bbox_to_anchor = (0,-0.1,legend_x,1),
+            bbox_transform = plt.gcf().transFigure)
+    
 
     fig.colorbar(c, ax=axs.ravel().tolist(),location = 'left')
 
-    return fig, ax
+    return fig, axs
     
 
 # def plot_density(points_to_fit, points_to_eval, density_model, labels, label_names, 

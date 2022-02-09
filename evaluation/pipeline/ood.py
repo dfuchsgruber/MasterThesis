@@ -60,7 +60,7 @@ class OODSeparation(PipelineMember):
         return fraction_id_nbs
 
     def _get_distribution_labels_perturbations(self, mask=True, **kwargs):
-        """ Gets labels for id vs ood where ood data is left out classes.
+        """ Gets labels for id vs ood where ood data is perturbed.
         
         Returns:
         --------
@@ -83,13 +83,16 @@ class OODSeparation(PipelineMember):
                 )
             ]
         )[0]
-        distribution_labels = (torch.cat(is_ood, dim = 0) > 0).long()
+        is_ood = torch.cat(is_ood, dim=0)
+        distribution_labels = torch.zeros(is_ood.size(0))
+        distribution_labels[is_ood > 0] = econstants.OOD_CLASS_NO_ID_CLASS_NBS
+        distribution_labels[~(is_ood > 0)] = econstants.ID_CLASS_NO_OOD_CLASS_NBS
         auroc_mask = torch.ones_like(distribution_labels).bool()
         auroc_labels = torch.zeros_like(distribution_labels).bool()
         auroc_labels[distribution_labels == econstants.ID_CLASS_NO_OOD_CLASS_NBS] = True
         distribution_label_names = {
-            1 : f'Perturbed', 
-            0 : f'Unperturbed', 
+            econstants.ID_CLASS_NO_OOD_CLASS_NBS : f'Unperturbed', 
+            econstants.OOD_CLASS_NO_ID_CLASS_NBS : f'Perturbed', 
         }
         return auroc_labels, auroc_mask, distribution_labels, distribution_label_names
 

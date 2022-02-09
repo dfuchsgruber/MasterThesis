@@ -6,6 +6,7 @@ GAT = 'gat'
 APPNP = 'appnp'
 GIN = 'gin'
 SAGE = 'sage'
+BGCN = 'bgcn'
 
 # --- Reconstruction types ---
 AUTOENCODER = 'autoencoder'

@@ -35,7 +35,7 @@ class EvaluateFeatureSpaceDistance(FeatureDensity):
     def __call__(self, *args, **kwargs):
 
         self._get_features_and_labels_to_fit(**kwargs)
-        features_to_fit, predictions_to_fit, labels_to_fit = self._get_features_and_labels_to_fit(**kwargs)
+        (features_to_fit, predictions_to_fit, labels_to_fit), (features_to_validate, prediction_to_validate, labels_to_validate) = self._get_features_and_labels_to_fit(**kwargs)
         features_to_evaluate, predictions_to_evaluate, labels_to_evaluate = self._get_features_and_labels_to_evaluate(**kwargs)
         auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
 

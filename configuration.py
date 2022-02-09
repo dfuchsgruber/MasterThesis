@@ -1,5 +1,6 @@
 
 from collections.abc import Mapping
+from sqlite3 import converters
 import data.constants as dconstants
 import model.constants as mconstants
 import attr
@@ -8,10 +9,12 @@ from typing import List, Union, Optional, Any
 from functools import wraps
 import os.path as osp
 
-def make_cls_converter(cls):
+def make_cls_converter(cls, optional=False):
     """ Converter function that initializes a class with a dict or keeps the class as is. """
     def _convert(value):
-        if isinstance(value, cls):
+        if optional and value is None:
+            return None
+        elif isinstance(value, cls):
             return value
         elif isinstance(value, Mapping):
             return cls(**value)
@@ -39,18 +42,39 @@ class ReconstructionConfiguration(BaseConfiguration):
     margin_constrastive_loss: float = attr.ib(default=0.0, converter=float)
 
 @attr.s
+class GATConfiguration(BaseConfiguration):
+    """ Configuration for GATs. """
+    num_heads: int = attr.ib(default=8, validator=lambda s, a, v: isinstance(v, int) and v > 0, converter=int)
+
+@attr.s
+class BayesianGCNConfiguration(BaseConfiguration):
+    """ Configuration for BGCNs. """
+    sigma_1: float = attr.ib(default=1.0, validator=attr.validators.gt(0.0), converter=float)
+    sigma_2: float = attr.ib(default=1e-6, validator=attr.validators.gt(0.0), converter=float)
+    pi: float = attr.ib(default=0.75, validator=validators.and_(validators.ge(0), validators.le(1)))
+    q_weight: float = attr.ib(default=1.0, converter=float)
+    prior_weight = float = attr.ib(default=1.0, converter=float)
+
+@attr.s
+class APPNPConfiguration(BaseConfiguration):
+    """ Configuration for APPNPs. """
+    diffusion_iterations: int = attr.ib(default=10, validator=lambda s, a, v: isinstance(v, int) and v > 0, converter=int)
+    teleportation_probability: Optional[float] = attr.ib(default=0.2, validator=attr.validators.instance_of(float), converter=float)
+
+@attr.s
 class ModelConfiguration(BaseConfiguration):
     """ Configuration for model initialization """ 
     hidden_sizes: List[int] = attr.ib(default=[64,], validator=lambda s, a, v: all(isinstance(x, int) for x in v))
     weight_scale: Optional[float] = attr.ib(default=1.0, validator=attr.validators.instance_of(float), converter=float)
     use_spectral_norm: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     model_type: str = attr.ib(default='gcn', validator=validators.in_((
-        mconstants.GCN, mconstants.APPNP, mconstants.GAT, mconstants.GIN, mconstants.SAGE,
+        mconstants.GCN, mconstants.APPNP, mconstants.GAT, mconstants.GIN, mconstants.SAGE, mconstants.BGCN,
         )), converter=lambda s: s.lower())
     use_bias: bool =  attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     activation: bool = attr.ib(default='leaky_relu', validator=validators.in_((mconstants.LEAKY_RELU, mconstants.RELU,)), converter=lambda s: s.lower())
     leaky_relu_slope: bool = attr.ib(default=1e-2, validator=attr.validators.instance_of(float), converter=float)
     residual: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
+    residual_pre_activation: bool = attr.ib(default=True, validator=attr.validators.instance_of(bool), converter=bool)
     freeze_residual_projection: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     dropout: float = attr.ib(default=0.0, validator=validators.and_(validators.ge(0), validators.le(1)), converter=float)
     drop_edge: float = attr.ib(default=0.0, validator=validators.and_(validators.ge(0), validators.le(1)), converter=float)
@@ -60,15 +84,9 @@ class ModelConfiguration(BaseConfiguration):
 
     reconstruction: ReconstructionConfiguration = attr.ib(default={}, converter=make_cls_converter(ReconstructionConfiguration))
 
-    # GAT configuration
-    num_heads: int = attr.ib(default=8, validator=lambda s, a, v: isinstance(v, int) and v > 0, converter=int)
-
-    # APPNP configuration
-    diffusion_iterations: int = attr.ib(default=5, validator=lambda s, a, v: isinstance(v, int) and v > 0, converter=int)
-    teleportation_probability: Optional[float] = attr.ib(default=0.2, validator=attr.validators.instance_of(float), converter=float)
-
-    # GIN configuration
-    normalize: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
+    gat: Optional[GATConfiguration] = attr.ib(default=None, converter=make_cls_converter(GATConfiguration, optional=True))
+    appnp: Optional[APPNPConfiguration] = attr.ib(default=None, converter=make_cls_converter(APPNPConfiguration, optional=True))
+    bgcn: Optional[BayesianGCNConfiguration] = attr.ib(default=None, converter=make_cls_converter(BayesianGCNConfiguration, optional=True))
 
     # Graph-Post-Net configuration
     # latent_size: int = attr.ib(default=16, converter=int)
@@ -150,8 +168,9 @@ class EvaluationConfiguration(BaseConfiguration):
     ignore_exceptions: bool = attr.ib(default=False, converter=bool)
     log_plots: bool = attr.ib(default=False, converter=bool)
     save_artifacts: bool = attr.ib(default=False, converter=bool)
+    sample: bool = attr.ib(default=False, converter=bool)
 
-DEFAULT_REGISTRY_COLLECTION_NAME = 'model_registry'
+DEFAULT_REGISTRY_COLLECTION_NAME = 'model_registry_v3'
 
 @attr.s
 class RunConfiguration(BaseConfiguration):

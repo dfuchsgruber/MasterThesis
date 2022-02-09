@@ -1,3 +1,4 @@
+from typing import Optional
 import numpy as np
 import torch
 import torch.nn as nn
@@ -148,11 +149,11 @@ class FeatureSpaceDensityPerClass(FeatureSpaceDensity):
         tags = []
         return tags
 
-    def get_class_weight(self, class_idx, soft):
+    def get_class_weight(self, class_idx, soft, soft_val):
         """ Fits the weight of a certain class density model. """ 
-        return soft[:, class_idx].sum(0) / soft.size(0)
+        return (soft[:, class_idx].sum(0) + soft_val[:, class_idx].sum(0)) / (soft.size(0) + soft_val.size(0))
 
-    def fit_class(self, class_idx, features, soft):
+    def fit_class(self, class_idx: int, features: torch.Tensor, soft: torch.Tensor, features_val: torch.Tensor, soft_val: torch.Tensor):
         """ Fits the density model for a given class. 
         
         Parameters:
@@ -163,13 +164,17 @@ class FeatureSpaceDensityPerClass(FeatureSpaceDensity):
             The features to fit.
         soft : torch.Tensor, shape [N, num_classes]
             Soft probabilities (scores) for assigning a sample to a class.
+        features_val : torch.Tensor, shape [N, D']
+            The features for validation.
+        soft_val : torch.Tensor, shape [N', num_classes]
+            Soft probabilities (scores) for assigning a validation sample to a class.
         """ 
         raise NotImplemented
     
     def get_density_class(self, class_idx, features):
         raise NotImplemented
 
-    def fit(self, features, soft):
+    def fit(self, features: torch.Tensor, soft: torch.Tensor, features_val: torch.Tensor, soft_val: torch.Tensor):
         """ Fits the density models to a set of features and labels. 
         
         Parameters:
@@ -178,6 +183,10 @@ class FeatureSpaceDensityPerClass(FeatureSpaceDensity):
             Features matrix.
         soft : torch.Tensor, shape [N, num_labels]
             Soft class labels.
+        features_val : torch.Tensor, shape [N, D']
+            The features for validation.
+        soft_val : torch.Tensor, shape [N', num_classes]
+            Soft probabilities (scores) for assigning a validation sample to a class.
         """
         if self._fitted:
             raise RuntimeError(f'Density model was already fitted.')
@@ -187,10 +196,10 @@ class FeatureSpaceDensityPerClass(FeatureSpaceDensity):
             if soft[:, label].sum(0) == 0:
                 # No observations
                 continue
-            self.class_weights[label] = self.get_class_weight(label, soft)
-            self.fit_class(label, features, soft)
+            self.class_weights[label] = self.get_class_weight(label, soft, soft_val)
+            self.fit_class(label, features, soft, features_val, soft_val)
 
-        self.fit_class('all', features, soft)
+        self.fit_class('all', features, soft, features_val, soft_val)
         self._fitted = True
 
     @torch.no_grad()
@@ -248,11 +257,13 @@ class FeatureSpaceDensityGaussianPerClass(FeatureSpaceDensityPerClass):
             self, 
             covariance='diag',
             regularization = False,
+            fit_val = True,
             **kwargs
         ):
         super().__init__(**kwargs)
         self.covariance = covariance
         self.regularization = regularization
+        self.fit_val = fit_val
         self.covs = dict()
         self.means = dict()
 
@@ -261,6 +272,7 @@ class FeatureSpaceDensityGaussianPerClass(FeatureSpaceDensityPerClass):
             self.name,
             f'\tCovariance type : {self.diagonal_covariance}'
             f'\tRegularization: {self.regularization}',
+            f'\tFit validation data: {self.fit_val}',
         ])
 
     @property
@@ -270,7 +282,7 @@ class FeatureSpaceDensityGaussianPerClass(FeatureSpaceDensityPerClass):
         return '-'.join(tags)
 
     @torch.no_grad()
-    def fit_class(self, class_idx, features, soft):
+    def fit_class(self, class_idx: int, features: torch.Tensor, soft: torch.Tensor, features_val: torch.Tensor, soft_val: torch.Tensor):
         """ Fits the density model for a given class. 
         
         Parameters:
@@ -281,7 +293,16 @@ class FeatureSpaceDensityGaussianPerClass(FeatureSpaceDensityPerClass):
             The features to fit.
         soft : torch.Tensor, shape [N, num_classes]
             Soft probabilities (scores) for assigning a sample to a class.
+        features_val : torch.Tensor, shape [N, D']
+            The features for validation.
+        soft_val : torch.Tensor, shape [N', num_classes]
+            Soft probabilities (scores) for assigning a validation sample to a class.
         """ 
+        
+        if self.fit_val: # Gaussian per Class fits the validation data as well
+            features = torch.cat((features, features_val), 0)
+            soft = torch.cat((soft, soft_val), 0)
+
         if class_idx == 'all':
             self.covs[class_idx], self.means[class_idx] = cov_and_mean(features, aweights=soft.sum(1))
         else:
@@ -332,11 +353,13 @@ class FeatureSpaceDensityMixtureOfGaussians(FeatureSpaceDensity):
             seed=1337,
             diagonal_covariance = False,
             initialization = 'random',
+            fit_val = True,
             **kwargs
         ):
         super().__init__(**kwargs)
         self._fitted = False
         self.number_components = number_components
+        self.fit_val = fit_val
         self.seed = seed
         self.diagonal_covariance = diagonal_covariance
         self.initialization = initialization
@@ -348,6 +371,7 @@ class FeatureSpaceDensityMixtureOfGaussians(FeatureSpaceDensity):
             f'\tSeed : {self.seed}',
             f'\tDiagonal Covariance : {self.diagonal_covariance}',
             f'\tInitialization method : {self.initialization}',
+            f'\tFit validation data : {self.fit_val}',
         ])
 
     @property
@@ -361,19 +385,27 @@ class FeatureSpaceDensityMixtureOfGaussians(FeatureSpaceDensity):
         return '-'.join(tags)
 
     @torch.no_grad()
-    def fit(self, features, soft):
+    def fit(self, features: torch.Tensor, soft: torch.Tensor, features_val: torch.Tensor, soft_val: torch.Tensor):
         """ Fits the density models to a set of features and labels. 
         
         Parameters:
         -----------
         features : torch.Tensor, shape [N, D]
             Features matrix.
-        soft : torch.Tensor, shape [N, num_classes]
-            Soft class labels. Only used when initializing the GMM with `predictions`.
+        soft : torch.Tensor, shape [N, num_labels]
+            Soft class labels.
+        features_val : torch.Tensor, shape [N, D']
+            The features for validation.
+        soft_val : torch.Tensor, shape [N', num_classes]
+            Soft probabilities (scores) for assigning a validation sample to a class.
         """
         if self._fitted:
             raise RuntimeError(f'{self.name} density model was already fitted.')
             
+        if self.fit_val:
+            features = torch.cat((features, features_val), 0)
+            soft = torch.cat((soft, soft_val), 0)
+
         if self.number_components <= 0:
             self.number_components = soft.size(1)
 
@@ -437,17 +469,19 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
 
     name = 'NormalizingFlowPerClass'
 
-    def __init__(self, flow_type='maf', num_layers=2, hidden_dim=None, num_hidden=2, iterations='auto', seed=1337, gpu=True, weight_decay=1e-3, verbose=False, *args, **kwargs):
+    def __init__(self, flow_type='maf', num_layers=2, hidden_dim=None, num_hidden=2, max_iterations=1000, seed=1337, 
+                    gpu=True, weight_decay=1e-3, verbose=False, patience=5, *args, **kwargs):
         super().__init__(**kwargs)
         self.seed = seed
         self.flow_type = flow_type
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
         self.num_hidden = num_hidden
-        self.iterations = iterations
+        self.max_iterations = max_iterations
         self.weight_decay = weight_decay
         self.gpu = gpu
         self.verbose = verbose
+        self.patience = patience
 
         self._fitted = False
         self.flows = dict()
@@ -460,8 +494,9 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
             f'\tNumber of layers : {self.num_layers}',
             f'\tHidden dimensionality : {self.hidden_dim}',
             f'\tNumber of hidden units per layer : {self.num_hidden} ',
-            f'\tIterations : {self.iterations}',
+            f'\tMaximal number of itearations : {self.max_iterations}',
             f'\tWeight Decay : {self.weight_decay}',
+            f'\tEarly stopping patience : {self.patience}',
             f'\t On GPU : {self.gpu}',
         ])
 
@@ -471,7 +506,7 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
         tags += self._tags
         return '-'.join(tags)
 
-    def fit_class(self, class_idx, features, soft):
+    def fit_class(self, class_idx: int, features: torch.Tensor, soft: torch.Tensor, features_val: torch.Tensor, soft_val: torch.Tensor):
         """ Fits the density model for a given class. 
         
         Parameters:
@@ -482,9 +517,13 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
             The features to fit.
         soft : torch.Tensor, shape [N, num_classes]
             Soft probabilities (scores) for assigning a sample to a class.
-        """
-        hard = soft.argmax(1)
+        features_val : torch.Tensor, shape [N, D']
+            The features for validation.
+        soft_val : torch.Tensor, shape [N', num_classes]
+            Soft probabilities (scores) for assigning a validation sample to a class.
+        """ 
         if class_idx != 'all':
+            hard = soft.argmax(1)
             self.coefs[class_idx] = (hard == class_idx).sum(0) / hard.size(0)
         
         if self.seed is not None:
@@ -493,10 +532,12 @@ class FeatureSpaceDensityNormalizingFlowPerClass(FeatureSpaceDensityPerClass):
         self.flows[class_idx] = NormalizingFlow(self.flow_type, self.num_layers, features.size(1), seed=self.seed, num_hidden=self.num_hidden, 
                 hidden_dim = self.hidden_dim, gpu = self.gpu, weight_decay = self.weight_decay)
         if class_idx == 'all':
-            weights = torch.ones(features.size(0)).float()
+            weights = soft.sum(1)
+            weights_val = soft_val.sum(1)
         else:
             weights = soft[:, class_idx]
-        self.flows[class_idx].fit(features, weights=weights, verbose=self.verbose, iterations=self.iterations)
+            weights_val = soft_val[:, class_idx]
+        self.flows[class_idx].fit(features, weights=weights, x_val=features_val, weights_val=weights_val, verbose=self.verbose, max_iterations=self.max_iterations)
 
     def get_density_class(self, class_idx, features):
         """ Gets the density for a given class.
@@ -520,14 +561,14 @@ class FeatureSpaceDensityNormalizingFlow(FeatureSpaceDensity):
 
     name = 'NormalizingFlow'
 
-    def __init__(self, flow_type='maf', num_layers=2, hidden_dim=64, num_hidden=2, iterations='auto', seed=1337, gpu=True, verbose=False, weight_decay=1e-3, *args, **kwargs):
+    def __init__(self, flow_type='maf', num_layers=2, hidden_dim=64, num_hidden=2, max_iterations=1000, seed=1337, gpu=True, verbose=False, weight_decay=1e-3, *args, **kwargs):
         super().__init__(**kwargs)
         self.seed = seed
         self.flow_type = flow_type
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
         self.num_hidden = num_hidden
-        self.iterations = iterations
+        self.max_iterations = max_iterations
         self.gpu = gpu
         self.verbose = verbose
         self.weight_decay = weight_decay
@@ -542,7 +583,7 @@ class FeatureSpaceDensityNormalizingFlow(FeatureSpaceDensity):
             f'\tNumber of layers : {self.num_layers}',
             f'\tHidden dimensionality : {self.hidden_dim}',
             f'\tNumber of hidden units per layer : {self.num_hidden} ',
-            f'\tIterations : {self.iterations}',
+            f'\tIterations : {self.max_iterations}',
             f'\tWeight Decay : {self.weight_decay}',
             f'\t On GPU : {self.gpu}',
         ])
@@ -553,12 +594,24 @@ class FeatureSpaceDensityNormalizingFlow(FeatureSpaceDensity):
         return '-'.join(tags)
 
     @torch.no_grad()
-    def fit(self, features, soft):
+    def fit(self, features: torch.Tensor, soft: torch.Tensor, features_val: torch.Tensor, soft_val: torch.Tensor):
+        """ Fits the density models to a set of features and labels. 
+        
+        Parameters:
+        -----------
+        features : torch.Tensor, shape [N, D]
+            Features matrix.
+        soft : torch.Tensor, shape [N, num_labels]
+            Soft class labels.
+        features_val : torch.Tensor, shape [N, D']
+            The features for validation.
+        soft_val : torch.Tensor, shape [N', num_classes]
+            Soft probabilities (scores) for assigning a validation sample to a class.
+        """
         self.flow = NormalizingFlow(self.flow_type, self.num_layers, features.size(1), seed=self.seed, num_hidden=self.num_hidden, 
                 hidden_dim = self.hidden_dim, gpu = self.gpu, weight_decay = self.weight_decay)
-        self.flow.fit(features, weights=soft.sum(1), verbose=self.verbose, iterations=self.iterations)
+        self.flow.fit(features, weights=soft.sum(1), x_val=features_val, weights_val=soft_val.sum(1), verbose=self.verbose, max_iterations=self.max_iterations)
         self._fitted = True
-
 
     def forward(self, features):
         return self.flow(features).cpu()

@@ -21,8 +21,9 @@ class PerturbationTransform(T.BaseTransform):
         noise = torch.zeros((idxs.shape[0], data.x.size(1)))
         if self.noise_type == dconstants.BERNOULLI:
             p = getattr(self, 'p', 0.5)
+            norm = getattr(self, 'norm', 2)
             noise = noise.bernoulli(p)
-            noise /= noise.sum(dim=-1).unsqueeze(-1) + 1e-12
+            noise /= noise.norm(p=norm, dim=-1).unsqueeze(-1) + 1e-12
         elif self.noise_type == dconstants.NORMAL:
             scale = getattr(self, 'scale', 1.0)
             noise = noise.normal_()

@@ -6,6 +6,7 @@ import networkx as nx
 from collections import Mapping
 import scipy.sparse as sp
 from typing import Dict, Any, Iterable
+from torch import Tensor
 
 @contextmanager
 def suppress_stdout(supress=True):

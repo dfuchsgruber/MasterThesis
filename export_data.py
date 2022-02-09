@@ -10,6 +10,9 @@ from configuration import *
 import data.constants as dconstants
 from data.construct import load_data_from_configuration
 from evaluation.pipeline import Pipeline
+import seed
+
+NUM_SPLITS = 5
 
 for ood_type in (dconstants.LEFT_OUT_CLASSES, dconstants.PERTURBATION):
     for setting in (dconstants.TRANSDUCTIVE, dconstants.HYBRID):
@@ -33,7 +36,7 @@ for ood_type in (dconstants.LEFT_OUT_CLASSES, dconstants.PERTURBATION):
                             #language_model = 'allenai/longformer-base-4096',
                             drop_train_vertices_portion = 0.1,
                             ood_sampling_strategy = dconstants.SAMPLE_ALL,
-                            ), run = {'num_dataset_splits' : 5}, 
+                            ),
                             model=ModelConfiguration(hidden_sizes=[64,])
                             )
 
@@ -42,74 +45,82 @@ for ood_type in (dconstants.LEFT_OUT_CLASSES, dconstants.PERTURBATION):
             config.data.base_labels = config.data.train_labels
             config.data.corpus_labels = config.data.train_labels
 
-        data_list, fixed_vertices = load_data_from_configuration(config.data, config.run.num_dataset_splits)
-        config.evaluation.pipeline = []
 
-        if config.data.ood_type == dconstants.PERTURBATION:
+        for split_idx in tqdm(range(NUM_SPLITS), desc='Exporting dataset splits...'):
 
-            # For a perturbation experiment we create datasets for the bernoulli and gaussian perturbation case
+            data_split_seed = seed.data_split_seeds()[split_idx]
+
+            data_dict, fixed_vertices = load_data_from_configuration(config.data, data_split_seed)
+            config.evaluation.pipeline = []
+
+            if config.data.ood_type == dconstants.PERTURBATION:
+
+                ood_datasets = ['ood-val-normal', 'ood-test-normal', 'ood-val-ber', 'ood-test-ber']
+                # For a perturbation experiment we create datasets for the bernoulli and gaussian perturbation case
+                config.evaluation.pipeline += [
+                    {
+                        'type' : 'PerturbData',
+                        'base_data' : 'ood-val',
+                        'dataset_name' : 'ood-val-ber',
+                        'perturbation_type' : 'bernoulli',
+                        'budget' : 0.1,
+                        'parameters' : {
+                            'p' : 0.5,
+                        },
+                        'perturb_in_mask_only' : True,
+                    },
+                    {
+                        'type' : 'PerturbData',
+                        'base_data' : 'ood-test',
+                        'dataset_name' : 'ood-test-ber',
+                        'perturbation_type' : 'bernoulli',
+                        'budget' : 0.1,
+                        'parameters' : {
+                            'p' : 0.5,
+                        },
+                        'perturb_in_mask_only' : True,
+                    },
+                    {
+                        'type' : 'PerturbData',
+                        'base_data' : 'ood-val',
+                        'dataset_name' : 'ood-val-normal',
+                        'perturbation_type' : 'normal',
+                        'budget' : 0.1,
+                        'parameters' : {
+                            'scale' : 1.0,
+                        },
+                        'perturb_in_mask_only' : True,
+                    },
+                    {
+                        'type' : 'PerturbData',
+                        'base_data' : 'ood-test',
+                        'dataset_name' : 'ood-test-normal',
+                        'perturbation_type' : 'normal',
+                        'budget' : 0.1,
+                        'parameters' : {
+                            'scale' : 1.0,
+                        },
+                        'perturb_in_mask_only' : True,
+                    },
+                    ]
+            else:
+                ood_datasets = ['ood-val', 'ood-test']
+
             config.evaluation.pipeline += [
                 {
-                    'type' : 'PerturbData',
-                    'base_data' : 'ood-val',
-                    'dataset_name' : 'ood-val-ber',
-                    'perturbation_type' : 'bernoulli',
-                    'budget' : 0.1,
-                    'parameters' : {
-                        'p' : 0.5,
-                    },
-                    'perturb_in_mask_only' : True,
-                },
-                {
-                    'type' : 'PerturbData',
-                    'base_data' : 'ood-test',
-                    'dataset_name' : 'ood-val-test',
-                    'perturbation_type' : 'bernoulli',
-                    'budget' : 0.1,
-                    'parameters' : {
-                        'p' : 0.5,
-                    },
-                    'perturb_in_mask_only' : True,
-                },
-                {
-                    'type' : 'PerturbData',
-                    'base_data' : 'ood-val',
-                    'dataset_name' : 'ood-val-normal',
-                    'perturbation_type' : 'normal',
-                    'budget' : 0.1,
-                    'parameters' : {
-                        'scale' : 1.0,
-                    },
-                    'perturb_in_mask_only' : True,
-                },
-                {
-                    'type' : 'PerturbData',
-                    'base_data' : 'ood-test',
-                    'dataset_name' : 'ood-test-normal',
-                    'perturbation_type' : 'normal',
-                    'budget' : 0.1,
-                    'parameters' : {
-                        'scale' : 1.0,
-                    },
-                    'perturb_in_mask_only' : True,
-                },
-                ]
+                    'type' : 'ExportData',
+                    'datasets' : 'all',
+                    'ood_datasets' : ood_datasets,
+                    'output_path' : './.exported_datasets/{data.dataset}/{data.setting}-{data.ood_type}/split-{run.split_idx}.pkl',
+                    # These settings will only be used when we are in the LoC setting
+                    # Note that this depends on the model depth, so you might want to change: config.model.hidden_sizes
+                    'separate_distributions_by' : 'ood-and-neighbours',
+                    'separate_distributions_tolerance' : 0.1,
+                }
+            ]
 
-        config.evaluation.pipeline += [
-            {
-                'type' : 'ExportData',
-                'datasets' : 'all',
-                'output_path' : './.exported_datasets/{data.dataset}/{data.setting}-{data.ood_type}/split-{registry.split_idx}.pkl',
-                # These settings will only be used when we are in the LoC setting
-                # Note that this depends on the model depth, so you might want to change: config.model.hidden_sizes
-                'separate_distributions_by' : 'ood-and-neighbours',
-                'separate_distributions_tolerance' : 0.1,
-            }
-        ]
-
-        for split_idx, data_dict in enumerate(tqdm(data_list, desc='Exporting dataset splits...')):
             loaders = {name : DataLoader(dataset, batch_size=1, shuffle=False) for name, dataset in data_dict.items()}
-            config.registry.split_idx = split_idx
+            config.run.split_idx = split_idx
             pipeline = Pipeline(config.evaluation.pipeline, config.evaluation, gpus=config.training.gpus, 
                             ignore_exceptions=config.evaluation.ignore_exceptions)
             pipeline(data_loaders=loaders, model=None, config=config)
