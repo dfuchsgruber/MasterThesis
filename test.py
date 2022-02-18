@@ -26,8 +26,8 @@ if __name__ == '__main__':
                         left_out_class_labels = ['Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance'],
                         corpus_labels = ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning'],
                         preprocessing='bag_of_words',
-                        ood_type = dconstants.LEFT_OUT_CLASSES,
-                        # ood_type = dconstants.PERTURBATION,
+                        # ood_type = dconstants.LEFT_OUT_CLASSES,
+                        ood_type = dconstants.PERTURBATION,
                         setting = dconstants.HYBRID,
                         # setting = dconstants.TRANSDUCTIVE,
                         #preprocessing='word_embedding',
@@ -38,6 +38,16 @@ if __name__ == '__main__':
                         ood_sampling_strategy = dconstants.SAMPLE_ALL,
                         )
 
+    # data_cfg = configuration.DataConfiguration(
+    #                     dataset='ogbn-arxiv',
+    #                     split_type='predefined',
+    #                     type='npz',
+    #                     ood_type = dconstants.PERTURBATION,
+    #                     setting = dconstants.HYBRID,
+    #                     preprocessing='none',
+    #                     drop_train_vertices_portion=0.1,
+    # )
+
     if data_cfg.ood_type == dconstants.PERTURBATION:
         data_cfg.left_out_class_labels = []
         data_cfg.base_labels = data_cfg.train_labels
@@ -46,7 +56,7 @@ if __name__ == '__main__':
     spectral_norm_cfg = {
         'use_spectral_norm' : True,
         'residual' : True,
-        'weight_scale' : 3.0,
+        'weight_scale' : 10.0,
     }
 
     reconstruction_cfg = {
@@ -66,7 +76,7 @@ if __name__ == '__main__':
         #model_type = 'appnp',
         # dropout = 0.5,
         # drop_edge = 0.2,
-        hidden_sizes=[64], 
+        hidden_sizes=[64,], 
         use_bias=True, 
         activation='leaky_relu', 
         leaky_relu_slope=0.01,
@@ -87,6 +97,7 @@ if __name__ == '__main__':
         split_idx = split_idx,
         initialization_idx = init_idx,
         use_pretrained_model = True,
+        use_default_configuration = True,
     )
 
     self_training = {
@@ -152,26 +163,53 @@ if __name__ == '__main__':
     ood_pipeline = []
     for ood_name, ood_dataset in ood_datasets.items():
         ood_pipeline += [
+            {
+                'type' : 'FitFeatureDensityGrid',
+                'fit_to' : ['train'],
+                'fit_to_ground_truth_labels' : ['train'],
+                'fit_to_mask_only' : True,
+                'fit_to_best_prediction' : False,
+                'fit_to_min_confidence' : 0.99,
+                'evaluate_on' : [ood_dataset],
+                'diffuse_features' : False,
+                'diffusion_iterations' : 16,
+                'teleportation_probability' : 0.2,
+                'density_types' : {
+                    'GaussianPerClass' : {
+                        'evaluation_kwargs_grid' : [{'mode' : ['weighted'], 'relative' : [False,]}],
+                        'covariance' : ['full', 'diag', 'eye', 'iso'],
+                    },
+                    # 'GaussianMixture' : {
+                    #     'diagonal_covariance' : [True],
+                    #     'number_components' : [-1],
+                    # }
+                },
+                'dimensionality_reductions' : {
+                    'none' : {
+                    }
+                },
+                'log_plots' : True,
+                'separate_distributions_by' : ood_separation,
+                'separate_distributions_tolerance' : 0.1,
+                'name' : ood_name,
+            },
             # {
             #     'type' : 'FitFeatureDensityGrid',
             #     'fit_to' : ['train'],
-            #     'fit_to_ground_truth_labels' : ['train'],
+            #     'fit_to_ground_truth_labels' : ['train', 'val'],
             #     'fit_to_mask_only' : True,
             #     'fit_to_best_prediction' : False,
-            #     'fit_to_min_confidence' : 0.99,
+            #     'fit_to_min_confidence' : 0.95,
             #     'evaluate_on' : [ood_dataset],
             #     'diffuse_features' : False,
             #     'diffusion_iterations' : 16,
             #     'teleportation_probability' : 0.2,
             #     'density_types' : {
-            #         'GaussianPerClass' : {
-            #             'evaluation_kwargs_grid' : [{'mode' : ['max', 'weighted'], 'relative' : [False, True]}],
-            #             'covariance' : ['full', 'diag', 'eye', 'iso'],
+            #         'NormalizingFlowPerClass' : {
+            #             'evaluation_kwargs_grid' : [{'mode' : ['weighted'], 'relative' : [False,]}],
+            #             'flow_type' : ['radial'],
+            #             'num_layers' : [5, 10,]
             #         },
-            #         'GaussianMixture' : {
-            #             'diagonal_covariance' : [True],
-            #             'number_components' : [-1],
-            #         }
             #     },
             #     'dimensionality_reductions' : {
             #         'none' : {
@@ -182,60 +220,33 @@ if __name__ == '__main__':
             #     'separate_distributions_tolerance' : 0.1,
             #     'name' : ood_name,
             # },
-            {
-                'type' : 'FitFeatureDensityGrid',
-                'fit_to' : ['train'],
-                'fit_to_ground_truth_labels' : ['train', 'val'],
-                'fit_to_mask_only' : True,
-                'fit_to_best_prediction' : False,
-                'fit_to_min_confidence' : 0.95,
-                'evaluate_on' : [ood_dataset],
-                'diffuse_features' : False,
-                'diffusion_iterations' : 16,
-                'teleportation_probability' : 0.2,
-                'density_types' : {
-                    'NormalizingFlowPerClass' : {
-                        'evaluation_kwargs_grid' : [{'mode' : ['weighted'], 'relative' : [False,]}],
-                        'flow_type' : ['radial'],
-                        'num_layers' : [5, 10,]
-                    },
-                },
-                'dimensionality_reductions' : {
-                    'none' : {
-                    }
-                },
-                'log_plots' : True,
-                'separate_distributions_by' : ood_separation,
-                'separate_distributions_tolerance' : 0.1,
-                'name' : ood_name,
-            },
-            {
-                'type' : 'FitFeatureDensityGrid',
-                'fit_to' : ['train'],
-                'fit_to_ground_truth_labels' : ['train', 'val'],
-                'fit_to_mask_only' : True,
-                'fit_to_best_prediction' : False,
-                'fit_to_min_confidence' : 0.95,
-                'evaluate_on' : [ood_dataset],
-                'diffuse_features' : False,
-                'diffusion_iterations' : 16,
-                'teleportation_probability' : 0.2,
-                'density_types' : {
-                    'NormalizingFlowPerClass' : {
-                        'evaluation_kwargs_grid' : [{'mode' : ['weighted'], 'relative' : [False,]}],
-                        'flow_type' : ['maf'],
-                        'num_layers' : [2, 5, 10, 15]
-                    },
-                },
-                'dimensionality_reductions' : {
-                    'none' : {
-                    }
-                },
-                'log_plots' : True,
-                'separate_distributions_by' : ood_separation,
-                'separate_distributions_tolerance' : 0.1,
-                'name' : ood_name,
-            },
+            # {
+            #     'type' : 'FitFeatureDensityGrid',
+            #     'fit_to' : ['train'],
+            #     'fit_to_ground_truth_labels' : ['train', 'val'],
+            #     'fit_to_mask_only' : True,
+            #     'fit_to_best_prediction' : False,
+            #     'fit_to_min_confidence' : 0.95,
+            #     'evaluate_on' : [ood_dataset],
+            #     'diffuse_features' : False,
+            #     'diffusion_iterations' : 16,
+            #     'teleportation_probability' : 0.2,
+            #     'density_types' : {
+            #         'NormalizingFlowPerClass' : {
+            #             'evaluation_kwargs_grid' : [{'mode' : ['weighted'], 'relative' : [False,]}],
+            #             'flow_type' : ['maf'],
+            #             'num_layers' : [2, 5, 10, 15]
+            #         },
+            #     },
+            #     'dimensionality_reductions' : {
+            #         'none' : {
+            #         }
+            #     },
+            #     'log_plots' : True,
+            #     'separate_distributions_by' : ood_separation,
+            #     'separate_distributions_tolerance' : 0.1,
+            #     'name' : ood_name,
+            # },
             {
                 'type' : 'EvaluateFeatureSpaceDistance',
                 'fit_to' : ['train'],
@@ -258,17 +269,17 @@ if __name__ == '__main__':
             #     'layer' : 0,
             #     'name' : 'input-' + ood_name
             # },
-            # {
-            #     'type' : 'EvaluateStructure',
-            #     'fit_to' : ['train'],
-            #     'evaluate_on' : [ood_dataset],
-            #     'log_plots' : True,
-            #     'separate_distributions_by' : ood_separation,
-            #     'separate_distributions_tolerance' : 0.1,
-            #     'diffusion_iterations' : 16,
-            #     'teleportation_probability' : 0.2,
-            #     'name' : ood_name,
-            # },
+            {
+                'type' : 'EvaluateStructure',
+                'fit_to' : ['train'],
+                'evaluate_on' : [ood_dataset],
+                'log_plots' : True,
+                'separate_distributions_by' : ood_separation,
+                'separate_distributions_tolerance' : 0.1,
+                'diffusion_iterations' : 16,
+                'teleportation_probability' : 0.2,
+                'name' : ood_name,
+            },
             # {
             #     'type' : 'EvaluateAccuracy',
             #     'evaluate_on' : [ood_dataset],

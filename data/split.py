@@ -7,7 +7,8 @@ import data.constants as dconstants
 import data.util as dutils
 from copy import deepcopy
 import configuration
-from typing import Tuple, Dict
+from typing import Optional, Set, Tuple, Dict
+import logging
 
 from seed import DATA_SPLIT_FIXED_TEST_SEED
 
@@ -57,44 +58,41 @@ def _graph_drop(x, edge_index, y, vertex_to_idx, mask, mask_drop):
     return x, edge_index, y, vertex_to_idx, mask
 
 
-def uniform_split_with_fixed_test_portion(data: tg.data.Data, split_seed: int, config: configuration.DataConfiguration) -> Tuple[Dict[str, SingleGraphDataset], set]:
-    """ Splits the data in a uniform manner, i.e. it samples a fixed amount of vertices for traininig and validation. Remaining vertices are allocated to test.
+def _make_base_data(data: tg.data.Data, config: configuration.DataConfiguration) -> Tuple[tg.data.Data, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, int], Dict[str, int], Set[int], Set[int]]:
+    """ Makes the base data.
     
     Parameters:
-    -----------
-    data : torch_geometric.data.Data
-        The graph to split
-    num_splits : int
-        How many splits to generate
-    portion_test_fixed : float
-        A fraction of vertices that is fixed and will never be allocated to non-test datasets
-    train_labels : 'all' or set
-        The labels to train on
-    setting : str
-        The setting. Either transductive or hybrid.
-    left_out_class_labels : 'all' or set
-        In the LoC experiment, the labels of classes that are left out from training and treated as ood.
-    base_labels : 'all' or set
-        Before splitting, a connected graph will be cut from `data` selecting only those classes.
-    drop_train : float
-        A fraction of id training vertices that will be dropped from training, validation and testing graphs and be included in the ood graphs.
-    perturbation_budget : float
-        In the perturbation experiment, how many vertices will be marked for perturbations.
-    ood_type : str
-        Which experiment to conduct: Either left-out-classes or perturbations.
-    ood_sampling_strategy : str
-        If the LoC split, how to sample vertices for the `dconstants.OOD[0]` dataset.
-    max_num_attempts_per_split : int
-        How many times a different seed can be redrawn for a given split.
+    data : Data
+        Base dataset instance.
+    config : DataConfiguration
+        configuration
 
     Returns:
     --------
-    data_list : list
-        Each element is a dict representing an individual split.
-    fixed_vertices : set
-        The vertex ids (as in `data.vertex_to_idx`'s keys) of the common portion that will only be allocated to testing data. 
-    """
+    data : tg.data.Data
+        Transformed data.
+    mask : ndarray, shape [N_original]
+        Which vertices of `data` are included.
+    mask_fixed : ndarray, shape [N]
+        Fixed test vertices.
+    mask_non_fixed : ndarray, shape [N]
+        Inverse of test vertices.
+    x_base : ndarray, shape [N]
+        Features matrix.
+    edge_index_base : ndarray, shape [2, E]
+        Edge indices.
+    y_base : ndarray, shape [N]
+        Labels.
+    vertex_to_idx_base : dict
+        Mapping from vertex name to its index.
+    label_to_idx_base : dict
+        Mapping from class name to its index.
+    train_labels : set
+        The indices of all labels used for training.
+    left_out_class_labels : set
+        The indices of all labels used for leave-out-classes.
     
+    """
     # Reduce the data before-hand: Note that this shifts labels, so it recommended to refer to them by string names
     x, edge_index, y, vertex_to_idx, label_to_idx, mask = dutils.graph_select_labels(data.x.numpy(), 
         data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, set(dutils.labels_to_idx(config.base_labels, data)), 
@@ -102,8 +100,15 @@ def uniform_split_with_fixed_test_portion(data: tg.data.Data, split_seed: int, c
     data = SingleGraphDataset.build(x, edge_index, y, vertex_to_idx, label_to_idx, np.ones(y.shape[0]).astype(bool))[0]
     mask_fixed, mask_non_fixed = dutils.stratified_split(data.y.numpy(), np.array([DATA_SPLIT_FIXED_TEST_SEED]), [config.test_portion_fixed, 1 - config.test_portion_fixed])[:, 0, :]
 
+    train_labels = set(dutils.labels_to_idx(config.train_labels, data))
+    left_out_class_labels = set(dutils.labels_to_idx(config.left_out_class_labels, data))
+    if config.ood_type != dconstants.LEFT_OUT_CLASSES:
+        left_out_class_labels = set()
+    else:
+        train_labels -= left_out_class_labels
+
     # Permute the labels of the base data such that the train labels are [0, ..., num_labels - 1]
-    train_label_compression = {label : idx for idx, label in enumerate(set(dutils.labels_to_idx(config.train_labels, data)))}
+    train_label_compression = {label : idx for idx, label in enumerate(train_labels)}
     for name, label in data.label_to_idx.items():
         if label not in train_label_compression:
             train_label_compression[label] = len(train_label_compression)
@@ -117,16 +122,174 @@ def uniform_split_with_fixed_test_portion(data: tg.data.Data, split_seed: int, c
     base_labels = set(dutils.labels_to_idx(config.base_labels, data))
     train_labels = set(dutils.labels_to_idx(config.train_labels, data))
     left_out_class_labels = set(dutils.labels_to_idx(config.left_out_class_labels, data))
-    assert base_labels == (train_labels | left_out_class_labels), f'Base labels is not the union of train labels and left out class labels'
+    if config.ood_type != dconstants.LEFT_OUT_CLASSES:
+        left_out_class_labels = set()
+    else:
+        train_labels -= left_out_class_labels
+    if base_labels != (train_labels | left_out_class_labels):
+        logging.warn(f'Base labels is not the union of train labels and left out class labels')
     assert not train_labels.intersection(left_out_class_labels), f'Train labels and left out class labels intersect'
     if config.ood_type == dconstants.LEFT_OUT_CLASSES:
         assert len(left_out_class_labels) > 0, f'For a LoC experiment, left out classes should be specified'
-    elif config.ood_type == dconstants.PERTURBATION:
-        assert not left_out_class_labels, f'For a Perturbations experiment, no left out classes should be specified'
 
     x_base, edge_index_base, y_base, vertex_to_idx_base, label_to_idx_base, _ = dutils.graph_select_labels(data.x.numpy(), 
         data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, base_labels, connected=True, _compress_labels=False)
 
+    return data, mask, mask_fixed, mask_non_fixed, x_base, edge_index_base, y_base, vertex_to_idx_base, label_to_idx_base, base_labels, train_labels, left_out_class_labels
+
+def predefined_split(data: tg.data.Data, split_seed: int, config: configuration.DataConfiguration) -> Tuple[Dict[str, SingleGraphDataset], Set[str]]:
+    """ Splits the data according to a pre-defined train, test, val split.
+    Assumes that `data` has attributes `_mask_train`, `_mask_val` and `_mask_test`.
+    
+    Parameters:
+    -----------
+    data : torch_geometric.data.Data
+        The graph to split
+    split_seed : int
+        The seed for this given split.
+    config : DataConfiguration
+        The dataset configuration.
+
+    Returns:
+    --------
+    data_list : list
+        Each element is a dict representing an individual split.
+    fixed_vertices : set
+        The vertex ids (as in `data.vertex_to_idx`'s keys) of the common portion that will only be allocated to testing data. 
+    """
+    _data = data
+    data, mask, mask_fixed, mask_non_fixed, x_base, edge_index_base, y_base, vertex_to_idx_base, label_to_idx_base, base_labels, train_labels, \
+        left_out_class_labels = _make_base_data(data, config)
+    logging.info('Splitting - Reduced to base labels')
+
+    # print(vars(data))
+    is_train = _data._mask_train.bool().numpy()[mask]
+    is_val = _data._mask_val.bool().numpy()[mask]
+    mask_fixed = _data._mask_test.bool().numpy()[mask]
+    mask_non_fixed = ~mask_fixed
+
+    rng = np.random.RandomState(split_seed)
+    for attempt in range(config.max_attempts_per_split):
+        try:
+            # Decide which vertices will be labeled ood
+            if config.ood_type == dconstants.LEFT_OUT_CLASSES:
+                is_ood_base = dutils.get_label_mask(y_base, left_out_class_labels)
+            elif config.ood_type == dconstants.PERTURBATION:
+                is_ood_base = dutils.split_from_mask_stratified(~is_train, y_base, sizes = [config.perturbation_budget, 1 - config.perturbation_budget], rng=rng)[:, 0]
+        
+            # Create a graph for training, validation, testing and one for the ood experiments (validation and testing)
+            mask_dropped_id = dutils.split_from_mask_stratified((~is_ood_base) & (~is_train), y_base, sizes = [config.drop_train_vertices_portion, 1 - config.drop_train_vertices_portion], rng=rng)[:, 0]
+            
+            if config.setting == dconstants.TRANSDUCTIVE:
+                x_train, edge_index_train, y_train, vertex_to_idx_train, mask_train_graph = (x_base.copy(), edge_index_base.copy(), y_base.copy(), 
+                deepcopy(vertex_to_idx_base), np.ones_like(y_base, dtype=bool))
+            elif config.setting == dconstants.HYBRID:
+                # Drop a portion of all in-distribution vertices from the train graph together with the out-of-distribution vertices
+                x_train, edge_index_train, y_train, vertex_to_idx_train, mask_train_graph = _graph_drop(
+                    x_base, edge_index_base, y_base, vertex_to_idx_base, np.ones_like(y_base, dtype=bool), mask_dropped_id | is_ood_base,    
+                )
+                # After dropping, other in-distribution vertices may have been droppped during lcc selection,
+                # we include those as well into `mask_dropped_id`
+                additionally_dropped_id = (~mask_train_graph) & (~mask_dropped_id) & (~is_ood_base)
+                assert set(y_base[additionally_dropped_id]).issubset(train_labels)
+                # print(f'Additional {additionally_dropped_id.sum()} id vertices were dropped after lcc.')
+                mask_dropped_id |= additionally_dropped_id
+            else:
+                raise ValueError
+            
+            x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, mask_ood_graph = (x_base.copy(), edge_index_base.copy(), y_base.copy(), 
+            deepcopy(vertex_to_idx_base), np.ones_like(y_base, dtype=bool))
+
+            # Sample dataset masks
+            mask_train = is_train & (~(is_ood_base | mask_dropped_id))
+            data_train = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_train[mask_train_graph])
+
+            mask_val = is_val & (~(is_ood_base | mask_dropped_id))
+            data_val = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_val[mask_train_graph])
+
+            # TODO: Potentially, use a sampling strategy here as well?
+            mask_test = mask_train_graph & ~is_ood_base & ~mask_dropped_id & mask_fixed
+            data_test = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_test[mask_train_graph])
+
+            # The ood masks are exclusively among vertices that were marked as either 
+            #   i) ood or 
+            #   ii) id and marked for dropping (they only actually *were* dropped in a hybrid setting)
+            if config.ood_sampling_strategy == dconstants.SAMPLE_UNIFORM:
+                raise ValueError(f'Sampling uniformly is not permitted for a predefined split!')
+            elif config.ood_sampling_strategy == dconstants.SAMPLE_ALL:
+                mask_ood_val = mask_ood_graph & (is_ood_base | mask_dropped_id) & mask_non_fixed
+            else:
+                raise ValueError
+            data_ood_val = SingleGraphDataset.build(x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, mask_ood_val[mask_ood_graph],
+                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph])
+
+            mask_ood_test = (is_ood_base | mask_dropped_id) & mask_fixed
+            data_ood_test = SingleGraphDataset.build(x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, mask_ood_test[mask_ood_graph],
+                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph])
+
+            datasets = {
+                dconstants.TRAIN : data_train,
+                dconstants.VAL : data_val,
+                dconstants.TEST : data_test,
+                dconstants.OOD_VAL : data_ood_val,
+                dconstants.OOD_TEST : data_ood_test,
+            }
+
+            if config.integrity_assertion:
+                # Checks and integrity assertions
+                logging.info('Splitting - Running sanity checks.')
+                dutils.assert_integrity(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx,
+                                    x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, 
+                                    assert_second_is_vertex_subset=True, assert_second_is_label_subset=True)
+                dutils.assert_integrity(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx,
+                                    x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, 
+                                    assert_second_is_vertex_subset=True, assert_second_is_label_subset=True)
+
+                assert ((mask_train.astype(int) + mask_val.astype(int)) <= 1).all(), f'Training and validation data are not disjunct'
+                assert ((mask_train.astype(int) + mask_test.astype(int)) <= 1).all(), f'Training and test data are not disjunct'
+                assert ((mask_val.astype(int) + mask_test.astype(int)) <= 1).all(), f'Validation and test data are not disjunct'
+
+                assert ((mask_train.astype(int) + mask_ood_val.astype(int)) <= 1).all(), f'Training and ood data are not disjunct'
+                assert ((mask_train.astype(int) + mask_ood_test.astype(int)) <= 1).all(), f'Training and ood test data are not disjunct'
+                assert ((mask_ood_val.astype(int) + mask_ood_test.astype(int)) <= 1).all(), f'Ood data and ood test data are not disjunct'
+
+                assert (((mask_train | mask_val).astype(int) + (mask_fixed).astype(int)) <= 1).all(), f'Non-fixed and fixed data are not disjunct'
+                assert (((mask_ood_val).astype(int) + (mask_fixed).astype(int)) <= 1).all(), f'Ood data and fixed data are not disjunct'
+
+                for name, dataset in datasets.items():
+                    assert (dataset[0].x.size()[0] == dataset[0].mask.size()[0]), name
+                    assert (dataset[0].y.size() == dataset[0].mask.size()), name
+                    assert (dataset[0].edge_index <= dataset[0].x.size()[0]).all(), name
+
+            return datasets, dutils.vertices_from_mask(mask_fixed, data.vertex_to_idx)
+
+        except dutils.SamplingError as e: 
+            warn(f'Split failed due to an sampling error in splitting: {e}. Trying next seed...')
+    else:
+        raise RuntimeError(f'Could not generate split after {config.max_attempts_per_split} attempts!')
+
+def uniform_split_with_fixed_test_portion(data: tg.data.Data, split_seed: int, config: configuration.DataConfiguration,) -> Tuple[Dict[str, SingleGraphDataset], Set[str]]:
+    """ Splits the data in a uniform manner, i.e. it samples a fixed amount of vertices for traininig and validation. Remaining vertices are allocated to test.
+    
+    Parameters:
+    -----------
+    data : torch_geometric.data.Data
+        The graph to split
+    split_seed : int
+        The seed for this given split.
+    config : DataConfiguration
+        The dataset configuration.
+
+    Returns:
+    --------
+    data_list : list
+        Each element is a dict representing an individual split.
+    fixed_vertices : set
+        The vertex ids (as in `data.vertex_to_idx`'s keys) of the common portion that will only be allocated to testing data. 
+    """
+    data, _, mask_fixed, mask_non_fixed, x_base, edge_index_base, y_base, vertex_to_idx_base, label_to_idx_base, base_labels, train_labels, \
+        left_out_class_labels = _make_base_data(data, config)
+    
     rng = np.random.RandomState(split_seed)
     for attempt in range(config.max_attempts_per_split):
         try:
@@ -157,6 +320,10 @@ def uniform_split_with_fixed_test_portion(data: tg.data.Data, split_seed: int, c
 
             x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, mask_ood_graph = (x_base.copy(), edge_index_base.copy(), y_base.copy(), 
             deepcopy(vertex_to_idx_base), np.ones_like(y_base, dtype=bool))
+
+            # class_cnt = {c : cnt for c, cnt in zip(*np.unique(y_base, return_counts=True))}
+            # pool_class_cnt = {c : cnt for c, cnt in zip(*np.unique(y_base[mask_train_graph & ~is_ood_base & ~mask_dropped_id & mask_non_fixed], return_counts=True))}
+            # print(f'Distribution of development classes {pool_class_cnt}\nDistribution of all classes {class_cnt}')
 
             # Sample dataset masks
             mask_train = dutils.sample_uniformly(y_base, train_labels, config.train_portion, mask_train_graph & ~is_ood_base & ~mask_dropped_id & mask_non_fixed, rng=rng)
@@ -204,29 +371,29 @@ def uniform_split_with_fixed_test_portion(data: tg.data.Data, split_seed: int, c
             }
 
             # Checks and integrity assertions
+            if config.integrity_assertion:
+                dutils.assert_integrity(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx,
+                                    x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, 
+                                    assert_second_is_vertex_subset=True, assert_second_is_label_subset=True)
+                dutils.assert_integrity(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx,
+                                    x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, 
+                                    assert_second_is_vertex_subset=True, assert_second_is_label_subset=True)
 
-            dutils.assert_integrity(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx,
-                                x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, 
-                                assert_second_is_vertex_subset=True, assert_second_is_label_subset=True)
-            dutils.assert_integrity(data.x.numpy(), data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx,
-                                x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, 
-                                assert_second_is_vertex_subset=True, assert_second_is_label_subset=True)
+                assert ((mask_train.astype(int) + mask_val.astype(int)) <= 1).all(), f'Training and validation data are not disjunct'
+                assert ((mask_train.astype(int) + mask_test.astype(int)) <= 1).all(), f'Training and test data are not disjunct'
+                assert ((mask_val.astype(int) + mask_test.astype(int)) <= 1).all(), f'Validation and test data are not disjunct'
 
-            assert ((mask_train.astype(int) + mask_val.astype(int)) <= 1).all(), f'Training and validation data are not disjunct'
-            assert ((mask_train.astype(int) + mask_test.astype(int)) <= 1).all(), f'Training and test data are not disjunct'
-            assert ((mask_val.astype(int) + mask_test.astype(int)) <= 1).all(), f'Validation and test data are not disjunct'
+                assert ((mask_train.astype(int) + mask_ood_val.astype(int)) <= 1).all(), f'Training and ood data are not disjunct'
+                assert ((mask_train.astype(int) + mask_ood_test.astype(int)) <= 1).all(), f'Training and ood test data are not disjunct'
+                assert ((mask_ood_val.astype(int) + mask_ood_test.astype(int)) <= 1).all(), f'Ood data and ood test data are not disjunct'
 
-            assert ((mask_train.astype(int) + mask_ood_val.astype(int)) <= 1).all(), f'Training and ood data are not disjunct'
-            assert ((mask_train.astype(int) + mask_ood_test.astype(int)) <= 1).all(), f'Training and ood test data are not disjunct'
-            assert ((mask_ood_val.astype(int) + mask_ood_test.astype(int)) <= 1).all(), f'Ood data and ood test data are not disjunct'
+                assert (((mask_train | mask_val).astype(int) + (mask_fixed).astype(int)) <= 1).all(), f'Non-fixed and fixed data are not disjunct'
+                assert (((mask_ood_val).astype(int) + (mask_fixed).astype(int)) <= 1).all(), f'Ood data and fixed data are not disjunct'
 
-            assert (((mask_train | mask_val).astype(int) + (mask_fixed).astype(int)) <= 1).all(), f'Non-fixed and fixed data are not disjunct'
-            assert (((mask_ood_val).astype(int) + (mask_fixed).astype(int)) <= 1).all(), f'Ood data and fixed data are not disjunct'
-
-            for name, dataset in datasets.items():
-                assert (dataset[0].x.size()[0] == dataset[0].mask.size()[0]), name
-                assert (dataset[0].y.size() == dataset[0].mask.size()), name
-                assert (dataset[0].edge_index <= dataset[0].x.size()[0]).all(), name
+                for name, dataset in datasets.items():
+                    assert (dataset[0].x.size()[0] == dataset[0].mask.size()[0]), name
+                    assert (dataset[0].y.size() == dataset[0].mask.size()), name
+                    assert (dataset[0].edge_index <= dataset[0].x.size()[0]).all(), name
 
             return datasets, dutils.vertices_from_mask(mask_fixed, data.vertex_to_idx)
 

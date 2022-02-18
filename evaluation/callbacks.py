@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from util import get_k_hop_neighbourhood
+import scipy.sparse as sp
+from util import k_hop_neighbourhood
 
 def make_callback_get_features(layer=-2, mask=True, cpu=True, ensemble_average=True):
     """ Creates callback that gets features from the second to last layer. """
@@ -66,13 +67,35 @@ def make_callback_get_ground_truth(mask=True, cpu=True):
     return callback
 
 def make_callback_count_neighbours_with_attribute(attribute_getter, k, mask=True, cpu=True):
-    """ Makes a callback that counts the neighbours with a certain attribute. """
+    """ Makes a callback that counts the neighbours with a certain attribute. 
+    
+    The result(s) of this callback will have shape [N, 2], where the first column is the fraction of neighbour with that attribute
+    and the second column is the total number of neighbours.
+    """
     def callback(data, output):
         has_attribute = attribute_getter(data, output)
-        neighbours = get_k_hop_neighbourhood(data.edge_index, k, k_min=k)
-        result = torch.tensor([
-                has_attribute[np.array(neighbours.get(idx, []))].sum() for idx in range(data.x.size(0))
-            ]).long()
+        n = data.x.size(0)
+        edge_index = data.edge_index.cpu().numpy()
+        A = sp.coo_matrix((np.ones(edge_index.shape[1]), edge_index), shape=(n, n), dtype=bool)
+        k_hop_nbs = k_hop_neighbourhood(A, k).astype(int)
+        result = torch.tensor(k_hop_nbs.multiply(has_attribute[None, :]).sum(1)).squeeze().long()
+        num_nbs = torch.tensor(k_hop_nbs.sum(1)).squeeze().long()
+        result = torch.stack([result, num_nbs], 1)
+        if mask:
+            result = result[data.mask]
+        if cpu:
+            result = result.cpu()
+        return result
+    return callback
+
+def make_callback_get_degree(hops=1, mask=True, cpu=True):
+    """ Makes a callback that gets the degree of a node in a given k-hop neighbourhood. """
+    def callback(data, output):
+        n = data.x.size(0)
+        edge_index = data.edge_index.cpu().numpy()
+        A = sp.coo_matrix((np.ones(edge_index.shape[1]), edge_index), shape=(n, n), dtype=bool)
+        k_hop_nbs = k_hop_neighbourhood(A, hops).astype(int)
+        result = torch.tensor(np.array(k_hop_nbs.sum(1))).to(data.x.device).squeeze()
         if mask:
             result = result[data.mask]
         if cpu:
@@ -94,9 +117,9 @@ def make_callback_is_ground_truth_in_labels(labels, mask=True, cpu=True):
         return is_train_label
     return callback
 
-def make_callback_count_neighbours(k, mask=True, cpu=True):
-    """ Makes a callback counts all neighbours in the k-hop neighbood. """
-    return make_callback_count_neighbours_with_attribute(lambda data, output: np.ones(data.x.size(0), dtype=bool), k, mask=mask, cpu=cpu)
+# def make_callback_count_neighbours(k, mask=True, cpu=True):
+#     """ Makes a callback counts all neighbours in the k-hop neighbood. """
+#     return make_callback_count_neighbours_with_attribute(lambda data, output: np.ones(data.x.size(0), dtype=bool), k, mask=mask, cpu=cpu)
 
 
 def make_callback_get_perturbation_mask(mask=True, cpu=True):

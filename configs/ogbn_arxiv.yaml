@@ -1,0 +1,12 @@
+# Dataset defaults
+data:
+  base_labels: 'all'
+  train_labels: 'all'
+  left_out_class_labels: ['arxiv cs ai', 'arxiv cs ne', 'arxiv cs sc', 'arxiv cs cv', 'arxiv cs gr', 'arxiv cs se', 'arxiv cs lg', 'arxiv cs ro', 'arxiv cs cl', 'arxiv cs ir']
+  preprocessing: 'none'
+  ood_sampling_strategy: all
+  split_type: predefined
+  type: npz
+  drop_train_vertices_portion: 0.1
+model:
+  hidden_sizes: [256, 256]

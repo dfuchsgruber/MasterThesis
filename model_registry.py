@@ -61,7 +61,12 @@ class ModelRegistry:
         """ Gets the path to a trained model with a given configuration set. """
         collection = self.database.get_collection(self.collection_name)
         for doc in collection.find():
-            if ExperimentConfiguration(**doc['config']).registry_configuration == cfg.registry_configuration:
+            try:
+                cfg_other = ExperimentConfiguration(**doc['config'])
+            except:
+                # Older version of the registry may have attributes incompatible with current version
+                continue
+            if cfg_other.registry_configuration == cfg.registry_configuration:
                 return doc['path']
         return None
 
@@ -71,7 +76,12 @@ class ModelRegistry:
         paths_to_delete = []
         collection = self.database.get_collection(self.collection_name)
         for doc in collection.find():
-            if cfg.registry_configuration == ExperimentConfiguration(**doc['config']).registry_configuration:
+            try:
+                cfg_doc = ExperimentConfiguration(**doc['config'])
+            except:
+                # Older version of the registry may have attributes incompatible with current version
+                continue
+            if cfg.registry_configuration == cfg_doc.registry_configuration:
                 ids_to_delete.append(doc['_id'])
                 paths_to_delete.append(doc['path'])
         for _id in ids_to_delete:

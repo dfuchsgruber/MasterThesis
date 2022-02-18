@@ -1,0 +1,15 @@
+# Dataset defaults
+data:
+  base_labels: 'all'
+  corpus_labels: 'all'
+  train_labels: 'all'
+  left_out_class_labels: ['IR', 'ML']
+  preprocessing: 'none'
+  ood_sampling_strategy: all
+  train_portion : 20
+  test_portion_fixed : 0.2
+  split_type: uniform
+  type: npz
+  drop_train_vertices_portion: 0.1
+model:
+  hidden_sizes: [64]

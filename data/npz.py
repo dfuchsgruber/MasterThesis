@@ -5,12 +5,14 @@ import scipy.sparse as sp
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from data.base import SingleGraphDataset
 import data.util
+import data.constants as dconst
 import os.path as osp
 import os
 from util import sparse_max, get_cache_path
 from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 import torch
+import logging
 
 from transformers import AutoModel, AutoTokenizer
 
@@ -80,11 +82,16 @@ def load_embedded_word_features(dataset_name, language_model, cache_dir=osp.join
 class NpzDataset(SingleGraphDataset):
     
     raw_files = {
-        'cora_full' : osp.join('data', 'raw', 'cora_full.npz'),
-        'cora_ml' : osp.join('data', 'raw', 'cora_ml.npz'),
-        'citeseer' : osp.join('data', 'raw', 'citeseer.npz'),
-        'pubmed' : osp.join('data', 'raw', 'pubmed.npz'),
-        'dblp' : osp.join('data', 'raw', 'dblp.npz'),
+        dconst.CORA_FULL : osp.join('data', 'raw', 'cora_full.npz'),
+        dconst.CORA_ML : osp.join('data', 'raw', 'cora_ml.npz'),
+        dconst.CITESEER : osp.join('data', 'raw', 'citeseer.npz'),
+        dconst.PUBMED : osp.join('data', 'raw', 'pubmed.npz'),
+        dconst.DBLP : osp.join('data', 'raw', 'dblp.npz'),
+        dconst.OGBN_ARXIV : osp.join('data', 'raw', 'ogbn-arxiv.npz'),
+        dconst.COAUTHOR_CS : osp.join('data', 'raw', 'ms_academic_cs_with_text.npz'),
+        dconst.COAUTHOR_PHYSICS :  osp.join('data', 'raw', 'ms_academic_phy_with_text.npz'),
+        dconst.AMAZON_COMPUTERS : osp.join('data', 'raw', 'amazon_electronics_computers.npz'),
+        dconst.AMAZON_PHOTO : osp.join('data', 'raw', 'amazon_electronics_photo.npz'),
     }
 
     @classmethod
@@ -243,29 +250,68 @@ class NpzDataset(SingleGraphDataset):
             raise ValueError(f'Npz dataset {config.dataset} does not exist.')
         loader = np.load(NpzDataset.raw_files[config.dataset], allow_pickle=True)
         A, vertices_to_keep = NpzDataset._load_graph(loader, make_undirected=True, select_lcc=True, remove_self_loops=False)
+        logging.info('Data Loading - Loaded adjacency matrix.')
         y = loader['labels'][vertices_to_keep]
-        idx_to_label = loader['idx_to_class'].item()
-        if 'attr_text' in loader:
-            corpus = loader['attr_text']
-        
+
+        if 'idx_to_class' in loader:
+            idx_to_label = loader['idx_to_class'].item()
+        elif 'class_names' in loader:
+            idx_to_label = {idx : name for idx, name in enumerate(loader['class_names'])}
+        else:
+            logging.info(f'Data Loading - Did not find class names in {config.dataset}. Generating default names...')
+            idx_to_label = {idx : f'class_{idx}' for idx in range(int(max(y)) + 1)}
+
+        if 'idx_to_node' in loader:
+            idx_to_node = loader['idx_to_node'].item()
+        elif 'node_names' in loader:
+            idx_to_node = {idx : name for idx, name in enumerate(loader['node_names'])}
+        else:
+            logging.info(f'Data Loading - Did not find vertex names in {config.dataset}. Generating default names...')
+            idx_to_node = {idx : f'node_{idx}' for idx in range(vertices_to_keep.shape[0])}
+
         # Build the attribute matrix
         if config.preprocessing == 'bag_of_words':
+            corpus = loader['attr_text']
             vectorizer = NpzDataset._build_vectorizer(corpus[vertices_to_keep], y, idx_to_label, corpus_labels=config.corpus_labels, 
                 min_token_frequency=config.min_token_frequency, normalize=config.normalize, vectorizer=config.vectorizer)
             X, feature_to_idx = NpzDataset._vectorize(corpus[vertices_to_keep], vectorizer)
             X = X.todense()
-            vertex_to_idx = NpzDataset._build_vertex_to_idx(loader['idx_to_node'].item(), vertices_to_keep)
+            vertex_to_idx = NpzDataset._build_vertex_to_idx(idx_to_node, vertices_to_keep)
         elif config.preprocessing == 'word_embedding':
+            corpus = loader['attr_text']
             X, feature_to_idx = load_embedded_word_features(config.dataset, config.language_model)
             X = X[vertices_to_keep]
-            vertex_to_idx = NpzDataset._build_vertex_to_idx(loader['idx_to_node'].item(), vertices_to_keep)
+            vertex_to_idx = NpzDataset._build_vertex_to_idx(idx_to_node, vertices_to_keep)
+        elif config.preprocessing is None or config.preprocessing == 'none':
+            if 'features' in loader:
+                # Dense features
+                X = loader['features'][vertices_to_keep]
+                vertex_to_idx = NpzDataset._build_vertex_to_idx(idx_to_node, vertices_to_keep)
+                feature_to_idx = {f'feature_{i}' : i for i in range(X.shape[1])}
+            else:
+                # Sparse features
+                X = sp.csr_matrix((loader['attr_data'], loader['attr_indices'], loader['attr_indptr']), shape=loader['attr_shape'])[vertices_to_keep].todense()
+                vertex_to_idx = NpzDataset._build_vertex_to_idx(idx_to_node, vertices_to_keep)
+            if 'attr_names' in loader and len(loader['attr_names']):
+                feature_to_idx = {feature : idx for idx, feature in enumerate(loader['attr_names'])}
+            else:
+                feature_to_idx = {f'feature_{i}' : i for i in range(X.shape[1])}
         else:
             raise ValueError(f'Unknown preprocessing for features of type {config.preprocessing}')
+        logging.info('Data Loading - Built attribute matrix.')
 
         label_to_idx = {label : idx for idx, label in idx_to_label.items() if idx in y}
         y, label_to_idx, _ = data.util.compress_labels(y, label_to_idx)
-        _data = SingleGraphDataset.build(X, np.array(A.nonzero()), y, vertex_to_idx, label_to_idx, np.ones_like(y), transform=transform, feature_to_idx=feature_to_idx)
-        return NpzDataset(_data.data, transform=transform)
+        _data = SingleGraphDataset.build(X, np.array(A.nonzero()), y, vertex_to_idx, label_to_idx, np.ones_like(y), transform=transform, feature_to_idx=feature_to_idx).data
+        
+        # Add additional attributes to the data by the dataset
+        if config.dataset == dconst.OGBN_ARXIV:
+            _data._mask_train = torch.Tensor(loader['mask_train'][vertices_to_keep]).bool()
+            _data._mask_val = torch.Tensor(loader['mask_val'][vertices_to_keep]).bool()
+            _data._mask_test = torch.Tensor(loader['mask_test'][vertices_to_keep]).bool()
+            _data.year = torch.Tensor(loader['year'][vertices_to_keep]).long()
+
+        return NpzDataset(_data, transform=transform)
 
 if __name__ == '__main__':
     pass

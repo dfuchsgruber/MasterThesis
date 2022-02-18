@@ -1,13 +1,13 @@
 
 from collections.abc import Mapping
-from sqlite3 import converters
 import data.constants as dconstants
 import model.constants as mconstants
 import attr
 from attrs import validators
-from typing import List, Union, Optional, Any
-from functools import wraps
+from typing import Dict, List, Union, Optional, Any
 import os.path as osp
+import yaml
+import logging
 
 def make_cls_converter(cls, optional=False):
     """ Converter function that initializes a class with a dict or keeps the class as is. """
@@ -99,7 +99,7 @@ class ModelConfiguration(BaseConfiguration):
 @attr.s
 class DataConfiguration(BaseConfiguration):
     """ Configuration for dataset splitting and building. """
-    dataset: str = attr.ib(default='cora_ml', validator=validators.in_(('cora_ml', 'cora_full', 'pubmed', 'citeseer',)), converter=lambda s: s.lower())
+    dataset: str = attr.ib(default='cora_ml', validator=validators.in_(dconstants.DATASETS), converter=lambda s: s.lower())
     train_portion: int = attr.ib(default=20, validator=validators.ge(0), converter=int)
     val_portion: int = attr.ib(default=20, validator=validators.ge(0), converter=int)
     test_portion_fixed: float = attr.ib(default=1, validator=validators.ge(0), converter=float)
@@ -122,7 +122,7 @@ class DataConfiguration(BaseConfiguration):
     ood_sampling_strategy: str = attr.ib(default=dconstants.SAMPLE_ALL, validator=validators.in_((dconstants.SAMPLE_ALL, dconstants.SAMPLE_UNIFORM)))
 
     # How train / val / test splits are generated: Uniform samples `portion` vertices for each split uniformly per class
-    split_type: str = attr.ib(default='uniform', validator=validators.in_(('uniform', )), converter=lambda s: s.lower())
+    split_type: str = attr.ib(default='uniform', validator=validators.in_(('uniform', 'predefined')), converter=lambda s: s.lower())
     type: str = attr.ib(default='npz', validator=validators.in_(('npz',)), converter=lambda s: s.lower())
 
     # For perturbation experiments
@@ -130,12 +130,14 @@ class DataConfiguration(BaseConfiguration):
 
     # Generate numerical features from text
     min_token_frequency: int = attr.ib(default=10, validator=validators.ge(0), converter=int)
-    preprocessing: str = attr.ib(default='bag_of_words', validator=validators.in_(('bag_of_words', 'word_embedding')), converter=lambda s: s.lower())
+    preprocessing: str = attr.ib(default='none', validator=validators.in_(('bag_of_words', 'word_embedding', 'none',)), converter=lambda s: s.lower())
 
     # If word embeddings are used
     language_model: str = attr.ib(default='bert-base-uncased')
     normalize: Optional[str] = attr.ib(default='l2', validator=validators.in_(('l1', 'l2', None)))
     vectorizer: str = attr.ib(default='tf-idf', validator=validators.in_(('tf-idf', 'count')), converter=lambda s: s.lower())
+
+    integrity_assertion: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
 
 @attr.s
 class EarlyStoppingConfiguration(BaseConfiguration):
@@ -189,6 +191,9 @@ class RunConfiguration(BaseConfiguration):
     use_pretrained_model: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
     model_registry_collection_name: str = attr.ib(default=DEFAULT_REGISTRY_COLLECTION_NAME, converter=str, metadata={'registry_attribute' : False})
 
+    # If set, some values are updated with defaults depending on the dataset
+    use_default_configuration: bool = attr.ib(default=False, converter=bool, metadata={'registry_attribute' : False})
+
 @attr.s
 class _RegistryConfiguration(BaseConfiguration):
     """ Configuration for the model registry. Values should never be initialized manually as they are not really configuration and more information. """
@@ -220,8 +225,60 @@ class ExperimentConfiguration(BaseConfiguration):
     registry: _RegistryConfiguration = attr.ib(default={}, converter=make_cls_converter(_RegistryConfiguration))
     logging: LoggingConfiguration = attr.ib(default={}, converter=make_cls_converter(LoggingConfiguration), metadata={'registry_attribute' : False})
 
-if __name__ == '__main__':
-    cfg_dict = ExperimentConfiguration().registry_configuration
-    cfg = ExperimentConfiguration(**cfg_dict)
-    print(cfg.registry_configuration == cfg_dict)
-    print(cfg.registry_configuration)
+def get_default_configuration_by_dataset(dataset: str) -> Dict:
+    """ Gets the default values for a given dataset. 
+    
+    Parameters:
+    -----------
+    dataset : str
+        The dataset to get the default configuration for.
+    
+    Returns:
+    --------
+    configuration : dict
+        The default configuration values.
+    """
+    # dir = osp.dirname('__file__')
+    dir = '.'
+    cfg_fns = {
+        dconstants.AMAZON_COMPUTERS : 'amazon_computers.yaml',
+        dconstants.AMAZON_PHOTO : 'amazon_photo.yaml',
+        dconstants.CITESEER : 'citeseer.yaml',
+        dconstants.COAUTHOR_CS : 'coauthor_cs.yaml',
+        dconstants.COAUTHOR_PHYSICS : 'coauthor_physics.yaml',
+        dconstants.CORA_FULL : 'cora_full.yaml',
+        dconstants.CORA_ML : 'cora_ml.yaml',
+        dconstants.OGBN_ARXIV : 'ogbn_arxiv.yaml',
+        dconstants.PUBMED : 'pubmed.yaml',
+    }
+    cfg_path = osp.join(dir, 'configs', cfg_fns[dataset])
+    with open(cfg_path) as f:
+        return yaml.safe_load(f)
+
+def update_with_default_configuration(config: ExperimentConfiguration):
+    """ Updates the values in a configuration with default values. 
+    
+    Parameters:
+    -----------
+    config : ExperimentConfiguration
+        The experiment configuration to update.
+    """
+    default_config = get_default_configuration_by_dataset(config.data.dataset)
+
+    def recursive_update(d, config, prefix=[]):
+        for k, v in config.items():
+            if isinstance(v, Mapping):
+                recursive_update(getattr(d, k), v, prefix=prefix + [k])
+            else:
+                setattr(d, k, v)
+                logging.info(f'Set configuration value ' + '.'.join(prefix + [k]) + f' to default {v}')
+    recursive_update(config, default_config)
+
+    # In a perturbations setting, set base and corpus labels to train labels
+    if config.data.ood_type == dconstants.PERTURBATION:
+        config.data.base_labels = config.data.train_labels
+        logging.info(f'Set configuration value data.base_labels to {config.data.train_labels}')
+        config.data.corpus_labels = config.data.train_labels
+        logging.info(f'Set configuration value data.corpus_labels to {config.data.train_labels}')
+        config.data.left_out_class_labels = config.data.train_labels
+        logging.info(f'Set configuration value data.corpus_labels to {config.data.train_labels}')

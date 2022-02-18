@@ -150,6 +150,7 @@ class ExportData(OODSeparation):
             auroc_labels, auroc_mask, _, _ = self.get_distribution_labels(mask=False, **kwargs)
             datasets[name].auroc_mask = auroc_mask
             datasets[name].is_in_distribution = auroc_labels
+            # print(f'Created mask for ood dataset {name}')
 
         os.makedirs(osp.dirname(output_path), exist_ok=True)
         with open(output_path, 'wb+') as f:

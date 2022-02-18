@@ -1,12 +1,13 @@
+from typing import Dict, List
 import torch
 import torch.nn.functional as F
 import numpy as np
-from util import get_k_hop_neighbourhood
 import evaluation.callbacks
 import evaluation.constants as evaluation_constants
 from collections.abc import Iterable
+from torch_geometric.loader import DataLoader
 
-def get_data_loader(name, loaders):
+def get_data_loader(name: str, loaders: Dict[str, DataLoader]) -> DataLoader:
     """ Gets the right dataloader given the name of a dataset. """
     name = name.lower()
     if name not in loaders:
@@ -56,9 +57,8 @@ def run_model_on_datasets(model, data_loaders, gpus=0, callbacks=[
                 results[idx].append(callback(data, output))
     return results
 
-
-def get_fraction_id_neighbours(data_loaders, k_max, mask=True):
-    """ For each dataset gets the fraction of in distribution neighbours within a certain amount of hops. 
+def count_id_neighbours(data_loaders: List[DataLoader], k_max: int, mask: bool=True, fraction: bool=False) -> torch.Tensor:
+    """ For each dataset counts the number of neighbours with the id attribute in set of k-hop neighbourhoods.
     
     Parameters:
     -----------
@@ -68,26 +68,30 @@ def get_fraction_id_neighbours(data_loaders, k_max, mask=True):
         How many hops to consider at most.
     mask : bool
         If True, results will be returned only on vertices within the mask of the data loaders.
+    fraction : bool, optional, default: True
+        If the number of id neighbours is to be normalized, i.e. a fraction of all neighbours.
     
     Returns:
     --------
     fraction : torch.Tensor, shape [N, k_max + 1]
         The fraction of neighbours with the `in_distribution` attribute.
     """
+    # print(f'Get fraction id nbs with k_max {k_max}')
     callbacks = []
     for k in range(0, k_max + 1):
         callbacks += [
             evaluation.callbacks.make_callback_count_neighbours_with_attribute(lambda data, output: ~data.is_out_of_distribution.numpy(), k, mask=mask),
-            evaluation.callbacks.make_callback_count_neighbours(k, mask=mask)
         ]
-    results = run_model_on_datasets(None, data_loaders, callbacks=callbacks, run_model=False)
-    num_id_nbs, num_nbs = results[0::2], results[1::2]
-    num_id_nbs = torch.stack([torch.cat(l, dim=0) for l in num_id_nbs]) # k + 1, N
-    num_nbs = torch.stack([torch.cat(l, dim=0) for l in num_nbs]) # k + 1, N
-    assert (num_nbs[0] == 1).all(), 'Each vertex should have only one 0-hop neighbour'
-    fraction = num_id_nbs / num_nbs
-    assert (fraction <= 1).all()
-    return fraction.permute(1, 0)
+    num_id_nbs = run_model_on_datasets(None, data_loaders, callbacks=callbacks, run_model=False)
+    num_id_nbs = torch.stack([torch.cat(l, dim=0) for l in num_id_nbs]) # k + 1, N, 2
+    assert (num_id_nbs[0, :, 1] == 1).all(), 'Each vertex should have only one 0-hop neighbour'
+    if fraction:
+        fraction = num_id_nbs[:, :, 0] / num_id_nbs[:, :, 1]
+        assert (fraction <= 1).all()
+        return fraction.permute(1, 0)
+    else:
+        count = num_id_nbs[:, :, 0]
+        return count.permute(1, 0)
 
 
 def get_distribution_labels(fraction_id_nbs, threshold=0.0):

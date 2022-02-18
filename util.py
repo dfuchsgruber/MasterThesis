@@ -131,35 +131,74 @@ def format_name(name_fmt, args, config, delimiter=':'):
     return name_fmt.format(*parsed_args)
 
 
-def get_k_hop_neighbourhood(edge_list, k_max, k_min = None):
-    """ Gets all vertices in the k-hop neighbourhood of vertices. 
+def k_hop_neighbourhood(A: sp.spmatrix, k: int):
+    """ Gets the k-hop neighbourhood of a graph. 
     
     Parameters:
     -----------
-    edge_list : torch.Tensor, shape [2, num_egdes]
-        The graph structure.
-    k_max : int
-        Vertices returned can be at most `k_max` hops away from a source.
-    k_min : int or None
-        Vertices returned have to be at least `k_min``hops away from a source. 
-        If `None`, `k_min` is set equal to `k_max`, which corresponds to the k-hop
-        neighbourhoods exactly.
-    smaller_or_equal : bool
-        If True, the <= k-hop neighbourhood is returned (vertices AT MOST k hops away).
-    
+    A : sp.spmatrix, shape [n, n]
+        Adjacency matrix. Values > 0 are interpreted as links.
+    k : int
+        How many hops to look for.
+
     Returns:
     --------
-    k-hop-neighbourhood : dict
-        A mapping from vertex_idx to a tuple of vertex_idxs in the k-hop neighbourhood.
+    A_sp_k : sp.spmatrix, shape [n, n]
+        A k-hop neighbour indicator matrix.
     """
-    if k_min is None:
-        k_min = k_max
-    G = nx.Graph()
-    G.add_edges_from(edge_list.numpy().T)
-    return {
-        src : tuple(n for n, path in nx.single_source_shortest_path(G, src, cutoff=k_max).items() if len(path) <= k_max + 1 and len(path) >= k_min + 1) 
-        for src in G.nodes
-    }
+
+    mat = sp.identity(A.shape[0], dtype=bool, format='csr')
+    result = sp.identity(A.shape[0], dtype=int, format='csr')
+    A = A.tocsc().astype(bool) # csr x csc is fast
+    
+    # The k-i hop neighbourhood will have a value of 2^i in the resulting matrix
+    # Therefore, the biggest power of 2 represents the bfs number of each vertex
+    # i.e. entries with a 1 will have a bfs number of k
+    for it in range(k):
+        mat = (mat @ A).astype(bool)
+        result *= 2
+        result += mat
+        
+    result = (result == 1)
+    result.eliminate_zeros()
+    return result
+
+# def k_hop_neighbourhood(A, k: int, strict: bool=True):
+#     """ Gets the k-hop neighbourhood of a graph. 
+    
+#     Parameters:
+#     -----------
+#     A : sp.sparse_matrix, shape [n, n]
+#         Adjacency matrix. Values > 0 are interpreted as links.
+#     k : int
+#         How many hops to look for.
+#     strict : bool, optional, default: True
+#         If given, any k-hop neighbour that is also some k' < k hop neighbour will
+#         not be returend. That is, only neighbours that have a shortest path length
+#         of k on the unweighted graph will be returned.
+    
+#     Returns:
+#     --------
+#     A_sp_k : sp.sparse_matrix, shape [n, n]
+#         A k-hop neighbour indicator matrix.
+#     """
+#     from tqdm import tqdm
+
+#     A = A.tocsc().astype(bool)
+#     powers = [sp.identity(A.shape[0], dtype=bool, format='csr')]
+#     for _ in tqdm(range(k), desc=f'Constructing {k}-hop neighbourhood...'):
+#         powers.append((powers[-1] @ A).astype(bool))
+        
+#     result = powers[-1] #.todok()
+    
+#     if strict:
+#         # Subtract the < k neighbourhoods
+#         for prev in tqdm(powers[:-1], desc=f'Removing <{k}-neighbours...'):
+#             result[prev.nonzero()] = False
+#     result = result.tocsr()
+#     result.eliminate_zeros()
+    
+#     return result
 
 def dict_to_tuple(d):
     """ Creates a nested tuple from a dict (to make it immutable and hashable) 

@@ -20,3 +20,17 @@ NORMAL = 'normal'
 # Different sampling strategies
 SAMPLE_UNIFORM = 'uniform' # Sample uniformly per class
 SAMPLE_ALL = 'all' # Don't sample but instead use all available samples in mask
+
+# Datasets
+CORA_FULL = 'cora_full'
+CORA_ML = 'cora_ml'
+DBLP = 'dblp'
+PUBMED = 'pubmed'
+CITESEER = 'citeseer'
+OGBN_ARXIV = 'ogbn_arxiv'
+COAUTHOR_CS = 'coauthor_cs'
+COAUTHOR_PHYSICS = 'coauthor_physics'
+AMAZON_COMPUTERS = 'amazon_computers'
+AMAZON_PHOTO = 'amazon_photo'
+
+DATASETS = (CORA_FULL, CORA_ML, DBLP, PUBMED, CITESEER, OGBN_ARXIV, COAUTHOR_PHYSICS, COAUTHOR_CS, AMAZON_PHOTO, AMAZON_COMPUTERS)

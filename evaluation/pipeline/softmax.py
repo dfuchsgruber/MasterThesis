@@ -101,5 +101,7 @@ class EvaluateSoftmaxEntropy(OODDetection):
             var = torch.var(scores, dim=-1) # Variance across ensemble, shape N x num_classes
             var_predicted_class = var[torch.arange(argmax_scores.size(0)), argmax_scores]
             self.ood_detection(1 / (var_predicted_class + self.variance_eps), labels, 'predicted-class-variance', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
-            
+            var_total = var.sum(-1)
+            self.ood_detection(1 / (var_total + self.variance_eps), labels, 'sampled-class-variance', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+
         return args, kwargs

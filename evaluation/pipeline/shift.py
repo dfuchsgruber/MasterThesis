@@ -43,10 +43,9 @@ class LogInductiveFeatureShift(PipelineMember):
         for k in range(1, receptive_field_size + 1):
             callbacks += [
                 evaluation.callbacks.make_callback_count_neighbours_with_attribute(lambda data, output: ~data.is_out_of_distribution.numpy(), k, mask=False),
-                evaluation.callbacks.make_callback_count_neighbours(k, mask=False),
             ]
         results = run_model_on_datasets(kwargs['model'], [get_data_loader(data, kwargs['data_loaders']) for data in (self.data_before, self.data_after)], gpus=self.gpus, callbacks=callbacks, model_kwargs=self.model_kwargs)
-        features, data, num_nbs_id, num_nbs = results[0], results[1], results[2::2], results[3::2]
+        features, data, num_nbs_id = results[0], results[1], results[2:]
 
         idx_before, idx_after = vertex_intersection(data[0], data[1])
         shift = (features[0][idx_before] - features[1][idx_after]).norm(dim=1)
@@ -59,7 +58,7 @@ class LogInductiveFeatureShift(PipelineMember):
         pipeline_log(f'Logged inductive feature shift for data {self.data_before} -> {self.data_after} by mask.')
 
         for k in range(1, receptive_field_size + 1):
-            fraction = 1 - (num_nbs_id[k - 1][1].float() / (num_nbs[k - 1][1] + 1e-12))
+            fraction = 1 - (num_nbs_id[k - 1][1][:, 0].float() / (num_nbs_id[k - 1][1][:, 1] + 1e-12))
             fig, ax = plot_2d_histogram(shift.cpu() + self.eps, fraction[idx_after], x_label='Log Feature Shift', y_label=f'Fraction of ood vertices in {k} neighbourhood', log_scale_x=True)
             log_figure(kwargs['logs'], fig, f'feature_shift_by_{k}_nbs', f'inductive_feature_shift{self.suffix}', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
             plt.close(fig)
@@ -100,10 +99,9 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
         for k in range(1, receptive_field_size + 1):
             callbacks += [
                 evaluation.callbacks.make_callback_count_neighbours_with_attribute(lambda data, output: ~data.is_out_of_distribution.numpy(), k, mask=False),
-                evaluation.callbacks.make_callback_count_neighbours(k, mask=False),
             ]
         results = run_model_on_datasets(kwargs['model'], [get_data_loader(data, kwargs['data_loaders']) for data in (self.data_before, self.data_after)], gpus=self.gpus, callbacks=callbacks, model_kwargs=self.model_kwargs)
-        scores, data, num_nbs_id, num_nbs = results[0], results[1], results[2::2], results[3::2]
+        scores, data, num_nbs_id = results[0], results[1], results[2:]
         entropy = [
             -(score * torch.log2(score + self.eps)).sum(1).mean(-1) # Average over ensemble axis
             for score in scores # Expected entropy per dataset
@@ -120,7 +118,7 @@ class LogInductiveSoftmaxEntropyShift(PipelineMember):
         pipeline_log(f'Logged inductive entropy shift for data {self.data_before} -> {self.data_after} by mask.')
 
         for k in range(1, receptive_field_size + 1):
-            fraction = 1 - (num_nbs_id[k - 1][1].float() / (num_nbs[k - 1][1] + 1e-12))
+            fraction = 1 - (num_nbs_id[k - 1][1][:, 0].float() / (num_nbs_id[k - 1][1][:, 1] + 1e-12))
             fig, ax = plot_2d_histogram(shift.cpu() + self.eps, fraction[idx_after], x_label='Entropy Shift', y_label=f'Fraction of ood vertices in {k} neighbourhood', log_scale_x=False)
             log_figure(kwargs['logs'], fig, f'entropy_shift_by_{k}_nbs', f'inductive_entropy_shift{self.suffix}', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
             plt.close(fig)

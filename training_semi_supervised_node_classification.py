@@ -80,6 +80,8 @@ class ExperimentWrapper:
         logging: Union[dict, configuration.LoggingConfiguration] = {}
         ):
         config = configuration.ExperimentConfiguration(data=data, model=model, evaluation=evaluation, training=training, run=run, ensemble = ensemble, logging=logging)
+        if config.run.use_default_configuration:
+            configuration.update_with_default_configuration(config)
 
         if not torch.cuda.is_available() and config.training.gpus > 0:
             l.warn(f'Requested {config.training.gpus} GPU devices but none are available. Not using GPU.')

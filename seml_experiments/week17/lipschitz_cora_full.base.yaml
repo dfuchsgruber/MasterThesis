@@ -1,17 +1,17 @@
 seml:
   executable: training_semi_supervised_node_classification.py
-  name: week16_densities_cora_ml
-  output_dir: /nfs/students/fuchsgru/seml_output/week16
+  name: week17_lipschitz_cora_full
+  output_dir: /nfs/students/fuchsgru/seml_output/week17
   project_root_dir: ../..
 
 slurm:
-  experiments_per_job: 1
+  experiments_per_job: 16
   sbatch_options:
     gres: gpu:1       # num GPUs
     mem: 64G          # memory
     cpus-per-task: 2  # num cores
     time: 0-12:00     # max time, D-HH:MM
-
+    partition: gpu_large
 
 ###### BEGIN PARAMETER CONFIGURATION ######
 
@@ -22,6 +22,7 @@ fixed:
     - model:residual
     - model:use_spectral_norm
     - data:setting
+    - model:weight_scale
     
   training.early_stopping.patience: 50
   training.early_stopping.mode: min
@@ -51,7 +52,6 @@ fixed:
   model.model_type: gcn
   model.freeze_residual_projection: false
   model.hidden_sizes: [64]
-  model.weight_scale: 3.0
   model.use_spectral_norm_on_last_layer: false
 
   evaluation.ignore_exceptions: false
@@ -60,7 +60,7 @@ fixed:
 grid:
   model.residual:
     type: choice
-    options: [false]
+    options: [false, true]
   data.setting:
     type: choice
     options: [transductive, hybrid]
