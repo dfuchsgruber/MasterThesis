@@ -2,7 +2,7 @@ import torch
 
 from .base import *
 import data.constants as dconstants
-from .ood import OODSeparation
+from .uncertainty_quantification import OODSeparation
 import evaluation.callbacks
 from evaluation.util import run_model_on_datasets, get_data_loader
 from evaluation.logging import *
@@ -36,7 +36,7 @@ class EvaluateAccuracy(OODSeparation):
 
             ])
         mask, predictions, labels = torch.cat(mask, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
-        is_id, is_id_mask, _, _ = self.get_distribution_labels(**kwargs)
+        is_id, is_id_mask, _, _ = self.get_ood_distribution_labels(**kwargs)
 
         # Accuracy should only be computed for classes the model can actually predict
         predictions, labels, is_id_mask, is_id = predictions[mask], labels[mask], is_id_mask[mask], is_id[mask]

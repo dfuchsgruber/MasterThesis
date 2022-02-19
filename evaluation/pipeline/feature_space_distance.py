@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 
 from .base import *
 import data.constants as dconstants
-from .ood import OODDetection
+from .uncertainty_quantification import UncertaintyQuantification
 from evaluation.util import run_model_on_datasets, get_data_loader
 from evaluation.logging import *
 from .feature_space_density import FeatureDensity
@@ -37,17 +37,15 @@ class EvaluateFeatureSpaceDistance(FeatureDensity):
         self._get_features_and_labels_to_fit(**kwargs)
         (features_to_fit, predictions_to_fit, labels_to_fit), (features_to_validate, prediction_to_validate, labels_to_validate) = self._get_features_and_labels_to_fit(**kwargs)
         features_to_evaluate, predictions_to_evaluate, labels_to_evaluate = self._get_features_and_labels_to_evaluate(**kwargs)
-        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
 
-
-        torch.save({
-            'features_fit' : features_to_fit,
-            'predictions_fit' : predictions_to_fit,
-            'labels_fit' : labels_to_fit,
-            'features_eval' : features_to_evaluate,
-            'predictions_eval' : predictions_to_evaluate,
-            'labels_eval' : labels_to_evaluate,
-        }, 'features_debug.pt')
+        # torch.save({
+        #     'features_fit' : features_to_fit,
+        #     'predictions_fit' : predictions_to_fit,
+        #     'labels_fit' : labels_to_fit,
+        #     'features_eval' : features_to_evaluate,
+        #     'predictions_eval' : predictions_to_evaluate,
+        #     'labels_eval' : labels_to_evaluate,
+        # }, 'features_debug.pt')
 
         
         distances = torch.cdist(features_to_evaluate, features_to_fit, p=self.p) # [num_eval x num_train]
@@ -56,9 +54,9 @@ class EvaluateFeatureSpaceDistance(FeatureDensity):
             distances_sorted = distances_sorted[:, :self.k]
         proxy = distances_sorted.mean(-1) # [num_eval]
 
-        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
-        self.ood_detection(-torch.Tensor(proxy), labels_to_evaluate,
-                                'feature-distance',
+        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_ood_distribution_labels(**kwargs)
+        self.uncertainty_quantification(-torch.Tensor(proxy), labels_to_evaluate,
+                                'feature-distance', predictions_to_evaluate.argmax(1) == labels_to_evaluate,
                                 auroc_labels, auroc_mask, distribution_labels,
                                 distribution_label_names, plot_proxy_log_scale=False, **kwargs
         )

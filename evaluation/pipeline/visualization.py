@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 from .base import *
 import data.constants as dconstants
-from .ood import OODSeparation
+from .uncertainty_quantification import OODSeparation
 import evaluation.callbacks
 from evaluation.util import run_model_on_datasets, get_data_loader
 from evaluation.logging import *
@@ -43,7 +43,7 @@ class VisualizeIDvsOOD(OODSeparation):
                                                                     evaluation.callbacks.make_callback_get_ground_truth(),
                                                                 ])
         features, predictions, labels = torch.cat(features, dim=0), torch.cat(predictions, dim=0), torch.cat(labels)
-        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
+        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_ood_distribution_labels(**kwargs)
 
         for dimensionality_reduction in self.dimensionality_reductions:
             group = f'visualization_id_vs_ood_{dimensionality_reduction.lower()}{self.suffix}'

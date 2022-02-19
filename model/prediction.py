@@ -12,6 +12,11 @@ from torch import Tensor
 
 # --- Normalizations for scores
 
+# Optional attributes that override standard procedures for getting features, scores, logits, etc.
+SOFT_PREDICTIONS = 'soft_predictions'
+HARD_PREDICTIONS = 'hard_predictions'
+LOGITS = 'logits'
+
 class Prediction:
     """ Summarizes the predictions of a model ensemble. Is also used for single models. 
     
@@ -20,9 +25,9 @@ class Prediction:
     features : List[Tensor]
         Features from all layers.
         By convention, features[0] should be input features.
-        By convention, features[-2] should be encodings.
+        By convention, features[-2] should be the most high level hidden embeddings.
         By convention, features[-1] should be logit-like objects.
-        If these conventions are not met, pass attributes SOFT, LOGITS or INPUT
+        If these conventions are not met, pass attributes SOFT_PREDICTIONS, HARD_PREDICTIONS or LOGITS
     """
 
     @staticmethod
@@ -124,14 +129,50 @@ class Prediction:
         logits : Tensor, shape [N, D, (num_members)]
             Logits.
         """
-        if 'logits' in self.attributes:
-            logits = self.attributes['logits']
+        if LOGITS in self.attributes:
+            logits = self.get(LOGITS, average=False)
         else:
             logits = [f[-1] for f in self.features]
-        logits = torch.stack(logits, dim=-1)
+            logits = torch.stack(logits, dim=-1)
         if average:
             logits = logits.mean(-1)
         return logits
+
+
+    def get_predictions(self, soft: bool = True, average: bool = True) -> Tensor:
+        """ Gets the predicted class scores. 
+        If the prediction has an attribute `SOFT_PREDICTIONS` or `HARD_PREDICTIONS`, it will use this attribute.
+        Otherwise, logits are used and the softmax function applied.
+
+        Parameters:
+        -----------
+        soft : bool, optional, default: True
+            If soft predictions should be given.
+        average : bool, optional, default: True
+            In the case of an ensemble prediction, if it should be averaged.
+
+        Returns:
+        --------
+        predictions : torch.Tensor, shape [N, C, (num_members)]
+        """
+        if SOFT_PREDICTIONS in self.attributes:
+            softs = self.get(SOFT_PREDICTIONS, average=average)
+        else:
+            # In case of logit-based soft scores, average the soft scores, not the logits
+            softs = self.get_logits(average=False)
+            softs = F.softmax(softs, dim=1)
+            if average:
+                softs = softs.mean(-1)
+        
+        if HARD_PREDICTIONS in self.attributes:
+            hard = self.get(HARD_PREDICTIONS, average=average)
+        else:
+            hard = torch.argmax(softs, dim=1)
+
+        if soft:
+            return softs
+        else:
+            return hard
 
     def get(self, attribute, average: bool = True) -> Tensor:
         """ Gets an attribute stored in the prediction. 

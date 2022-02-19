@@ -6,11 +6,11 @@ from metrics import accuracy
 from model.gnn import make_model_by_configuration
 from model.prediction import Prediction
 from model.reconstruction import ReconstructionLoss
+import model.constants as mconst
 from torch_geometric.utils import remove_self_loops, add_self_loops
 from configuration import ModelConfiguration
 import logging
 from sklearn.metrics import roc_auc_score
-from util import aggregate_matching
 
 def log_metrics(module: pl.LightningModule, metrics, prefix=None):
     if prefix is None:
@@ -24,6 +24,8 @@ def log_metrics(module: pl.LightningModule, metrics, prefix=None):
 
 class SemiSupervisedNodeClassification(pl.LightningModule):
     """ Wrapper for networks that perform semi supervised node classification. """
+
+    training_type = mconst.TRAIN_PL
 
     def __init__(self, backbone_configuration: ModelConfiguration, num_input_features, num_classes, learning_rate=1e-2, weight_decay=0.0,):
         super().__init__()

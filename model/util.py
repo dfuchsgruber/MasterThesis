@@ -1,5 +1,4 @@
 import torch
-import model.constants as mconst
 
 def module_numel(m: torch.nn.Module, only_trainable: bool = False):
     """

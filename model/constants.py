@@ -16,3 +16,6 @@ ENERGY = 'energy'
 # --- Loss types --
 LEAKY_RELU = 'leaky_relu'
 RELU = 'relu'
+
+# --- Wrapper Types ---
+TRAIN_PL = 'train-pytorch-lightning'

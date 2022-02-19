@@ -116,25 +116,25 @@ def build_experiments(cfg):
                     ood_args = {}
 
                 pipeline += [
-                    {
-                        'type' : 'EvaluateFeatureSpaceDistance',
-                        'fit_to' : ['train'],
-                        'validate_on' : ['val'],
-                        'evaluate_on' : [ood_dataset],
-                        'log_plots' : False,
-                        'k' : 5,
-                        'layer' : 0,
-                        'name' : 'input-' + ood_name
-                    } | ood_args,
-                    {
-                        'type' : 'EvaluateStructure',
-                        'fit_to' : ['train'],
-                        'evaluate_on' : [ood_dataset],
-                        'log_plots' : False,
-                        'diffusion_iterations' : 10,
-                        'teleportation_probability' : 0.1,
-                        'name' : ood_name,
-                    } | ood_args,
+                    # {
+                    #     'type' : 'EvaluateFeatureSpaceDistance',
+                    #     'fit_to' : ['train'],
+                    #     'validate_on' : ['val'],
+                    #     'evaluate_on' : [ood_dataset],
+                    #     'log_plots' : False,
+                    #     'k' : 5,
+                    #     'layer' : 0,
+                    #     'name' : 'input-' + ood_name
+                    # } | ood_args,
+                    # {
+                    #     'type' : 'EvaluateStructure',
+                    #     'fit_to' : ['train'],
+                    #     'evaluate_on' : [ood_dataset],
+                    #     'log_plots' : False,
+                    #     'diffusion_iterations' : 10,
+                    #     'teleportation_probability' : 0.1,
+                    #     'name' : ood_name,
+                    # } | ood_args,
                 ]
 
                 for suffix, args in (

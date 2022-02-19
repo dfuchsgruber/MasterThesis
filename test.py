@@ -56,7 +56,7 @@ if __name__ == '__main__':
     spectral_norm_cfg = {
         'use_spectral_norm' : True,
         'residual' : True,
-        'weight_scale' : 10.0,
+        'weight_scale' : 2.2,
     }
 
     reconstruction_cfg = {
@@ -269,17 +269,17 @@ if __name__ == '__main__':
             #     'layer' : 0,
             #     'name' : 'input-' + ood_name
             # },
-            {
-                'type' : 'EvaluateStructure',
-                'fit_to' : ['train'],
-                'evaluate_on' : [ood_dataset],
-                'log_plots' : True,
-                'separate_distributions_by' : ood_separation,
-                'separate_distributions_tolerance' : 0.1,
-                'diffusion_iterations' : 16,
-                'teleportation_probability' : 0.2,
-                'name' : ood_name,
-            },
+            # {
+            #     'type' : 'EvaluateStructure',
+            #     'fit_to' : ['train'],
+            #     'evaluate_on' : [ood_dataset],
+            #     'log_plots' : True,
+            #     'separate_distributions_by' : ood_separation,
+            #     'separate_distributions_tolerance' : 0.1,
+            #     'diffusion_iterations' : 16,
+            #     'teleportation_probability' : 0.2,
+            #     'name' : ood_name,
+            # },
             # {
             #     'type' : 'EvaluateAccuracy',
             #     'evaluate_on' : [ood_dataset],

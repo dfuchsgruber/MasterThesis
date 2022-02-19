@@ -5,7 +5,7 @@ import os, re, pickle
 import os.path as osp
 
 from .base import *
-from .ood import OODSeparation
+from .uncertainty_quantification import OODSeparation
 import data.constants as dconstants
 from evaluation.util import get_data_loader
 from data.util import data_get_summary, labels_to_idx, graph_select_labels
@@ -147,7 +147,7 @@ class ExportData(OODSeparation):
         for name in self.ood_datasets:
             # Get vertices that are used for AUROC calculation in our experiments.
             self.evaluate_on = [name]
-            auroc_labels, auroc_mask, _, _ = self.get_distribution_labels(mask=False, **kwargs)
+            auroc_labels, auroc_mask, _, _ = self.get_ood_distribution_labels(mask=False, **kwargs)
             datasets[name].auroc_mask = auroc_mask
             datasets[name].is_in_distribution = auroc_labels
             # print(f'Created mask for ood dataset {name}')

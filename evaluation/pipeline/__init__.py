@@ -1,5 +1,5 @@
 from .base import *
-from .ood import *
+from .uncertainty_quantification import *
 from .calibration import *
 from .features import *
 from .lipschitz import *

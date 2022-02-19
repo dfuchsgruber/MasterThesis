@@ -6,7 +6,7 @@ from util import is_outlier
 
 from .base import *
 import data.constants as dconstants
-from .ood import OODDetection
+from .uncertainty_quantification import UncertaintyQuantification
 import evaluation.callbacks
 from evaluation.util import run_model_on_datasets, get_data_loader
 from evaluation.logging import *
@@ -18,7 +18,7 @@ from plot.density import plot_density, get_dimensionality_reduction_to_plot
 from plot.util import get_greyscale_colormap
 from util import approximate_page_rank_matrix
 
-class FeatureDensity(OODDetection):
+class FeatureDensity(UncertaintyQuantification):
     """ Superclass for pipeline members that fit a feature density. """
 
     name = 'FeatureDensity'
@@ -146,7 +146,8 @@ class FitFeatureDensityGrid(FeatureDensity):
 
         # Note that for `self.fit_to_ground_truth_labels` data, the `predictions_to_fit` are overriden with a 1-hot ground truth
         features_to_evaluate, predictions_to_evaluate, labels_to_evaluate = self._get_features_and_labels_to_evaluate(**kwargs)
-        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
+        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_ood_distribution_labels(**kwargs)
+        is_correct_prediction = predictions_to_evaluate.argmax(-1) == labels_to_evaluate
 
         # Grid over dimensionality reductions
         for dim_reduction_type, dim_reduction_grid in self.dimensionality_reductions.items():
@@ -185,8 +186,8 @@ class FitFeatureDensityGrid(FeatureDensity):
                             log_density = density_model(features_to_evaluate_reduced, **eval_kwargs).cpu()
                             is_finite_density = torch.isfinite(log_density)
                             proxy_name = f'{density_model.compressed_name}{eval_suffix}:{dim_reduction.compressed_name}'
-                            self.ood_detection(log_density[is_finite_density], labels_to_evaluate[is_finite_density],
-                                proxy_name,
+                            self.uncertainty_quantification(log_density[is_finite_density], labels_to_evaluate[is_finite_density],
+                                proxy_name, is_correct_prediction,
                                 auroc_labels[is_finite_density], auroc_mask[is_finite_density], distribution_labels[is_finite_density],
                                 distribution_label_names, plot_proxy_log_scale=False, **kwargs
                             )

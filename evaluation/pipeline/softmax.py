@@ -2,12 +2,12 @@ import torch
 
 from .base import *
 import data.constants as dconstants
-from .ood import OODDetection
+from .uncertainty_quantification import UncertaintyQuantification
 import evaluation.callbacks
 from evaluation.util import run_model_on_datasets, get_data_loader
 
 @register_pipeline_member
-class EvaluateLogitEnergy(OODDetection):
+class EvaluateLogitEnergy(UncertaintyQuantification):
     """ Pipeline member to evaluate the Logit Energy curves of the model for in-distribution and out-of-distribution data. """
 
     name = 'EvaluateLogitEnergy'
@@ -33,21 +33,22 @@ class EvaluateLogitEnergy(OODDetection):
     def __call__(self, *args, **kwargs):
 
         data_loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
-        logits, labels = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
+        logits, labels, predictions = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
                 evaluation.callbacks.make_callback_get_logits(mask=True, ensemble_average=False),
                 evaluation.callbacks.make_callback_get_ground_truth(mask=True),
+                evaluation.callbacks.make_callback_get_predictions(mask=True, soft=True),
             ], gpus=self.gpus, model_kwargs=self.model_kwargs_evaluate)
-        logits, labels = torch.cat(logits), torch.cat(labels) # Logits are of shape : N, n_classes, n_ensemble
+        logits, labels, predictions = torch.cat(logits), torch.cat(labels), torch.cat(predictions, dim=0) # Logits are of shape : N, n_classes, n_ensemble
         energy = -self.temperature * torch.logsumexp(logits / self.temperature, dim=1) # N, n_ensemble
         energy = energy.mean(-1) # Average over ensemble members
 
-        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
-        self.ood_detection(-energy, labels, 'logit-energy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_ood_distribution_labels(**kwargs)
+        self.uncertainty_quantification(-energy, labels, 'logit-energy', predictions.argmax(1) == labels, auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
         
         return args, kwargs
 
 @register_pipeline_member
-class EvaluateSoftmaxEntropy(OODDetection):
+class EvaluateSoftmaxEntropy(UncertaintyQuantification):
     """ Pipeline member to evaluate the Softmax Entropy curves of the model for in-distribution and out-of-distribution data. """
 
     name = 'EvaluateSoftmaxEntropy'
@@ -81,6 +82,8 @@ class EvaluateSoftmaxEntropy(OODDetection):
             ], gpus=self.gpus, model_kwargs=self.model_kwargs_evaluate)
         scores, labels = torch.cat(scores), torch.cat(labels) # Scores are of shape : N, n_classes, n_ensemble
 
+        is_correct_prediction = scores.mean(-1).argmax(1) == labels
+
         # Aleatoric uncertainty is the expected entropy
         expected_entropy = -(scores * torch.log2(scores + self.entropy_eps)).sum(1)
         expected_entropy = expected_entropy.mean(-1) # Get the expectation over all ensemble members
@@ -91,17 +94,17 @@ class EvaluateSoftmaxEntropy(OODDetection):
 
         max_scores, argmax_scores = scores.mean(-1).max(-1)
 
-        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_distribution_labels(**kwargs)
-        self.ood_detection(-predictive_entropy, labels, 'total-predictive-entropy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
-        self.ood_detection(max_scores, labels, 'max-score', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+        auroc_labels, auroc_mask, distribution_labels, distribution_label_names = self.get_ood_distribution_labels(**kwargs)
+        self.uncertainty_quantification(-predictive_entropy, labels, 'total-predictive-entropy', is_correct_prediction, auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+        self.uncertainty_quantification(max_scores, labels, 'max-score', is_correct_prediction, auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
         if scores.size()[-1] > 1: # Some ensembling is used (ensembles, dropout, etc.), so epistemic and aleatoric estimates can be disentangled
-            self.ood_detection(-expected_entropy, labels, 'expected-softmax-entropy', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
-            self.ood_detection(-(predictive_entropy - expected_entropy), labels, 'mutual-information', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+            self.uncertainty_quantification(-expected_entropy, labels, 'expected-softmax-entropy', is_correct_prediction, auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+            self.uncertainty_quantification(-(predictive_entropy - expected_entropy), labels, 'mutual-information', is_correct_prediction, auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
             # Also use the empirical variance of the predicted class as proxy
             var = torch.var(scores, dim=-1) # Variance across ensemble, shape N x num_classes
             var_predicted_class = var[torch.arange(argmax_scores.size(0)), argmax_scores]
-            self.ood_detection(1 / (var_predicted_class + self.variance_eps), labels, 'predicted-class-variance', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+            self.uncertainty_quantification(1 / (var_predicted_class + self.variance_eps), labels, 'predicted-class-variance', is_correct_prediction, auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
             var_total = var.sum(-1)
-            self.ood_detection(1 / (var_total + self.variance_eps), labels, 'sampled-class-variance', auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
+            self.uncertainty_quantification(1 / (var_total + self.variance_eps), labels, 'sampled-class-variance', is_correct_prediction, auroc_labels, auroc_mask, distribution_labels, distribution_label_names, plot_proxy_log_scale=False, log_plots=self.log_plots, **kwargs)
 
         return args, kwargs

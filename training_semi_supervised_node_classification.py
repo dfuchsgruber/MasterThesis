@@ -1,5 +1,4 @@
 from typing import Union
-from model.bayesian import sample_normal
 from sacred import Experiment
 import numpy as np
 import torch
@@ -8,30 +7,27 @@ import seml
 import os.path as osp
 import os
 import json
-from collections import defaultdict
-import warnings
-import matplotlib.pyplot as plt
 import attr
+from collections import defaultdict
+import matplotlib.pyplot as plt
 import logging as l
 
 l.basicConfig(level=l.INFO)
 
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 from util import format_name
-from util import suppress_stdout as context_supress_stdout
-from model.semi_supervised_node_classification import SemiSupervisedNodeClassification, Ensemble
+from model.semi_supervised_node_classification import Ensemble
 from data.util import data_get_num_attributes, data_get_num_classes
 from data.construct import load_data_from_configuration
 import data.constants as dconstants
 from evaluation.pipeline import Pipeline
 from evaluation.logging import finish as finish_logging, build_table
-from model_registry import ModelRegistry
 import configuration
 import seed
+from train import train_model
+from model.build import make_model
 
 os.environ['WANDB_START_METHOD'] = 'thread'
 
@@ -48,17 +44,6 @@ def config():
     db_collection = None
     if db_collection is not None:
         ex.observers.append(seml.create_mongodb_observer(db_collection, overwrite=overwrite))
-
-class SelfTrainingCallback(pl.callbacks.Callback):
-    """ Callback that activates self-training after a certain amounts of epochs. """
-
-    def __init__(self, num_warmup_epochs: int):
-        super().__init__()
-        self.num_warmup_epochs = num_warmup_epochs
-
-    def on_epoch_start(self, trainer: pl.Trainer, model: pl.LightningModule):
-        if trainer.current_epoch >= self.num_warmup_epochs:
-            model.self_training = True
 
 class ExperimentWrapper:
 
@@ -83,13 +68,11 @@ class ExperimentWrapper:
         if config.run.use_default_configuration:
             configuration.update_with_default_configuration(config)
 
+        # Discard demanded GPUs if None available
         if not torch.cuda.is_available() and config.training.gpus > 0:
             l.warn(f'Requested {config.training.gpus} GPU devices but none are available. Not using GPU.')
             config.training.gpus = 0
-
         l.info(f'Logging to collection {self.collection_name}')
-
-        model_registry = ModelRegistry(collection_name=config.run.model_registry_collection_name)
 
         # Data Loading
         data_split_seed = seed.data_split_seeds()[config.run.split_idx]
@@ -112,84 +95,25 @@ class ExperimentWrapper:
         pipeline = Pipeline(config.evaluation.pipeline, config.evaluation, gpus=config.training.gpus, 
             ignore_exceptions=config.evaluation.ignore_exceptions)
 
-        # Training
+        # Model loading and training
         result = defaultdict(list)
         ensembles = []
         for ensemble_idx in range(config.ensemble.num_members):
-            model_seed = next(model_seed_generator)
 
-            config.registry.model_seed = model_seed
-
-            pl.seed_everything(model_seed)
-            model = SemiSupervisedNodeClassification(
-                config.model, 
-                data_get_num_attributes(data_dict[dconstants.TRAIN][0]), 
-                data_get_num_classes(data_dict[dconstants.TRAIN][0]), 
-                learning_rate=config.training.learning_rate,
-                weight_decay=config.training.weight_decay,
-            )
-            # print(f'Model parameters (trainable / all): {module_numel(model, only_trainable=True)} / {module_numel(model, only_trainable=False)}')
-            
             artifact_dir = osp.join(run_artifact_dir, f'{config.run.split_idx}-{config.run.initialization_idx}-{ensemble_idx}')
             os.makedirs(artifact_dir, exist_ok=True)
-
-            checkpoint_callback = ModelCheckpoint(
-                artifact_dir,
-                monitor=config.training.early_stopping.monitor,
-                mode=config.training.early_stopping.mode,
-                save_top_k=1,
-            )
-            early_stopping_callback = EarlyStopping(
-                monitor=config.training.early_stopping.monitor,
-                mode=config.training.early_stopping.mode,
-                patience=config.training.early_stopping.patience,
-                min_delta=config.training.early_stopping.min_delta,
-            )
-            callbacks = []
-            if config.training.self_training:
-                callbacks.append(SelfTrainingCallback(config.training.num_warmup_epochs))
-
-            # Model training
-            with context_supress_stdout(supress=config.training.suppress_stdout), warnings.catch_warnings():
-                warnings.filterwarnings("ignore")
-                trainer = pl.Trainer(max_epochs=config.training.max_epochs, deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ] + callbacks,
-                                    logger=logger,
-                                    progress_bar_refresh_rate=0,
-                                    gpus=config.training.gpus,
-                                    )
-                if config.run.use_pretrained_model:
-                    best_model_path = model_registry[config]
-                    if best_model_path is None:
-                        l.info(f'Could not find pre-trained model.')
-                else:
-                    best_model_path = None
-                if best_model_path is None:
-                    trainer.fit(model, data_loaders[dconstants.TRAIN], data_loaders[dconstants.VAL])
-                    best_model_path = checkpoint_callback.best_model_path
-                    model_registry[config] = best_model_path
-                    os.remove(best_model_path) # Clean the checkpoint from the artifact directory
-                    best_model_path = model_registry[config]
-                else:
-                    l.info(f'Loading pre-trained model from {best_model_path}')
-
-                model = model.load_from_checkpoint(best_model_path, strict=False, backbone_configuration=config.model)
-                model.eval()
-                
-            # Add the model to the ensemble
-            ensembles.append(model.eval())
+            model_seed = next(model_seed_generator)
+            config.registry.model_seed = model_seed
+            pl.seed_everything(model_seed)
+            model = make_model(config, data_get_num_attributes(data_dict[dconstants.TRAIN][0]), 
+                data_get_num_classes(data_dict[dconstants.TRAIN][0])) 
+            model = train_model(model, config, artifact_dir, data_loaders, logger=logger).eval()
+            ensembles.append(model)
 
         # An ensemble of 1 model behaves just like one model of this type: 
         # Therefore we always deal with an "ensemble", even if there is only one member
         model = Ensemble(ensembles, config.ensemble.num_samples, sample_at_eval=config.evaluation.sample)
         model.clear_and_disable_cache()
-        val_metrics = {
-            name : trainer.validate(model, data_loaders[name], ckpt_path=best_model_path)
-            for name in (dconstants.VAL, )
-        }
-        for name, metrics in val_metrics.items():
-            for val_metric in metrics:
-                for metric, value in val_metric.items():
-                    result[f'{metric}-{name}-{ensemble_idx}'].append(value)
 
         # Run evaluation pipeline
         l.info(f'Executing pipeline...')
@@ -214,7 +138,7 @@ class ExperimentWrapper:
         for metric, value in pipeline_metrics.items():
             result[metric].append(value)
         
-        plt.close('all')
+        plt.close('all') # To not run into OOM or plt warnings
 
         # Build wandb table for everything that was logged by the pipeline
         build_table(logger, all_logs)
@@ -232,17 +156,11 @@ class ExperimentWrapper:
 
         return {'results' : {metric : values for metric, values in result.items()}, 'configuration' : attr.asdict(config)}
 
-
-# We can call this command, e.g., from a Jupyter notebook with init_all=False to get an "empty" experiment wrapper,
-# where we can then for instance load a pretrained model to inspect the performance.
 @ex.command(unobserved=True)
 def get_experiment(init_all=False):
     experiment = ExperimentWrapper(init_all=init_all)
     return experiment
 
-
-# This function will be called by default. Note that we could in principle manually pass an experiment instance,
-# e.g., obtained by loading a model from the database or by calling this from a Jupyter notebook.
 @ex.automain
 def train(_config, experiment=None,):
     run_id = _config['overwrite']

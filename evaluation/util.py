@@ -94,7 +94,7 @@ def count_id_neighbours(data_loaders: List[DataLoader], k_max: int, mask: bool=T
         return count.permute(1, 0)
 
 
-def get_distribution_labels(fraction_id_nbs, threshold=0.0):
+def get_ood_distribution_labels(fraction_id_nbs, threshold=0.0):
     """ Gets information about which vertices have the attribute `is_out_of_distribution`. It counts for each vertex how big the fraction
     of vertices with that attribute is in its k-neighbourhood. For a k-neighbourhood, a threshold `t_k = 1 - (threshold ** k)` is defined.
     
@@ -150,7 +150,7 @@ def separate_distributions(distribution_labels, separate_distributions_by):
     Parameters:
     -----------
     distribution_labels : torch.Tensor, shape [N]
-        Distribution labels according to `get_distribution_labels`.
+        Distribution labels according to `get_ood_distribution_labels`.
     separate_distributions_by : str
         With which criterion to select and separate vertices used for the auroc computation.
         Possible are:
