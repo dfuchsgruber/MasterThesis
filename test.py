@@ -325,10 +325,14 @@ if __name__ == '__main__':
         ignore_exceptions = False,
         log_plots = True,
         pipeline = perturbation_pipeline + ood_pipeline + [
-            # {
-            #     'type' : 'EvaluateCalibration',
-            #     'evaluate_on' : ['val'],
-            # },
+            {
+                'type' : 'EvaluateAccuracy',
+                'evaluate_on' : ['val'],
+            },
+            {
+                'type' : 'EvaluateCalibration',
+                'evaluate_on' : ['val'],
+            },
         ],
         # sample = True,
     )

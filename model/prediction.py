@@ -165,7 +165,11 @@ class Prediction:
                 softs = softs.mean(-1)
         
         if HARD_PREDICTIONS in self.attributes:
-            hard = self.get(HARD_PREDICTIONS, average=average)
+            hard = self.get(HARD_PREDICTIONS, average=False)
+            if average:
+                if hard.size(-1) > 1:
+                    raise RuntimeError(f'Dont know how to make sense of an ensemble of hard predictions')
+                hard = hard[..., -1]
         else:
             hard = torch.argmax(softs, dim=1)
 

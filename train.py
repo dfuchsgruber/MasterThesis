@@ -1,3 +1,4 @@
+from model.parameterless import ParameterlessBase
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
@@ -96,6 +97,34 @@ def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, a
 
         return model
 
+def train_parameterless_model(model: ParameterlessBase, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], logger: Optional[Any]=None):
+    """ Trains a parameterless model using its fit function.
+
+    Parameters:
+    -----------
+    model : Any
+        The model to train
+    config : ExperimentConfiguration
+        The configuration for the whole experiment
+    artifact_dir : str
+        In which directory to put artifacts.
+    data_loaders : Dict[str, DataLoader]
+        Data loaders used for training. See `data.constants` for keys.
+    logger : Any, optional, default: None
+        Logger to use for training progress.
+    
+    Returns:
+    --------
+    model : Any
+        The input model, but after training.
+    """
+    data_loader_train = data_loaders[dconstants.TRAIN]
+    assert len(data_loader_train) == 1
+    for batch in data_loader_train:
+        pass
+    model.fit(batch)
+    logging.info(f'Fit {model.__class__}.')
+    return model
 
 def train_model(model: Any, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], logger: Optional[Any]=None):
     """ Trains a model if neccessary.
@@ -120,5 +149,7 @@ def train_model(model: Any, config: ExperimentConfiguration, artifact_dir: str, 
     """
     if model.training_type == mconstants.TRAIN_PL:
         return train_pl_model(model, config, artifact_dir, data_loaders, logger=logger)
+    elif model.training_type == mconstants.TRAIN_PARAMETERLESS:
+        return train_parameterless_model(model, config, artifact_dir, data_loaders, logger=logger)
     else:
         raise ValueError(f'Training for type {model.training_type} not implemented.')

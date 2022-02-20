@@ -8,6 +8,11 @@ GIN = 'gin'
 SAGE = 'sage'
 BGCN = 'bgcn'
 
+# Baselines
+APPR_DIFFUSION = 'appr_diffusion'
+INPUT_DISTANCE = 'input_distance'
+GDK = 'graph_dirichlet_kernel'
+
 # --- Reconstruction types ---
 AUTOENCODER = 'autoencoder'
 TRIPLET = 'triplet'
@@ -19,3 +24,4 @@ RELU = 'relu'
 
 # --- Wrapper Types ---
 TRAIN_PL = 'train-pytorch-lightning'
+TRAIN_PARAMETERLESS = 'train-parameterless'

@@ -62,13 +62,30 @@ class APPNPConfiguration(BaseConfiguration):
     teleportation_probability: Optional[float] = attr.ib(default=0.2, validator=attr.validators.instance_of(float), converter=float)
 
 @attr.s
+class InputDistanceConfiguration(BaseConfiguration):
+    """ Configuration for the parameterless input distance baseline. """
+    centroids: bool = attr.ib(default=False, converter=bool)
+    # Averages the k closest distances within a class. If k < 0, all distances within a class are averaged 
+    k: bool = attr.ib(default=-1, converter=int)
+    p = attr.ib(default=2) # Norm to use for distance
+    sigma: float = attr.ib(default=1.0, converter=float, validator=attr.validators.gt(0)) # scale parameter for the kernel
+
+@attr.s
+class GraphDirichletKernelConfiguration(BaseConfiguration):
+    """ Configuration for the parameterless graph dirichlet kernel baseline. """
+    sigma: float = attr.ib(default=1.0, converter=float, validator=attr.validators.gt(0)) # scale parameter for the kernel
+    # How the kernel distances (evidences) are aggregated within a class
+    reduction: str = attr.ib(default='sum', validator=attr.validators.in_(('sum', 'mul', 'mean', 'min', 'max')))
+
+@attr.s
 class ModelConfiguration(BaseConfiguration):
     """ Configuration for model initialization """ 
     hidden_sizes: List[int] = attr.ib(default=[64,], validator=lambda s, a, v: all(isinstance(x, int) for x in v))
     weight_scale: Optional[float] = attr.ib(default=1.0, validator=attr.validators.instance_of(float), converter=float)
     use_spectral_norm: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     model_type: str = attr.ib(default='gcn', validator=validators.in_((
-        mconstants.GCN, mconstants.APPNP, mconstants.GAT, mconstants.GIN, mconstants.SAGE, mconstants.BGCN,
+        mconstants.GCN, mconstants.APPNP, mconstants.GAT, mconstants.GIN, mconstants.SAGE, mconstants.BGCN, mconstants.APPR_DIFFUSION,
+        mconstants.INPUT_DISTANCE, mconstants.GDK,
         )), converter=lambda s: s.lower())
     use_bias: bool =  attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     activation: bool = attr.ib(default='leaky_relu', validator=validators.in_((mconstants.LEAKY_RELU, mconstants.RELU,)), converter=lambda s: s.lower())
@@ -87,6 +104,11 @@ class ModelConfiguration(BaseConfiguration):
     gat: Optional[GATConfiguration] = attr.ib(default=None, converter=make_cls_converter(GATConfiguration, optional=True))
     appnp: Optional[APPNPConfiguration] = attr.ib(default=None, converter=make_cls_converter(APPNPConfiguration, optional=True))
     bgcn: Optional[BayesianGCNConfiguration] = attr.ib(default=None, converter=make_cls_converter(BayesianGCNConfiguration, optional=True))
+
+    # Parameterless baselines
+    input_distance: Optional[InputDistanceConfiguration] = attr.ib(default=None, converter=make_cls_converter(InputDistanceConfiguration, optional=True))
+    gdk: Optional[GraphDirichletKernelConfiguration] = attr.ib(default=None, converter=make_cls_converter(GraphDirichletKernelConfiguration, optional=True))
+
 
     # Graph-Post-Net configuration
     # latent_size: int = attr.ib(default=16, converter=int)

@@ -27,6 +27,17 @@ def make_callback_get_predictions(mask=True, cpu=True, soft: bool=True, ensemble
         return scores
     return callback
 
+def make_callback_get_prediction_attribute(attribute, mask=True, cpu=True, ensemble_average=True):
+    """ Creates a callback that gets some attribute from the prediction. """
+    def callback(data, output: Prediction):
+        result = output.get(attribute, average=ensemble_average)
+        if mask:
+            result = result[data.mask]
+        if cpu:
+            result = result.cpu()
+        return result
+    return callback
+
 def make_callback_get_logits(mask=True, cpu=True, ensemble_average=False):
     """ Creates a callback that gets logits from a model ensemble. """
     def callback(data, output: Prediction):

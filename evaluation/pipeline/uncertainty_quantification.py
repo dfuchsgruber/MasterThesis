@@ -182,7 +182,7 @@ class OODSeparation(PipelineMember):
             raise RuntimeError(f'Could not separate distribution labels (id vs ood) by unknown type {cfg.data.ood_type}.')
 
 class UncertaintyQuantification(OODSeparation):
-    """ Pipeline member to perform OOD detection for a given metric. Evaluates AUROC scores and logs plots. """
+    """ Pipeline member to evaluate uncertainty quantification. Runs ood detection and misclassification detection experiments. """
 
     name = 'UncertaintyQuantification'
 
@@ -250,7 +250,7 @@ class UncertaintyQuantification(OODSeparation):
         try:
             if self.log_plots:
                 deg = self._get_degree(mask=True, k=None, **kwargs).long()
-                fig, axs = plot_against_neighbourhood(deg[ood_mask], proxy, ood_labels[ood_mask], x_label='Degree', y_label='Proxy', y_log_scale=plot_proxy_log_scale, k_min=1)
+                fig, axs = plot_against_neighbourhood(deg[ood_mask], proxy[ood_mask], ood_labels[ood_mask], x_label='Degree', y_label='Proxy', y_log_scale=plot_proxy_log_scale, k_min=1)
                 log_figure(kwargs['logs'], fig, f'{proxy_name}_by_degree{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                 pipeline_log(f'Saved {proxy_name} by degree to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_by_degree{self.suffix}.pdf')))
                 plt.close(fig)
@@ -307,7 +307,7 @@ class UncertaintyQuantification(OODSeparation):
         try:
             if self.log_plots:
                 fraction_id_nbs = self._count_id_nbs(mask=True, k=None, fraction=True, **kwargs)
-                fig, axs = plot_against_neighbourhood(fraction_id_nbs[ood_mask], proxy, ood_labels[ood_mask], x_label='Fraction of in distirubtion neighbours', y_label='Proxy', y_log_scale=plot_proxy_log_scale, k_min=1, x_min=0.0, x_max=1.0)
+                fig, axs = plot_against_neighbourhood(fraction_id_nbs[ood_mask], proxy[ood_mask], ood_labels[ood_mask], x_label='Fraction of in distirubtion neighbours', y_label='Proxy', y_log_scale=plot_proxy_log_scale, k_min=1, x_min=0.0, x_max=1.0)
                 log_figure(kwargs['logs'], fig, f'{proxy_name}_by_fraction_id_nbs{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                 pipeline_log(f'Saved {proxy_name} by fraction of id nbs to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_by_fraction_id_nbs{self.suffix}.pdf')))
                 plt.close(fig)
@@ -318,7 +318,7 @@ class UncertaintyQuantification(OODSeparation):
         try:
             if self.log_plots:
                 num_id_nbs = self._count_id_nbs(mask=True, k=None, fraction=False, **kwargs)
-                fig, axs = plot_against_neighbourhood(num_id_nbs[ood_mask], proxy, ood_labels[ood_mask], x_label='Number of in distirubtion neighbours', y_label='Proxy', y_log_scale=plot_proxy_log_scale, k_min=1)
+                fig, axs = plot_against_neighbourhood(num_id_nbs[ood_mask], proxy[ood_mask], ood_labels[ood_mask], x_label='Number of in distirubtion neighbours', y_label='Proxy', y_log_scale=plot_proxy_log_scale, k_min=1)
                 log_figure(kwargs['logs'], fig, f'{proxy_name}_by_num_id_nbs{self.suffix}', f'{proxy_name}_plots', kwargs['artifacts'], save_artifact=kwargs['artifact_directory'])
                 pipeline_log(f'Saved {proxy_name} by fraction of id nbs to ' + str(osp.join(kwargs['artifact_directory'], f'{proxy_name}_by_num_id_nbs{self.suffix}.pdf')))
                 plt.close(fig)
@@ -337,3 +337,52 @@ class UncertaintyQuantification(OODSeparation):
                 plt.close(fig)
         except Exception as e:
             pipeline_log(f'Could not misclassification plots for {proxy_name}. Reason {e}')
+
+@register_pipeline_member
+class UncertaintyQuantificationByPredictionAttribute(UncertaintyQuantification):
+    """ Quantify uncertainty using any attribute from the prediction. """
+
+    name = 'UncertaintyQuantificationByPredictionAttribute'
+
+    def __init__(self, attribute=None, name='unnamed proxy', mask=True, invert=False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.attribute = attribute
+        self.mask = mask
+        self.invert = invert
+        self.name = name
+
+    @property
+    def configuration(self):
+        return super().configuration | {
+            'Attribute to be used as proxy' : self.attribute,
+            'Quantify in Mask only' : self.mask,
+            'Invert attribute as proxy' : self.invert,
+            'Proxy name' : self.name,
+        }
+
+    def __call__(self, *args, **kwargs):
+        
+        data_loaders = [get_data_loader(name, kwargs['data_loaders']) for name in self.evaluate_on]
+        hard, labels, attr = run_model_on_datasets(kwargs['model'], data_loaders, callbacks=[
+                evaluation.callbacks.make_callback_get_predictions(mask=self.mask, ensemble_average=True, soft=False), # Average the prediction scores over the ensemble
+                evaluation.callbacks.make_callback_get_ground_truth(mask=self.mask),
+                evaluation.callbacks.make_callback_get_prediction_attribute(self.attribute, mask=self.mask, ensemble_average=True)
+            ], model_kwargs=self.model_kwargs_evaluate)
+        hard, labels, attr = torch.cat(hard), torch.cat(labels), torch.cat(attr, dim=0)
+
+        is_correct_prediction = hard == labels
+
+        if self.invert:
+            # For cases, when a higher proxy relates to lower certainty
+            attr *= -1
+        
+        ood_labels, ood_mask, distribution_labels, distribution_label_names = self.get_ood_distribution_labels(**kwargs)
+        self.uncertainty_quantification(attr, labels,
+                                self.name,
+                                is_correct_prediction,
+                                ood_labels, ood_mask, distribution_labels,
+                                distribution_label_names, plot_proxy_log_scale=False, **kwargs
+        )
+
+        return args, kwargs
+

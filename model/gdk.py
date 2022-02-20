@@ -1,5 +1,6 @@
 # Based on https://github.com/stadlmax/Graph-Posterior-Network/blob/main/gpn/models/gdk.py
 
+from functools import reduce
 import scipy.sparse as sp
 import numpy as np
 import math
@@ -8,15 +9,13 @@ import torch.nn as nn
 import torch_scatter
 from torch import Tensor
 import networkx as nx
-from networkx.algorithms.shortest_paths.unweighted import single_source_shortest_path_length
 import torch_geometric.transforms as T
-from torch_geometric.utils import to_networkx
 from torch_geometric.data import Data
 import logging
 
 from configuration import ModelConfiguration
-
-
+from model.parameterless import ParameterlessBase
+from model.prediction import *
 
 def gaussian_kernel(x: Tensor, sigma: float = 1.0) -> Tensor:
     sigma_scale = 1.0 / (sigma * math.sqrt(2 * math.pi))
@@ -24,31 +23,49 @@ def gaussian_kernel(x: Tensor, sigma: float = 1.0) -> Tensor:
     return sigma_scale * k_dis
 
 
-class GDK:
+class GraphDirichletKernel(ParameterlessBase):
     """ Parameterless Graph Dirichlet Kernel baseline """
 
-    def __init__(self, config: ModelConfiguration):
-        self.cached = config.cached
-        self._alpha_cache = None
-        self.vertices_train = None
-        self.num_classes = None
+    def __init__(self, config: ModelConfiguration, num_classes: int):
+        super().__init__()
+        self.num_classes = num_classes
+        self.sigma = config.gdk.sigma
+        self.reduction = config.gdk.reduction
+        self.self_loop_fill_value = config.self_loop_fill_value
 
-    def forward(self, batch: Data, *args, **kwargs):
-        if self.vertices_train is None:
-            raise RuntimeError(f'Set the vertices the GDK is fit to first.')
-        batch = T.AddSelfLoops()(batch)
+    def forward(self, batch: Data, *args, **kwargs) -> Prediction:
+        idxs_fit = self.get_fit_idxs(batch)
+
+        batch = T.AddSelfLoops(fill_value=self.self_loop_fill_value)(batch)
         n = batch.x.size(0)
 
-        idx_train = [batch.vertex_to_idx[v] for v in self.vertices_train if v in batch.vertex_to_idx]
-        y_train = batch.y[idx_train]
-        evidence = torch.zeros((n, self.num_classes), device=batch.y.device)
+        y_train = batch.y[idxs_fit]
 
+        # Evidence is kernelized shorest path distance
         edge_index = batch.edge_index.numpy()
         A = sp.coo_matrix((np.ones(edge_index.shape[1]), edge_index), shape=(n, n)).tocsr()
-        distances = sp.csgraph.shortest_path(A, indices=idx_train)
+        distances = sp.csgraph.shortest_path(A, indices=idxs_fit).T # N, num_fit
         logging.info('GDK - Computed shortest path distances.')
         distances[~np.isfinite(distances)] = 1e10 # large value
-        distances = torch.tensor(distances)
+        distances = gaussian_kernel(torch.tensor(distances), sigma=self.sigma)
 
+        evidence = torch_scatter.scatter(distances, y_train, dim=1, reduce=self.reduction, dim_size=self.num_classes) # N, num_classes
+        alpha = 1.0 + evidence
 
+        soft = alpha / (alpha.sum(-1, keepdim=True) + 1e-10)
+        hard = alpha.argmax(1)
+
+        return Prediction(
+            features=None,
+            # The evidence can be used as proxy for uncertainty
+            # We consider: i) evidence for the predicted class ii) evidence for all classes
+            evidence_prediction = alpha[torch.arange(evidence.size(0)), hard],
+            evidence_total = alpha.sum(1),
+            evidence_structure_prediction = evidence[torch.arange(evidence.size(0)), hard],
+            evidence_structure_total = evidence.sum(1),
+            **{
+                SOFT_PREDICTIONS : soft,
+                HARD_PREDICTIONS : hard,
+            }
+        )
 
