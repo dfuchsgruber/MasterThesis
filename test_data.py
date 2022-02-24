@@ -1,5 +1,5 @@
 import configuration
-import data.construct
+import data.build
 from copy import deepcopy
 import data.constants as dconstants
 import data.util as dutil
@@ -25,7 +25,7 @@ if cfg['data']['ood_type'] in dconstants.PERTURBATION:
 
 cfg = configuration.get_experiment_configuration(cfg)
 
-data_list, fixed_vertices = data.construct.load_data_from_configuration(cfg['data'])
+data_list, fixed_vertices = data.build.load_data_from_configuration(cfg['data'])
 
 data_val = data_list[0][dconstants.VAL]
 data_ood = data_list[0][dconstants.OOD_VAL]

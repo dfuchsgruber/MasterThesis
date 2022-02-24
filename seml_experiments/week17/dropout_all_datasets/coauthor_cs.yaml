@@ -720,6 +720,6 @@ slurm:
   sbatch_options:
     cpus-per-task: 2
     gres: gpu:1
-    mem: 64G
+    mem: 256G
     partition: gpu_large
     time: 0-24:00

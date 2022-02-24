@@ -233,13 +233,13 @@ def labels_to_idx(labels, dataset):
     Returns:
     --------
     labels : list of int
-        Integer labels.
+        Integer labels. Returns -1 in the case a label does not exist.
     """
     if labels == 'all':
         return list(dataset.label_to_idx.values())
     else:
         if all(isinstance(label, str) for label in labels):
-            labels = [dataset.label_to_idx[label] for label in labels]
+            labels = [dataset.label_to_idx.get(label, -1) for label in labels]
         elif all(isinstance(label, int) for label in labels):
             raise RuntimeError(f'Using ints to adress labels is deprecated!')
         try:

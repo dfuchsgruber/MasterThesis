@@ -20,7 +20,7 @@ from pytorch_lightning.loggers import WandbLogger
 from util import format_name
 from model.semi_supervised_node_classification import Ensemble
 from data.util import data_get_num_attributes, data_get_num_classes
-from data.construct import load_data_from_configuration
+from data.build import load_data_from_configuration
 import data.constants as dconstants
 from evaluation.pipeline import Pipeline
 from evaluation.logging import finish as finish_logging, build_table
@@ -107,6 +107,7 @@ class ExperimentWrapper:
             pl.seed_everything(model_seed)
             model = make_model(config, data_get_num_attributes(data_dict[dconstants.TRAIN][0]), 
                 data_get_num_classes(data_dict[dconstants.TRAIN][0])) 
+            print(model)
             model = train_model(model, config, artifact_dir, data_loaders, logger=logger).eval()
             ensembles.append(model)
 

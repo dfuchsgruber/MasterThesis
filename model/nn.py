@@ -139,11 +139,13 @@ class BaysianGCNConv(GCNConv):
 class LinearWithSpectralNormaliatzion(nn.Module):
     """ Wrapper for a linear layer that applies spectral normalization and rescaling to the weight. """
 
-    def __init__(self, input_dim, output_dim, config: ModelConfiguration):
+    can_sample = False
+    
+    def __init__(self, input_dim, output_dim, config: ModelConfiguration, use_spectral_norm: bool = True):
         super().__init__()
         self.linear = nn.Linear(input_dim, output_dim, bias=config.use_bias)
         self._cached = False # Unused, for the interface
-        if config.use_spectral_norm:
+        if use_spectral_norm:
             self.linear = spectral_norm(self.linear, name='weight', rescaling=config.weight_scale)
 
     def clear_and_disable_cache(self):
@@ -211,12 +213,12 @@ class ResidualBlock(BasicBlock):
     config : ModelConfiguration, optional
         The configuration.
     """
-    def __init__(self, input_dim: int, output_dim: int, conv: nn.Module, act: Optional[nn.Module], config: ModelConfiguration):
+    def __init__(self, input_dim: int, output_dim: int, conv: nn.Module, act: Optional[nn.Module], config: ModelConfiguration, use_spectral_norm: bool=True):
         super().__init__(input_dim, output_dim, conv, act, config)
         self.conv = conv
         self.act = act
         if input_dim != output_dim:
-            self.input_projection = LinearWithSpectralNormaliatzion(input_dim, output_dim, config)
+            self.input_projection = LinearWithSpectralNormaliatzion(input_dim, output_dim, config, use_spectral_norm=use_spectral_norm)
 
             if config.freeze_residual_projection:
                 for param in self.input_projection.parameters():
@@ -250,9 +252,9 @@ def make_convolutions(input_dim: int, num_classes: int, cfg: ModelConfiguration,
         else:
             act = make_activation_by_configuration(cfg)
 
-        conv = make_conv(in_dim, out_dim, cfg, *args, **kwargs)
-        if cfg.residual and idx < len(dims) - 1:
-            conv = ResidualBlock(in_dim, out_dim, conv, act, cfg)
+        conv = make_conv(in_dim, out_dim, cfg, use_spectral_norm=sn, *args, **kwargs)
+        if cfg.residual and (idx < len(dims) - 1 or cfg.use_residual_on_last_layer):
+            conv = ResidualBlock(in_dim, out_dim, conv, act, cfg, use_spectral_norm=sn)
         else:
             conv = BasicBlock(in_dim, out_dim, conv, act, cfg)
         convs.append(conv)

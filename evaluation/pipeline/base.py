@@ -1,3 +1,4 @@
+from typing import Optional
 from util import format_name
 from itertools import product
 from copy import deepcopy

@@ -78,17 +78,22 @@ class GraphDirichletKernelConfiguration(BaseConfiguration):
     reduction: str = attr.ib(default='sum', validator=attr.validators.in_(('sum', 'mul', 'mean', 'min', 'max')))
 
 @attr.s
+class LaplaceBayesianGCNConfiguration(BaseConfiguration):
+    """ Configuration for laplace posterior approximation. """
+    seed: int = attr.ib(default=1337, converter=int)
+    hessian_structure = attr.ib(default=mconstants.DIAG_HESSIAN, converter=lambda s: s.lower(), validator=validators.in_((mconstants.DIAG_HESSIAN, mconstants.FULL_HESSIAN)))
+
+
+@attr.s
 class ModelConfiguration(BaseConfiguration):
     """ Configuration for model initialization """ 
     hidden_sizes: List[int] = attr.ib(default=[64,], validator=lambda s, a, v: all(isinstance(x, int) for x in v))
+    linear_classification: bool = attr.ib(default=False, converter=bool)
     weight_scale: Optional[float] = attr.ib(default=1.0, validator=attr.validators.instance_of(float), converter=float)
     use_spectral_norm: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
-    model_type: str = attr.ib(default='gcn', validator=validators.in_((
-        mconstants.GCN, mconstants.APPNP, mconstants.GAT, mconstants.GIN, mconstants.SAGE, mconstants.BGCN, mconstants.APPR_DIFFUSION,
-        mconstants.INPUT_DISTANCE, mconstants.GDK,
-        )), converter=lambda s: s.lower())
+    model_type: str = attr.ib(default=mconstants.GCN, validator=validators.in_(mconstants.MODEL_TYPES), converter=lambda s: s.lower())
     use_bias: bool =  attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
-    activation: bool = attr.ib(default='leaky_relu', validator=validators.in_((mconstants.LEAKY_RELU, mconstants.RELU,)), converter=lambda s: s.lower())
+    activation: bool = attr.ib(default=mconstants.LEAKY_RELU, validator=validators.in_((mconstants.LEAKY_RELU, mconstants.RELU,)), converter=lambda s: s.lower())
     leaky_relu_slope: bool = attr.ib(default=1e-2, validator=attr.validators.instance_of(float), converter=float)
     residual: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     residual_pre_activation: bool = attr.ib(default=True, validator=attr.validators.instance_of(bool), converter=bool)
@@ -96,6 +101,7 @@ class ModelConfiguration(BaseConfiguration):
     dropout: float = attr.ib(default=0.0, validator=validators.and_(validators.ge(0), validators.le(1)), converter=float)
     drop_edge: float = attr.ib(default=0.0, validator=validators.and_(validators.ge(0), validators.le(1)), converter=float)
     use_spectral_norm_on_last_layer: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
+    use_residual_on_last_layer: bool = attr.ib(default=False, converter=bool)
     cached: bool = attr.ib(default=True, validator=attr.validators.instance_of(bool), converter=bool) # Cache will be cleared and disabled after training
     self_loop_fill_value: float = attr.ib(default=1.0, converter=float)
 
@@ -104,11 +110,11 @@ class ModelConfiguration(BaseConfiguration):
     gat: Optional[GATConfiguration] = attr.ib(default=None, converter=make_cls_converter(GATConfiguration, optional=True))
     appnp: Optional[APPNPConfiguration] = attr.ib(default=None, converter=make_cls_converter(APPNPConfiguration, optional=True))
     bgcn: Optional[BayesianGCNConfiguration] = attr.ib(default=None, converter=make_cls_converter(BayesianGCNConfiguration, optional=True))
+    laplace: Optional[LaplaceBayesianGCNConfiguration] = attr.ib(default=None, converter=make_cls_converter(LaplaceBayesianGCNConfiguration, optional=True))
 
     # Parameterless baselines
     input_distance: Optional[InputDistanceConfiguration] = attr.ib(default=None, converter=make_cls_converter(InputDistanceConfiguration, optional=True))
     gdk: Optional[GraphDirichletKernelConfiguration] = attr.ib(default=None, converter=make_cls_converter(GraphDirichletKernelConfiguration, optional=True))
-
 
     # Graph-Post-Net configuration
     # latent_size: int = attr.ib(default=16, converter=int)
@@ -301,6 +307,6 @@ def update_with_default_configuration(config: ExperimentConfiguration):
         config.data.base_labels = config.data.train_labels
         logging.info(f'Set configuration value data.base_labels to {config.data.train_labels}')
         config.data.corpus_labels = config.data.train_labels
-        logging.info(f'Set configuration value data.corpus_labels to {config.data.train_labels}')
-        config.data.left_out_class_labels = config.data.train_labels
-        logging.info(f'Set configuration value data.corpus_labels to {config.data.train_labels}')
+        logging.info(f'Set configuration value data.corpus_labels to {config.data.corpus_labels}')
+        config.data.left_out_class_labels = []
+        logging.info(f'Set configuration value data.left_out_class_labels to {config.data.left_out_class_labels}')

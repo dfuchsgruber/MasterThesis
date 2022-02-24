@@ -4,6 +4,7 @@ import numpy as np
 import scipy.sparse as sp
 from util import k_hop_neighbourhood
 from model.prediction import Prediction
+from data.util import labels_to_idx
 
 def make_callback_get_features(layer=-2, mask=True, cpu=True, ensemble_average=True):
     """ Creates callback that gets features from the second to last layer. """
@@ -118,11 +119,12 @@ def make_callback_get_degree(hops=1, mask=True, cpu=True):
 
 def make_callback_is_ground_truth_in_labels(labels, mask=True, cpu=True):
     """ Makes a callback that identifies all train labels in the ground truth. """
-    labels = set(labels)
+    _labels = labels
     def callback(data, output):
+        labels = labels_to_idx(_labels, data)
         is_train_label = torch.zeros_like(data.y).bool()
         for label in labels:
-            is_train_label[data.y == data.label_to_idx.get(label, -1)] = True
+            is_train_label[data.y == label] = True
         if mask:
             is_train_label = is_train_label[data.mask]
         if cpu:

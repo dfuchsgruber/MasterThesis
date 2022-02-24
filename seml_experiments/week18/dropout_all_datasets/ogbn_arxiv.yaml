@@ -11,6 +11,7 @@ fixed:
   ensemble.num_samples: 10
   evaluation.ignore_exceptions: false
   evaluation.log_plots: false
+  evaluation.sample: true
   model.activation: leaky_relu
   model.hidden_sizes:
   - 64
@@ -56,7 +57,7 @@ left-out-classes_drop_edge:
     evaluation.pipeline:
     - evaluate_on:
       - val
-      name: _val
+      name: val
       type: EvaluateAccuracy
     - evaluate_on:
       - val
@@ -66,7 +67,7 @@ left-out-classes_drop_edge:
       type: EvaluateAccuracy
     - evaluate_on:
       - val
-      name: _val
+      name: val
       type: EvaluateCalibration
     - evaluate_on:
       - val
@@ -118,7 +119,7 @@ left-out-classes_drop_edge:
       type: EvaluateLogitEnergy
     - evaluate_on:
       - test
-      name: _test
+      name: test
       type: EvaluateAccuracy
     - evaluate_on:
       - test
@@ -128,7 +129,7 @@ left-out-classes_drop_edge:
       type: EvaluateAccuracy
     - evaluate_on:
       - test
-      name: _test
+      name: test
       type: EvaluateCalibration
     - evaluate_on:
       - test
@@ -188,7 +189,7 @@ left-out-classes_dropout:
     evaluation.pipeline:
     - evaluate_on:
       - val
-      name: _val
+      name: val
       type: EvaluateAccuracy
     - evaluate_on:
       - val
@@ -198,7 +199,7 @@ left-out-classes_dropout:
       type: EvaluateAccuracy
     - evaluate_on:
       - val
-      name: _val
+      name: val
       type: EvaluateCalibration
     - evaluate_on:
       - val
@@ -250,7 +251,7 @@ left-out-classes_dropout:
       type: EvaluateLogitEnergy
     - evaluate_on:
       - test
-      name: _test
+      name: test
       type: EvaluateAccuracy
     - evaluate_on:
       - test
@@ -260,7 +261,7 @@ left-out-classes_dropout:
       type: EvaluateAccuracy
     - evaluate_on:
       - test
-      name: _test
+      name: test
       type: EvaluateCalibration
     - evaluate_on:
       - test
@@ -320,7 +321,7 @@ perturbations_drop_edge:
     evaluation.pipeline:
     - evaluate_on:
       - val
-      name: _val
+      name: val
       type: EvaluateAccuracy
     - evaluate_on:
       - val
@@ -330,7 +331,7 @@ perturbations_drop_edge:
       type: EvaluateAccuracy
     - evaluate_on:
       - val
-      name: _val
+      name: val
       type: EvaluateCalibration
     - evaluate_on:
       - val
@@ -340,14 +341,14 @@ perturbations_drop_edge:
       type: EvaluateCalibration
     - base_data: ood-val
       dataset_name: ber-val
-      name: _val
+      name: val
       parameters:
         p: 0.5
       perturbation_type: bernoulli
       type: PerturbData
     - base_data: ood-val
       dataset_name: normal-val
-      name: _val
+      name: val
       parameters:
         scale: 1.0
       perturbation_type: normal
@@ -414,7 +415,7 @@ perturbations_drop_edge:
       type: EvaluateLogitEnergy
     - evaluate_on:
       - test
-      name: _test
+      name: test
       type: EvaluateAccuracy
     - evaluate_on:
       - test
@@ -424,7 +425,7 @@ perturbations_drop_edge:
       type: EvaluateAccuracy
     - evaluate_on:
       - test
-      name: _test
+      name: test
       type: EvaluateCalibration
     - evaluate_on:
       - test
@@ -434,14 +435,14 @@ perturbations_drop_edge:
       type: EvaluateCalibration
     - base_data: ood-test
       dataset_name: ber-test
-      name: _test
+      name: test
       parameters:
         p: 0.5
       perturbation_type: bernoulli
       type: PerturbData
     - base_data: ood-test
       dataset_name: normal-test
-      name: _test
+      name: test
       parameters:
         scale: 1.0
       perturbation_type: normal
@@ -516,7 +517,7 @@ perturbations_dropout:
     evaluation.pipeline:
     - evaluate_on:
       - val
-      name: _val
+      name: val
       type: EvaluateAccuracy
     - evaluate_on:
       - val
@@ -526,7 +527,7 @@ perturbations_dropout:
       type: EvaluateAccuracy
     - evaluate_on:
       - val
-      name: _val
+      name: val
       type: EvaluateCalibration
     - evaluate_on:
       - val
@@ -536,14 +537,14 @@ perturbations_dropout:
       type: EvaluateCalibration
     - base_data: ood-val
       dataset_name: ber-val
-      name: _val
+      name: val
       parameters:
         p: 0.5
       perturbation_type: bernoulli
       type: PerturbData
     - base_data: ood-val
       dataset_name: normal-val
-      name: _val
+      name: val
       parameters:
         scale: 1.0
       perturbation_type: normal
@@ -610,7 +611,7 @@ perturbations_dropout:
       type: EvaluateLogitEnergy
     - evaluate_on:
       - test
-      name: _test
+      name: test
       type: EvaluateAccuracy
     - evaluate_on:
       - test
@@ -620,7 +621,7 @@ perturbations_dropout:
       type: EvaluateAccuracy
     - evaluate_on:
       - test
-      name: _test
+      name: test
       type: EvaluateCalibration
     - evaluate_on:
       - test
@@ -630,14 +631,14 @@ perturbations_dropout:
       type: EvaluateCalibration
     - base_data: ood-test
       dataset_name: ber-test
-      name: _test
+      name: test
       parameters:
         p: 0.5
       perturbation_type: bernoulli
       type: PerturbData
     - base_data: ood-test
       dataset_name: normal-test
-      name: _test
+      name: test
       parameters:
         scale: 1.0
       perturbation_type: normal
@@ -708,8 +709,8 @@ perturbations_dropout:
   grid: {}
 seml:
   executable: training_semi_supervised_node_classification.py
-  name: week17_dropout_all_datasets
-  output_dir: /nfs/students/fuchsgru/seml_output/week17
+  name: week18_dropout_all_datasets
+  output_dir: /nfs/students/fuchsgru/seml_output/week18
   project_root_dir: ../../..
 slurm:
   experiments_per_job: 2

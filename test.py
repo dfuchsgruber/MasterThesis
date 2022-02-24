@@ -21,11 +21,7 @@ if __name__ == '__main__':
                         train_portion=20, test_portion_fixed=0.2,
                         split_type='uniform',
                         type='npz',
-                        base_labels = ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning','Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance'],
-                        train_labels = ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning'],
-                        left_out_class_labels = ['Operating_Systems/Distributed', 'Operating_Systems/Memory_Management', 'Operating_Systems/Realtime', 'Operating_Systems/Fault_Tolerance'],
-                        corpus_labels = ['Artificial_Intelligence/Machine_Learning/Case-Based', 'Artificial_Intelligence/Machine_Learning/Theory', 'Artificial_Intelligence/Machine_Learning/Genetic_Algorithms', 'Artificial_Intelligence/Machine_Learning/Probabilistic_Methods', 'Artificial_Intelligence/Machine_Learning/Neural_Networks','Artificial_Intelligence/Machine_Learning/Rule_Learning','Artificial_Intelligence/Machine_Learning/Reinforcement_Learning'],
-                        preprocessing='bag_of_words',
+                        preprocessing='none',
                         # ood_type = dconstants.LEFT_OUT_CLASSES,
                         ood_type = dconstants.PERTURBATION,
                         setting = dconstants.HYBRID,
@@ -35,7 +31,6 @@ if __name__ == '__main__':
                         #language_model = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
                         #language_model = 'allenai/longformer-base-4096',
                         drop_train_vertices_portion = 0.1,
-                        ood_sampling_strategy = dconstants.SAMPLE_ALL,
                         )
 
     # data_cfg = configuration.DataConfiguration(
@@ -56,7 +51,7 @@ if __name__ == '__main__':
     spectral_norm_cfg = {
         'use_spectral_norm' : True,
         'residual' : True,
-        'weight_scale' : 2.2,
+        'weight_scale' : 3.0,
     }
 
     reconstruction_cfg = {
@@ -71,7 +66,7 @@ if __name__ == '__main__':
 
 
     model_cfg = configuration.ModelConfiguration(
-        model_type=mconstants.GCN,
+        model_type=mconstants.GCN_LINEAR_CLASSIFICATION,
         # model_type = mconstants.BGCN,
         #model_type = 'appnp',
         # dropout = 0.5,
@@ -86,7 +81,7 @@ if __name__ == '__main__':
         cached=True,
         # bgcn = {},
         # reconstruction = reconstruction_cfg,
-        # **spectral_norm_cfg,
+        **spectral_norm_cfg,
         )
 
     run_cfg = configuration.RunConfiguration(
@@ -96,7 +91,7 @@ if __name__ == '__main__':
         ],
         split_idx = split_idx,
         initialization_idx = init_idx,
-        use_pretrained_model = True,
+        use_pretrained_model = False,
         use_default_configuration = True,
     )
 
@@ -163,6 +158,10 @@ if __name__ == '__main__':
     ood_pipeline = []
     for ood_name, ood_dataset in ood_datasets.items():
         ood_pipeline += [
+            {
+                'type' : 'EvaluateAccuracy',
+                'evaluate_on' : ['val'],
+            },
             {
                 'type' : 'FitFeatureDensityGrid',
                 'fit_to' : ['train'],
@@ -247,17 +246,17 @@ if __name__ == '__main__':
             #     'separate_distributions_tolerance' : 0.1,
             #     'name' : ood_name,
             # },
-            {
-                'type' : 'EvaluateFeatureSpaceDistance',
-                'fit_to' : ['train'],
-                'evaluate_on' : [ood_dataset],
-                'log_plots' : True,
-                'separate_distributions_by' : ood_separation,
-                'separate_distributions_tolerance' : 0.1,
-                'k' : 5,
-                'layer' : -2,
-                'name' : ood_name,
-            },
+            # {
+            #     'type' : 'EvaluateFeatureSpaceDistance',
+            #     'fit_to' : ['train'],
+            #     'evaluate_on' : [ood_dataset],
+            #     'log_plots' : True,
+            #     'separate_distributions_by' : ood_separation,
+            #     'separate_distributions_tolerance' : 0.1,
+            #     'k' : 5,
+            #     'layer' : -2,
+            #     'name' : ood_name,
+            # },
             # {
             #     'type' : 'EvaluateFeatureSpaceDistance',
             #     'fit_to' : ['train'],
@@ -293,13 +292,13 @@ if __name__ == '__main__':
             #     'separate_distributions_tolerance' : 0.1,
             #      'name' : ood_name,
             # },
-            # {
-            #     'type' : 'EvaluateSoftmaxEntropy',
-            #     'evaluate_on' : [ood_dataset],
-            #     'separate_distributions_by' : ood_separation,
-            #     'separate_distributions_tolerance' : 0.1,
-            #     'name' : ood_name,
-            # },
+            {
+                'type' : 'EvaluateSoftmaxEntropy',
+                'evaluate_on' : [ood_dataset],
+                'separate_distributions_by' : ood_separation,
+                'separate_distributions_tolerance' : 0.1,
+                'name' : ood_name,
+            },
             # {
             #     'type' : 'EvaluateLogitEnergy',
             #     'evaluate_on' : [ood_dataset],

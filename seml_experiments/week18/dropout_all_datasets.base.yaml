@@ -1,14 +1,14 @@
 seml:
   executable: training_semi_supervised_node_classification.py
-  name: week17_dropout_all_datasets
-  output_dir: /nfs/students/fuchsgru/seml_output/week17
+  name: week18_dropout_all_datasets
+  output_dir: /nfs/students/fuchsgru/seml_output/week18
   project_root_dir: ../../..
 
 slurm:
   experiments_per_job: 8 # Dont make it too large, especially for ogbn arxiv
   sbatch_options:
     gres: gpu:1       # num GPUs
-    mem: 256G          # memory
+    mem: 64G          # memory
     cpus-per-task: 2  # num cores
     time: 0-24:00     # max time, D-HH:MM
     partition: gpu_large
@@ -53,6 +53,7 @@ fixed:
 
   evaluation.ignore_exceptions: false
   evaluation.log_plots: false
+  evaluation.sample: true # Important for ensembles and BNN, but disable otherwise
 
   ensemble.num_members: 1
   ensemble.num_samples: 10

@@ -10,7 +10,7 @@ import yaml
 
 from configuration import *
 import data.constants as dconstants
-from data.construct import load_data_from_configuration
+from data.build import load_data_from_configuration
 from evaluation.pipeline import Pipeline
 import seed
 import argparse

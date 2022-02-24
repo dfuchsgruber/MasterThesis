@@ -97,4 +97,5 @@ class SingleGraphDataset(Dataset):
             is_out_of_distribution = is_out_of_distribution,
             **attributes
         )
+
         return SingleGraphDataset(data, transform=transform)

@@ -24,9 +24,7 @@ def log_metrics(module: pl.LightningModule, metrics, prefix=None):
 
 class SemiSupervisedNodeClassification(pl.LightningModule):
     """ Wrapper for networks that perform semi supervised node classification. """
-
-    training_type = mconst.TRAIN_PL
-
+    
     def __init__(self, backbone_configuration: ModelConfiguration, num_input_features, num_classes, learning_rate=1e-2, weight_decay=0.0,):
         super().__init__()
         self.save_hyperparameters(ignore=["backbone_configuration"])
@@ -48,6 +46,10 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
     @property
     def self_training(self):
         return self._self_training
+
+    @property
+    def training_type(self):
+        return self.backbone.training_type
 
     @self_training.setter
     def self_training(self, value: bool):
@@ -127,6 +129,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         return self.backbone.get_output_weights()
 
 
+
 class Ensemble(pl.LightningModule):
     """ Wrapper class for a model ensemble.
     
@@ -136,7 +139,7 @@ class Ensemble(pl.LightningModule):
         List of torch modules that output predictions.
     num_samples : int
         How many samples to draw from each member.
-    sample_at_eval : bool
+    sample_at_eval : bool, default: False
         If samples should be drawn by default at evaluation time. Setting it to `True` will enable dropout etc.
         Can be overriden by passing `sample = None` to forward pass.
     """

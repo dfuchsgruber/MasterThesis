@@ -15,12 +15,13 @@ def build():
     with open(osp.join(dir, fn + '.base.yaml')) as f:
         base = yaml.safe_load(f)
 
-    for dataset, jobs in (('cora_full', 16),  ('cora_ml', 16), ('pubmed', 16), ('citeseer', 16), ('coauthor_cs', 8), ('amazon_photo', 8), ('ogbn_arxiv', 2)):
+    for dataset, jobs in (('cora_full', 16),  ('cora_ml', 32), ('pubmed', 32), ('citeseer', 32), ('coauthor_cs', 8), ('amazon_photo', 8), ('ogbn_arxiv', 2)):
         cfg = deepcopy({k : base[k] for k in BASE_KEYS})
         cfg['fixed']['data.dataset'] = dataset
         cfg['slurm']['experiments_per_job'] = jobs
         if  dataset == 'ogbn_arxiv':
             cfg['grid']['run.split_idx'] = {'type' : 'choice', 'options' : [0]}
+            cfg['slurm']['sbatch_options']['mem'] = '256G'
 
         build_experiments(cfg)
 
@@ -126,7 +127,6 @@ def build_experiments(cfg):
                         
 
                 for member in pipeline:
-                    member['log_plots'] = False # We dont want any images as it slows down...
                     if 'name' in member:
                         member['name'] += f'_{eval_mode}'
                     else:

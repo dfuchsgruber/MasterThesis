@@ -294,6 +294,8 @@ class NpzDataset(SingleGraphDataset):
                 vertex_to_idx = NpzDataset._build_vertex_to_idx(idx_to_node, vertices_to_keep)
             if 'attr_names' in loader and len(loader['attr_names']):
                 feature_to_idx = {feature : idx for idx, feature in enumerate(loader['attr_names'])}
+            elif 'idx_to_attr' in loader:
+                feature_to_idx = {attr : idx for idx, attr in loader['idx_to_attr'].item().items()}
             else:
                 feature_to_idx = {f'feature_{i}' : i for i in range(X.shape[1])}
         else:

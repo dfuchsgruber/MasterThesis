@@ -16,6 +16,7 @@ from torch import Tensor
 SOFT_PREDICTIONS = 'soft_predictions'
 HARD_PREDICTIONS = 'hard_predictions'
 LOGITS = 'logits'
+INPUTS = 'inputs'
 
 class Prediction:
     """ Summarizes the predictions of a model ensemble. Is also used for single models. 
@@ -83,8 +84,8 @@ class Prediction:
         features : Tensor, shape [N, D, (num_members)]
             Inputs.
         """
-        if 'inputs' in self.attributes:
-            inputs = self.attributes['inputs']
+        if INPUTS in self.attributes:
+            inputs = self.attributes[INPUTS]
         else:
             inputs = [features[0] for features in self.features]
         if average and len(inputs) > 1:

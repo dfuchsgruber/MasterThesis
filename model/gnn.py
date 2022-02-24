@@ -1,3 +1,4 @@
+from copy import deepcopy
 from configuration import ModelConfiguration
 import numpy as np
 import torch.nn as nn
@@ -11,6 +12,7 @@ import model.constants as mconst
 from configuration import ModelConfiguration
 from typing import Callable
 from util import aggregate_matching
+import laplace
 
 from model.nn import *
 from model.prediction import *
@@ -33,6 +35,8 @@ def _get_convolution_weights(conv: nn.Module) -> torch.Tensor:
 
 class ModelBase(nn.Module):
     """ Base class for GNN models. """
+
+    training_type = mconst.TRAIN_PL
 
     def __init__(self, config: ModelConfiguration):
         super().__init__()
@@ -60,14 +64,15 @@ class ModelBase(nn.Module):
         """ Gets additional losses based on the model parameters. """
         return {}
 
+
 class GCN(ModelBase):
     """ Vanilla GCN """
 
     def __init__(self, input_dim, num_classes, cfg: ModelConfiguration):
         super().__init__(cfg)
         self.residual = cfg.residual
-        self.dropout = cfg.dropout
-        self.drop_edge = cfg.drop_edge
+        # self.dropout = cfg.dropout
+        # self.drop_edge = cfg.drop_edge
         self.convs = make_convolutions(input_dim, num_classes, cfg, self._make_gcn_conv_with_spectral_norm)
 
     def clear_and_disable_cache(self):
@@ -76,10 +81,10 @@ class GCN(ModelBase):
             conv.clear_and_disable_cache()
 
     @staticmethod
-    def _make_gcn_conv_with_spectral_norm(input_dim, output_dim, config: ModelConfiguration, *args, **kwargs):
+    def _make_gcn_conv_with_spectral_norm(input_dim, output_dim, config: ModelConfiguration, *args, use_spectral_norm: bool = False, **kwargs):
         """ Method to create a convolution operator with spectral normalization """
-        conv = GCNConv(input_dim, output_dim, *args, **kwargs, add_self_loops=False, cached=config.cached)
-        if config.use_spectral_norm:
+        conv = GCNConv(input_dim, output_dim, *args, **kwargs, add_self_loops=False, cached=config.cached, bias=config.use_bias)
+        if use_spectral_norm:
             conv.lin = spectral_norm(conv.lin, name='weight', rescaling=config.weight_scale)
         return conv
 
@@ -90,15 +95,106 @@ class GCN(ModelBase):
             x = layer(x, edge_index, edge_weight=edge_weight, sample=sample)
             embeddings.append(x)
         return Prediction(
-            embeddings, 
-            inputs = data.x,
-            logits = x,
-            soft = F.softmax(x, dim=1),
+            features = embeddings,
+            **{
+                LOGITS : x,
+                SOFT_PREDICTIONS : F.softmax(x, dim=1),
+                INPUTS : data.x,
+            } 
             )
 
     def get_output_weights(self):
         """ Gets the weights of the output layer. """
         return _get_convolution_weights(self.convs[-1])
+
+class GCNLinearClassification(GCN):
+    """ Vanilla GCN encoder with linear classification output """
+
+    def __init__(self, input_dim, num_classes, cfg: ModelConfiguration):
+        super(GCN, self).__init__(cfg)
+
+        # Hacky workaround: Create one additional convolution that will then be replaced with a linear layer
+        cfg_convs = deepcopy(cfg)
+        cfg_convs.hidden_sizes = cfg.hidden_sizes[:-1] + [cfg.hidden_sizes[-1], cfg.hidden_sizes[-1]]
+        self.convs = make_convolutions(input_dim, num_classes, cfg_convs, self._make_gcn_conv_with_spectral_norm)[:-1]
+        if cfg.residual:
+            self.head = ResidualBlock(cfg.hidden_sizes[-1], num_classes, LinearWithSpectralNormaliatzion(
+                cfg.hidden_sizes[-1], num_classes, cfg, use_spectral_norm=cfg.use_spectral_norm_on_last_layer,
+            ), None, cfg, use_spectral_norm=cfg.use_spectral_norm_on_last_layer)
+        else:
+            self.head = BasicBlock(cfg.hidden_sizes[-1], num_classes, LinearWithSpectralNormaliatzion(
+                cfg.hidden_sizes[-1], num_classes, cfg, use_spectral_norm=cfg.use_spectral_norm_on_last_layer,
+            ), None, cfg)
+
+
+    def clear_and_disable_cache(self):
+        """ Clears and disables the cache. """
+        super().clear_and_disable_cache()
+        self.head.clear_and_disable_cache()
+    
+    def get_output_weights(self):
+        """ Gets the weights of the output layer. """
+        return _get_convolution_weights(self.head)
+
+    def forward(self, data, sample=None):
+        x, edge_index, edge_weight, sample = self._unpack_inputs_and_sample(data, sample=sample)
+        embeddings = [x]
+        for num, layer in enumerate(self.convs):
+            x = layer(x, edge_index, edge_weight=edge_weight, sample=sample)
+            embeddings.append(x)
+        x = self.head(x, edge_index, edge_weight=edge_weight, sample=sample)
+        embeddings.append(x)
+        return Prediction(
+            features = embeddings,
+            **{
+                LOGITS : x,
+                SOFT_PREDICTIONS : F.softmax(x, dim=1),
+                INPUTS : data.x,
+            })
+
+class GCNLinearClassificationLaplaceBackbone(GCNLinearClassification):
+    """ Child-backbone class for laplace approximation. """
+    training_type = mconst.TRAIN_LAPLACE
+
+class GCNLaplace(ModelBase):
+    """ GCN with linear output layer that has a laplace approximation to its weights. It needs to be assembled
+    as an GCN encoder (ModuleList of convolutions) and a laplace linear layer. """
+
+    def __init__(self, convs: nn.ModuleList, head: laplace.Laplace, config: ModelConfiguration):
+        super().__init__(config)
+        self.convs = convs
+        self.head = head
+
+    def clear_and_disable_cache(self):
+        """ Clears and disables the cache. """
+        for conv in self.convs:
+            conv.clear_and_disable_cache()
+
+    def get_output_weights(self):
+        """ Gets the weights of the output layer. """
+        return _get_convolution_weights(self.head)
+
+    def forward(self, data, sample=None):
+        x, edge_index, edge_weight, sample = self._unpack_inputs_and_sample(data, sample=sample)
+        embeddings = [x]
+        for num, layer in enumerate(self.convs):
+            x = layer(x, edge_index, edge_weight=edge_weight, sample=sample)
+            embeddings.append(x)
+        if sample:
+            # Always draw only one sample: The samples themselves will be aggregated by the framework 
+            # in `semi_supervised_node_classification.py`
+            x = self.head.predictive_samples(x, n_samples=1)[0, ...]
+        else:
+            x = self.head(x)
+        embeddings.append(x)
+        return Prediction(
+            features = embeddings,
+            **{
+                LOGITS : x,
+                SOFT_PREDICTIONS : F.softmax(x, dim=1),
+                INPUTS : data.x,
+            })
+
 
 # class GAT(nn.Module):
 #     """ Graph Attention Network """
@@ -203,7 +299,7 @@ class BayesianGCN(ModelBase):
     def __init__(self, input_dim: int, output_dim: int, config: ModelConfiguration):
         super().__init__(config)
         self.activation = make_activation_by_configuration(config)
-        self.convs = make_convolutions(input_dim, output_dim, config, self._make_gcn_conv_with_spectral_norm)
+        self.convs = make_convolutions(input_dim, output_dim, config, self._make_variational_gcn_conv)
         self.q_weight = config.bgcn.q_weight
         self.prior_weight = config.bgcn.prior_weight
 
@@ -213,8 +309,8 @@ class BayesianGCN(ModelBase):
             conv.clear_and_disable_cache()
 
     @staticmethod
-    def _make_gcn_conv_with_spectral_norm(input_dim, output_dim, config: ModelConfiguration, *args, **kwargs):
-        """ Method to create a convolution operator with spectral normalization """
+    def _make_variational_gcn_conv(input_dim, output_dim, config: ModelConfiguration, *args, **kwargs):
+        """ Method to create a convolution. """
         conv = BayesianGCNConv(input_dim, output_dim, sigma_1 = config.bgcn.sigma_1, sigma_2 = config.bgcn.sigma_2, pi=config.bgcn.pi,
                                 cached=config.cached, add_self_loops=False
 
@@ -228,12 +324,14 @@ class BayesianGCN(ModelBase):
             x = layer(x, edge_index, edge_weight=edge_weight, calculate_log_probs=True, sample=sample)
             embeddings.append(x)
         return Prediction(
-            embeddings, 
-            inputs = data.x,
-            logits = x,
-            soft = F.softmax(x, dim=1),
+            features = embeddings, 
             log_prior = self.log_prior(),
             log_q = self.log_q(),
+            **{
+                LOGITS : x,
+                SOFT_PREDICTIONS : F.softmax(x, dim=1),
+                INPUTS : data.x,
+            },
             )
 
     def log_prior(self) -> torch.Tensor:
@@ -247,6 +345,7 @@ class BayesianGCN(ModelBase):
             'log_q' : self.q_weight * prediction.get('log_q'),
             'log_prior' : self.prior_weight * (-prediction.get('log_prior')),
         }
+
 
 # class BGCN(ModelBase):
 #     """ Bayesian GCN that samples weights. """
@@ -326,12 +425,14 @@ class APPNP(ModelBase):
         logits_diffused = self.diffusion(logits, edge_index)
         embeddings_diffused.append(logits_diffused)
         return Prediction(
-            embeddings_diffused,
-            inputs = data.x,
-            logits = logits_diffused,
-            logits_undiffused = logits,
-            soft = F.softmax(logits_diffused, dim=1),
-            soft_undiffused = F.softmax(x, dim=1),
+            features = embeddings_diffused,
+            **{
+                INPUTS : data.x,
+                LOGITS : logits_diffused,
+                LOGITS + '_undiffused' : logits,
+                SOFT_PREDICTIONS : F.softmax(logits_diffused, dim=1),
+                SOFT_PREDICTIONS + '_undiffused' : F.softmax(logits_diffused),
+            }
         )
 
     def get_output_weights(self):
@@ -374,6 +475,10 @@ def make_model_by_configuration(cfg: ModelConfiguration, input_dim, output_dim):
     #         use_bias=configuration['use_bias'], use_spectral_norm=configuration['use_spectral_norm'], weight_scale=configuration['weight_scale'])
     elif cfg.model_type == mconst.APPNP:
         return APPNP(input_dim, output_dim, cfg)
+    elif cfg.model_type == mconst.GCN_LINEAR_CLASSIFICATION:
+        return GCNLinearClassification(input_dim, output_dim, cfg)
+    elif cfg.model_type == mconst.GCN_LAPLACE:
+        return GCNLinearClassificationLaplaceBackbone(input_dim, output_dim, cfg)
     else:
         raise RuntimeError(f'Unsupported model type {cfg.model_type}')
         
