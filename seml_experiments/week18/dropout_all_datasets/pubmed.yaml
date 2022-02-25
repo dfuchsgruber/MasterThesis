@@ -717,10 +717,10 @@ seml:
   output_dir: /nfs/students/fuchsgru/seml_output/week18
   project_root_dir: ../../..
 slurm:
-  experiments_per_job: 32
+  experiments_per_job: 4
   sbatch_options:
     cpus-per-task: 2
     gres: gpu:1
-    mem: 64G
+    mem: 256G
     partition: gpu_large
     time: 0-24:00

@@ -200,7 +200,7 @@ class EvaluationConfiguration(BaseConfiguration):
     save_artifacts: bool = attr.ib(default=False, converter=bool)
     sample: bool = attr.ib(default=False, converter=bool)
 
-DEFAULT_REGISTRY_COLLECTION_NAME = 'model_registry_v3'
+DEFAULT_REGISTRY_COLLECTION_NAME = 'model_registry_v4'
 
 @attr.s
 class RunConfiguration(BaseConfiguration):
