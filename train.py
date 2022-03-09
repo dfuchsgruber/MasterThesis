@@ -8,9 +8,11 @@ from torch_geometric.loader import DataLoader
 from typing import Optional, Any, Dict
 import os
 import logging
+import numpy as np
 
+from log import LogGradientsCallback, LogWeightMatrixSpectrum
 from configuration import *
-from util import suppress_stdout as context_supress_stdout
+from util import suppress_stdout as context_supress_stdout, get_parameters_with_dimensions
 import warnings
 from model_registry import ModelRegistry
 import data.constants as dconstants
@@ -30,6 +32,24 @@ class SelfTrainingCallback(pl.callbacks.Callback):
         if trainer.current_epoch >= self.num_warmup_epochs:
             model.self_training = True
 
+class SingularValueBounding(pl.callbacks.Callback):
+    """ Callback that bounds the singular value after each training step. 
+    
+    Parameters:
+    -----------
+    eps : float, optional, default=0.01
+        Tolerance for singular values. Will be bound to range [1/(1 + eps), 1 + eps]
+    """
+
+    def __init__(self, eps: float=0.01):
+        self.eps = eps
+
+    def on_train_batch_end(self, trainer: pl.Trainer, model: pl.LightningModule, *args, **kwargs):
+        with torch.no_grad():
+            for weight in get_parameters_with_dimensions(model, order=2).values():
+                u, s, v = np.linalg.svd(weight.detach().cpu().numpy(), full_matrices=False)
+                s = np.clip(s, 1 / (1 + self.eps), 1 + self.eps)
+                weight[:, :] = torch.Tensor(u @ s @ v)
 
 def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], logger: Optional[Any]=None):
     """ Trains a model that can be trained with pytorch lightning. 
@@ -69,11 +89,24 @@ def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, a
     callbacks = []
     if config.training.self_training:
         callbacks.append(SelfTrainingCallback(config.training.num_warmup_epochs))
+    if config.training.singular_value_bounding:
+        callbacks.append(SingularValueBounding(config.training.singular_value_bounding_eps))
+    if config.logging.log_gradients:
+        callbacks.append(LogGradientsCallback(config.logging.log_gradients,
+            log_relative=config.logging.log_gradients_relative_to_parameter,
+            log_normalized=config.logging.log_gradients_relative_to_norm)
+        )
+    if config.logging.log_weight_matrix_spectrum_every > 0:
+        callbacks.append(LogWeightMatrixSpectrum(
+            log_every_epoch=config.logging.log_weight_matrix_spectrum_every,
+            save_buffer_to=config.logging.log_weight_matrix_spectrum_to_file,
+        ))
 
     # Model training
     with context_supress_stdout(supress=config.training.suppress_stdout), warnings.catch_warnings():
         warnings.filterwarnings("ignore")
-        trainer = pl.Trainer(max_epochs=config.training.max_epochs, deterministic=True, callbacks=[ checkpoint_callback, early_stopping_callback, ] + callbacks,
+        trainer = pl.Trainer(max_epochs=config.training.max_epochs, min_epochs=config.training.min_epochs,
+                            deterministic=False, callbacks=[ checkpoint_callback, early_stopping_callback, ] + callbacks,
                             logger=logger,
                             progress_bar_refresh_rate=0,
                             gpus=config.training.gpus,
@@ -97,7 +130,7 @@ def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, a
         model.eval()
         
         # Final validation
-        trainer.validate(model, data_loaders[dconstants.VAL], ckpt_path=best_model_path)
+        trainer.validate(model, data_loaders[dconstants.VAL])
 
         return model
 
@@ -187,7 +220,7 @@ def train_laplace(model: Any, config: ExperimentConfiguration, artifact_dir: str
     model.backbone = GCNLaplace(encoder.convs, la, config.model)
     return model
 
-def train_model(model: Any, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], logger: Optional[Any]=None) -> Any:
+def train_model(model: Any, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], logger: Optional[Any]=None,) -> Any:
     """ Trains a model if neccessary.
     
     Parameters:
@@ -202,6 +235,8 @@ def train_model(model: Any, config: ExperimentConfiguration, artifact_dir: str, 
         Data loaders used for training. See `data.constants` for keys.
     logger : Any, optional, default: None
         Logger to use for training progress.
+    return_trainer : bool, optional, default: False
+        If the trainer should also be returned.
     
     Returns:
     --------

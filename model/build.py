@@ -37,6 +37,7 @@ def make_model(config: ExperimentConfiguration, num_inputs: int, num_outputs: in
             num_outputs, 
             learning_rate=config.training.learning_rate,
             weight_decay=config.training.weight_decay,
+            orthnormal_regularizer=config.training.orthonormal_weight_regularization_strength,
         )
 
     return model

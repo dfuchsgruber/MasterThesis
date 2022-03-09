@@ -12,3 +12,4 @@ from .data import *
 from .logit_geometry import *
 from .feature_space_distance import *
 from .structure import *
+from .validate_and_test import *

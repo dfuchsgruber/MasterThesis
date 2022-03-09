@@ -1,3 +1,4 @@
+from multiprocessing.sharedctypes import Value
 import configuration
 import numpy as np
 import matplotlib.pyplot as plt
@@ -301,6 +302,15 @@ class NpzDataset(SingleGraphDataset):
         else:
             raise ValueError(f'Unknown preprocessing for features of type {config.preprocessing}')
         logging.info('Data Loading - Built attribute matrix.')
+
+        if config.normalize is None or config.normalize == 'none':
+            pass
+        if config.normalize == 'l1':
+            X /= np.linalg.norm(X, axis=1, ord=1, keepdims=True)
+        elif config.normalize == 'l2':
+            X /= np.linalg.norm(X, axis=1, ord=2, keepdims=True)
+        else:
+            raise ValueError(f'Unsupported normalization {config.normalize}')
 
         label_to_idx = {label : idx for idx, label in idx_to_label.items() if idx in y}
         y, label_to_idx, _ = data.util.compress_labels(y, label_to_idx)

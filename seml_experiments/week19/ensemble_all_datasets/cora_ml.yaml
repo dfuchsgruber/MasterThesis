@@ -1,0 +1,448 @@
+fixed:
+  data.dataset: cora_ml
+  data.drop_train_vertices_portion: 0.1
+  data.ood_sampling_strategy: all
+  data.preprocessing: none
+  data.split_type: uniform
+  data.test_portion_fixed: 0.2
+  data.train_portion: 20
+  data.type: npz
+  ensemble.num_members: 5
+  evaluation.ignore_exceptions: false
+  evaluation.log_plots: false
+  model.activation: leaky_relu
+  model.hidden_sizes:
+  - 64
+  model.leaky_relu_slope: 0.01
+  model.model_type: gcn
+  model.residual: false
+  model.use_bias: true
+  model.use_spectral_norm: false
+  run.args:
+  - model:dropout
+  - model:drop_edge
+  - data:setting
+  - data:dataset
+  run.use_default_configuration: true
+  training.early_stopping.min_delta: 1e-2
+  training.early_stopping.mode: min
+  training.early_stopping.monitor: val_loss
+  training.early_stopping.patience: 50
+  training.gpus: 1
+  training.learning_rate: 0.001
+  training.max_epochs: 1000
+grid:
+  data.setting:
+    options:
+    - transductive
+    - hybrid
+    type: choice
+  run.initialization_idx:
+    options:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    type: choice
+  run.split_idx:
+    options:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    type: choice
+left-out-classes_ensemble:
+  fixed:
+    data.ood_type: left-out-classes
+    evaluation.pipeline:
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    run.name: ensemble-dataset:3-setting:2-ood_type:loc
+  grid: {}
+perturbations_ensemble:
+  fixed:
+    data.ood_type: perturbations
+    evaluation.pipeline:
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: no-edges_val
+      type: EvaluateCalibration
+    - base_data: ood-val
+      dataset_name: ber-val
+      log_plots: false
+      name: val
+      parameters:
+        p: 0.5
+      perturbation_type: bernoulli
+      type: PerturbData
+    - base_data: ood-val
+      dataset_name: normal-val
+      log_plots: false
+      name: val
+      parameters:
+        scale: 1.0
+      perturbation_type: normal
+      type: PerturbData
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateLogitEnergy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateLogitEnergy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateLogitEnergy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateLogitEnergy
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: no-edges_test
+      type: EvaluateCalibration
+    - base_data: ood-test
+      dataset_name: ber-test
+      log_plots: false
+      name: test
+      parameters:
+        p: 0.5
+      perturbation_type: bernoulli
+      type: PerturbData
+    - base_data: ood-test
+      dataset_name: normal-test
+      log_plots: false
+      name: test
+      parameters:
+        scale: 1.0
+      perturbation_type: normal
+      type: PerturbData
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateLogitEnergy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateLogitEnergy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateLogitEnergy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateLogitEnergy
+    run.name: ensemble-dataset:3-setting:2-ood_type:per
+  grid: {}
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week19_ensemble_all_datasets
+  output_dir: /nfs/students/fuchsgru/seml_output/week19
+  project_root_dir: ../../..
+slurm:
+  experiments_per_job: 16
+  sbatch_options:
+    cpus-per-task: 2
+    gres: gpu:1
+    mem: 256G
+    partition: gpu_large
+    time: 0-24:00

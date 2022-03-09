@@ -6,7 +6,7 @@ import torch
 import torch_geometric
 import torch.nn.functional as F
 from torch_geometric.utils import dropout_adj
-from model.spectral_norm import spectral_norm
+from model.parametrization import spectral_norm, bjorck_orthonormalize
 import pytorch_lightning as pl
 import model.constants as mconst
 from configuration import ModelConfiguration
@@ -117,7 +117,7 @@ class GCNLinearClassification(GCN):
         cfg_convs = deepcopy(cfg)
         cfg_convs.hidden_sizes = cfg.hidden_sizes[:-1] + [cfg.hidden_sizes[-1], cfg.hidden_sizes[-1]]
         self.convs = make_convolutions(input_dim, num_classes, cfg_convs, self._make_gcn_conv_with_spectral_norm)[:-1]
-        if cfg.residual:
+        if cfg.residual and cfg.use_residual_on_last_layer:
             self.head = ResidualBlock(cfg.hidden_sizes[-1], num_classes, LinearWithSpectralNormaliatzion(
                 cfg.hidden_sizes[-1], num_classes, cfg, use_spectral_norm=cfg.use_spectral_norm_on_last_layer,
             ), None, cfg, use_spectral_norm=cfg.use_spectral_norm_on_last_layer)
@@ -347,6 +347,61 @@ class BayesianGCN(ModelBase):
         }
 
 
+class OrthogonalGCN(ModelBase):
+
+    def __init__(self, input_dim, num_classes, cfg: ModelConfiguration):
+        super().__init__(cfg)
+        if cfg.orthogonal.random_input_projection:
+            self.input_projection = nn.Linear(input_dim, cfg.hidden_sizes[0], bias=False)
+            self.input_projection.weight.requires_grad = False
+            input_dim = cfg.hidden_sizes[0]
+            self._indim = input_dim
+        else:
+            self.input_projection = None
+        self.convs = make_convolutions(input_dim, num_classes, cfg, self._make_conv)
+
+    def clear_and_disable_cache(self):
+        """ Clears and disables the cache. """
+        for conv in self.convs:
+            conv.clear_and_disable_cache()
+
+    @staticmethod
+    def _make_conv(input_dim, output_dim, config: ModelConfiguration, *args, **kwargs):
+        """ Method to create a convolution operator with spectral normalization """
+        conv = OrthogonalGCNConv(input_dim, output_dim, *args, singular_values=config.weight_scale,
+            add_self_loops=False, cached=config.cached, bias=config.use_bias)
+        return conv
+
+    def forward(self, data, sample=None):
+        x, edge_index, edge_weight, sample = self._unpack_inputs_and_sample(data, sample=sample)
+        if self.input_projection is not None:
+            x = self.input_projection(x)
+        embeddings = [x]
+        for num, layer in enumerate(self.convs):
+            x = layer(x, edge_index, edge_weight=edge_weight, sample=sample)
+            embeddings.append(x)
+        return Prediction(
+            features = embeddings,
+            **{
+                LOGITS : x,
+                SOFT_PREDICTIONS : F.softmax(x, dim=1),
+                INPUTS : data.x,
+            } 
+            )
+
+    def get_output_weights(self):
+        raise NotImplemented
+
+class BjorckOrthonormalGCN(OrthogonalGCN):
+    """ GCN that uses bjorck orthonormalized weight matrices. """
+
+    @staticmethod
+    def _make_conv(input_dim, output_dim, config: ModelConfiguration, *args, use_spectral_norm: bool = False, **kwargs):
+        """ Method to create a convolution operator with bjorck normalization """
+        conv = GCNConv(input_dim, output_dim, *args, **kwargs, add_self_loops=False, cached=config.cached, bias=config.use_bias)
+        conv.lin = bjorck_orthonormalize(conv.lin, name='weight', n_iter=config.orthogonal.bjorck_orthonormalzation_n_iter)
+        return conv
+
 # class BGCN(ModelBase):
 #     """ Bayesian GCN that samples weights. """
 
@@ -479,6 +534,10 @@ def make_model_by_configuration(cfg: ModelConfiguration, input_dim, output_dim):
         return GCNLinearClassification(input_dim, output_dim, cfg)
     elif cfg.model_type == mconst.GCN_LAPLACE:
         return GCNLinearClassificationLaplaceBackbone(input_dim, output_dim, cfg)
+    elif cfg.model_type == mconst.GCN_ORTHOGONAL:
+        return OrthogonalGCN(input_dim, output_dim, cfg)
+    elif cfg.model_type == mconst.GCN_BJORCK_ORTHOGONAL:
+        return BjorckOrthonormalGCN(input_dim, output_dim, cfg)
     else:
         raise RuntimeError(f'Unsupported model type {cfg.model_type}')
         

@@ -7,13 +7,14 @@ from torch import Tensor
 from torch_sparse import SparseTensor
 from torch_geometric.typing import Adj, OptTensor, PairTensor
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
-from model.spectral_norm import spectral_norm
+from model.parametrization import spectral_norm
 import model.constants as mconst
 from configuration import ModelConfiguration
 import logging
 from model.bayesian import kl_divergence_diagonal_normal, sample_normal
 import math
 from typing import Optional
+from model.orthogonal import OrthogonalLinear
 
 class GCNConv(torch_geometric.nn.GCNConv):
     """ GCN convolution that allows to clear and disable the cache that was used during training. """
@@ -27,6 +28,12 @@ class GCNConv(torch_geometric.nn.GCNConv):
         self._cached_edge_index = None
         self._cached_adj_t
 
+class OrthogonalGCNConv(GCNConv):
+    """GCN convolution with an orthogonal linear layer that uses SVD. It forces all its singular values to be a certain value. """
+    def __init__(self, in_channels: int, out_channels: int, singular_values: float=1.0, *args, bias: bool=False, **kwargs):
+        super().__init__(in_channels, out_channels, args, bias=bias, **kwargs)
+        assert hasattr(self, 'lin') # Will be overriden with the Bayesian Linear layer
+        self.lin = OrthogonalLinear(in_channels, out_channels, singular_values=singular_values)
 
 class APPNPConv(torch_geometric.nn.APPNP):
     """ APPNP convolution that allows to clear and disable the cache that was used during training. """

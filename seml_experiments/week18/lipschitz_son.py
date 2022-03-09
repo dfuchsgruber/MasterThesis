@@ -15,12 +15,12 @@ def build():
     with open(osp.join(dir, fn + '.base.yaml')) as f:
         base = yaml.safe_load(f)
 
-    for dataset, jobs in (('cora_full', 16),  ('amazon_photo', 8), ('ogbn_arxiv', 2)):
+    for dataset, jobs in (('cora_full', 16),  ('amazon_photo', 8), ('ogbn_arxiv', 1), ('citeseer', 16)):
         cfg = deepcopy({k : base[k] for k in BASE_KEYS})
         cfg['fixed']['data.dataset'] = dataset
         cfg['slurm']['experiments_per_job'] = jobs
         if  dataset == 'ogbn_arxiv' or dataset == 'pubmed':
-            cfg['slurm']['sbatch_options']['mem'] = '256G'
+            cfg['slurm']['sbatch_options']['mem'] = '512G'
         if dataset == 'ogbn_arxiv':
             cfg['grid']['run.split_idx'] = {'type' : 'choice', 'options' : [0]}
 
@@ -226,7 +226,9 @@ def build_experiments(cfg):
                         subcfg['fixed']['data.ood_type'] = ood_type
 
 
-                        cfg[f'{ood_type}' + ('-spectral-norm' if spectral_norm else '-no-spectral-norm') + f'-weight-scale-{weight_scale}'.replace('.', '-')] = subcfg
+                        cfg[f'{ood_type}' + ('-spectral-norm' if spectral_norm else '-no-spectral-norm') + 
+                            f'-weight-scale-{weight_scale}'.replace('.', '-') + 
+                            ('-spectral-output-norm' if use_son else '-no-spectral-output-norm')] = subcfg
 
         
 if __name__ == '__main__':

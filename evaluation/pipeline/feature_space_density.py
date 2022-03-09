@@ -62,7 +62,7 @@ class FeatureDensity(UncertaintyQuantification):
         for datasets in (self.fit_to, self.validate_on):
             features, predictions, labels = [], [], []
             for x, pred, y, mask, edge_index, name in zip(*run_model_on_datasets(kwargs['model'], [get_data_loader(name, kwargs['data_loaders']) for name in datasets], 
-                gpus=self.gpus, model_kwargs=self.model_kwargs_evaluate, callbacks = [
+                gpus=self.gpus, model_kwargs=self.model_kwargs_fit, callbacks = [
                     evaluation.callbacks.make_callback_get_features(mask = False),
                     evaluation.callbacks.make_callback_get_predictions(mask = False),
                     evaluation.callbacks.make_callback_get_ground_truth(mask = False),

@@ -10,7 +10,7 @@ slurm:
     gres: gpu:1       # num GPUs
     mem: 64G          # memory
     cpus-per-task: 2  # num cores
-    time: 0-24:00     # max time, D-HH:MM
+    time: 0-48:00     # max time, D-HH:MM
     partition: gpu_large
 
 
@@ -68,3 +68,6 @@ grid:
   run.split_idx:
     type: choice
     options: [0, 1, 2]
+  model.residual:
+    type: choice
+    options: [false, true]

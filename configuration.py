@@ -1,5 +1,6 @@
 
 from collections.abc import Mapping
+from wsgiref.validate import validator
 import data.constants as dconstants
 import model.constants as mconstants
 import attr
@@ -40,6 +41,17 @@ class ReconstructionConfiguration(BaseConfiguration):
     ))) 
     cached: bool = attr.ib(default=True, converter=bool)
     margin_constrastive_loss: float = attr.ib(default=0.0, converter=float)
+
+@attr.s
+class FeatureReconstructionConfiguration(BaseConfiguration):
+    """ Configuration for feature reconstruction in a model. """
+    loss_weight: float = attr.ib(default=0.0, converter=float) # If 0.0, no reconstruction will be applied
+    loss: str = attr.ib(default='l2', validator=attr.validators.in_(('l2', 'l1', 'bce', 'weighted_bce')))
+    mirror_encoder: bool = attr.ib(default=True, converter=bool)
+    activation_on_last_layer: bool = attr.ib(default=False, converter=bool)
+    log_metrics_every: int = attr.ib(default=1, converter=int, validator=validators.gt(0), metadata={'registry_attribute' : False})
+    num_samples : int = attr.ib(default=-1, converter=int)
+    seed: int = attr.ib(default=1337, converter=int)
 
 @attr.s
 class GATConfiguration(BaseConfiguration):
@@ -83,6 +95,11 @@ class LaplaceBayesianGCNConfiguration(BaseConfiguration):
     seed: int = attr.ib(default=1337, converter=int)
     hessian_structure = attr.ib(default=mconstants.DIAG_HESSIAN, converter=lambda s: s.lower(), validator=validators.in_((mconstants.DIAG_HESSIAN, mconstants.FULL_HESSIAN)))
 
+@attr.s
+class OrthongonalGCNConfiguration(BaseConfiguration):
+    """ Configuration for laplace posterior approximation. """
+    random_input_projection: bool = attr.ib(default=False, converter=bool)
+    bjorck_orthonormalzation_n_iter: int = attr.ib(default=1, converter=int, validator=validators.gt(0))
 
 @attr.s
 class ModelConfiguration(BaseConfiguration):
@@ -106,11 +123,13 @@ class ModelConfiguration(BaseConfiguration):
     self_loop_fill_value: float = attr.ib(default=1.0, converter=float)
 
     reconstruction: ReconstructionConfiguration = attr.ib(default={}, converter=make_cls_converter(ReconstructionConfiguration))
+    feature_reconstruction: FeatureReconstructionConfiguration = attr.ib(default={}, converter=make_cls_converter(FeatureReconstructionConfiguration))
 
     gat: Optional[GATConfiguration] = attr.ib(default=None, converter=make_cls_converter(GATConfiguration, optional=True))
     appnp: Optional[APPNPConfiguration] = attr.ib(default=None, converter=make_cls_converter(APPNPConfiguration, optional=True))
     bgcn: Optional[BayesianGCNConfiguration] = attr.ib(default=None, converter=make_cls_converter(BayesianGCNConfiguration, optional=True))
     laplace: Optional[LaplaceBayesianGCNConfiguration] = attr.ib(default=None, converter=make_cls_converter(LaplaceBayesianGCNConfiguration, optional=True))
+    orthogonal: Optional[OrthongonalGCNConfiguration] = attr.ib(default=None, converter=make_cls_converter(OrthongonalGCNConfiguration, optional=True))
 
     # Parameterless baselines
     input_distance: Optional[InputDistanceConfiguration] = attr.ib(default=None, converter=make_cls_converter(InputDistanceConfiguration, optional=True))
@@ -165,7 +184,7 @@ class DataConfiguration(BaseConfiguration):
     normalize: Optional[str] = attr.ib(default='l2', validator=validators.in_(('l1', 'l2', None)))
     vectorizer: str = attr.ib(default='tf-idf', validator=validators.in_(('tf-idf', 'count')), converter=lambda s: s.lower())
 
-    integrity_assertion: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
+    integrity_assertion: bool = attr.ib(default=False, converter=bool, metadata={'registry_attribute' : False})
 
 @attr.s
 class EarlyStoppingConfiguration(BaseConfiguration):
@@ -180,7 +199,8 @@ class EarlyStoppingConfiguration(BaseConfiguration):
 @attr.s
 class TrainingConfiguration(BaseConfiguration):
     """ Configuration for training a model. """
-    max_epochs: int = attr.ib(default=1000, validator=validators.ge(0), converter=int)
+    max_epochs: Optional[int] = attr.ib(default=1000)
+    min_epochs: Optional[int] = attr.ib(default=None)
     learning_rate: float = attr.ib(default=1e-3, validator=validators.ge(0), converter=float)
     early_stopping: EarlyStoppingConfiguration = attr.ib(default={}, converter=make_cls_converter(EarlyStoppingConfiguration))
     gpus: int = attr.ib(default=1, converter=int, metadata={'registry_attribute' : False})
@@ -189,6 +209,13 @@ class TrainingConfiguration(BaseConfiguration):
     train_model: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
     self_training: bool = attr.ib(default=False, converter=bool)
     num_warmup_epochs: int = attr.ib(default=50, converter=int)
+
+    # Singular value bounding
+    singular_value_bounding: bool = attr.ib(default=False, converter=bool)
+    singular_value_bounding_eps: float = attr.ib(default=1e-2, converter=float, validator=validators.ge(0))
+
+    # additional regularizers
+    orthonormal_weight_regularization_strength: float = attr.ib(default=0.0, converter=float, validator=validators.ge(0))
 
 @attr.s
 class EvaluationConfiguration(BaseConfiguration):
@@ -200,7 +227,7 @@ class EvaluationConfiguration(BaseConfiguration):
     save_artifacts: bool = attr.ib(default=False, converter=bool)
     sample: bool = attr.ib(default=False, converter=bool)
 
-DEFAULT_REGISTRY_COLLECTION_NAME = 'model_registry_v4'
+DEFAULT_REGISTRY_COLLECTION_NAME = 'model_registry_v5'
 
 @attr.s
 class RunConfiguration(BaseConfiguration):
@@ -222,6 +249,7 @@ class RunConfiguration(BaseConfiguration):
     # If set, some values are updated with defaults depending on the dataset
     use_default_configuration: bool = attr.ib(default=False, converter=bool, metadata={'registry_attribute' : False})
 
+
 @attr.s
 class _RegistryConfiguration(BaseConfiguration):
     """ Configuration for the model registry. Values should never be initialized manually as they are not really configuration and more information. """
@@ -240,6 +268,15 @@ class LoggingConfiguration(BaseConfiguration):
     artifact_dir: str = attr.ib(default=osp.join('/', 'nfs', 'students', 'fuchsgru', 'artifacts'), metadata={'registry_attribute' : False})
     logging_dir: str = attr.ib(default=osp.join('/', 'nfs', 'students', 'fuchsgru', 'wandb'), metadata={'registry_attribute' : False})
 
+    # Gradient logging
+    log_gradients: Dict[str, str] = attr.ib(default={}, metadata={'registry_attribute' : False})
+    log_gradients_relative_to_parameter: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
+    log_gradients_relative_to_norm: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
+
+    # Spectrum logging
+    log_weight_matrix_spectrum_every: int = attr.ib(default=0, converter=int, metadata={'registry_attribute' : False})
+    log_weight_matrix_spectrum_to_file: Optional[str] = attr.ib(default=None, metadata={'registry_attribute' : False})
+    
 @attr.s
 class ExperimentConfiguration(BaseConfiguration):
     """ Configuration for a whole experiment """

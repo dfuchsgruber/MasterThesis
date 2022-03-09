@@ -364,3 +364,20 @@ def all_equal(x: Iterable) -> bool:
     """ Checks if all elements in an iterable are the same"""
     x = list(x)
     return all(i == x[0] for i in x)
+
+def get_parameters_with_dimensions(module: torch.nn.Module, order: int=2) -> Dict[str, torch.nn.Parameter]:
+    """ Gets all parameters with a given number of dimensions. 
+    
+    Parameters:
+    -----------
+    module : nn.Module
+        The model to get parameters of.
+    order : int, optional, default: 2
+        The number of dimensions.
+
+    Returns:
+    --------
+    parameters : Dict[str, torch.nn.Parameter]
+        The parameters with that dimension.
+    """
+    return {n : p for n, p in module.named_parameters() if len(p.size()) == order}

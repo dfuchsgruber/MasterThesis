@@ -17,31 +17,21 @@ if __name__ == '__main__':
 
     ex = ExperimentWrapper(init_all=False, collection_name='test', run_id='gcn_64_32_residual')
     data_cfg = configuration.DataConfiguration(
-                        dataset='cora_full', 
+                        dataset=dconstants.CORA_FULL, 
                         train_portion=20, test_portion_fixed=0.2,
                         split_type='uniform',
                         type='npz',
                         preprocessing='none',
                         # ood_type = dconstants.LEFT_OUT_CLASSES,
                         ood_type = dconstants.PERTURBATION,
-                        setting = dconstants.HYBRID,
-                        # setting = dconstants.TRANSDUCTIVE,
+                        # setting = dconstants.HYBRID,
+                        setting = dconstants.TRANSDUCTIVE,
                         #preprocessing='word_embedding',
                         #language_model = 'bert-base-uncased',
                         #language_model = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
                         #language_model = 'allenai/longformer-base-4096',
                         drop_train_vertices_portion = 0.1,
                         )
-
-    # data_cfg = configuration.DataConfiguration(
-    #                     dataset='ogbn-arxiv',
-    #                     split_type='predefined',
-    #                     type='npz',
-    #                     ood_type = dconstants.PERTURBATION,
-    #                     setting = dconstants.HYBRID,
-    #                     preprocessing='none',
-    #                     drop_train_vertices_portion=0.1,
-    # )
 
     if data_cfg.ood_type == dconstants.PERTURBATION:
         data_cfg.left_out_class_labels = []
@@ -51,7 +41,7 @@ if __name__ == '__main__':
     spectral_norm_cfg = {
         'use_spectral_norm' : True,
         'residual' : True,
-        'weight_scale' : 3.0,
+        'weight_scale' : 20.0,
     }
 
     reconstruction_cfg = {
@@ -63,10 +53,33 @@ if __name__ == '__main__':
         'margin_constrastive_loss' : 0.0,
     }
 
+    feature_reconstruction_cfg = {
+        'loss_weight' : 1.0,
+        'loss' : 'weighted_bce',
+        'log_metrics_every' : 5,
+        'num_samples' : 100,
+    }
 
+    orthogonal_cfg = {
+        'weight_scale' : 1.0,
+        'orthogonal' : {
+            'random_input_projection' : False,
+            'bjorck_orthonormalzation_n_iter' : 1,
+        },
+        'residual' : False,
+    }
+
+    orthonormal_reg = {
+        'orthonormal_weight_regularization_strength' : 1e-0,
+    }
+
+    bounded_svd = {
+        'singular_value_bounding' : True,
+        'singular_value_bounding_eps' : 1.0,
+    }
 
     model_cfg = configuration.ModelConfiguration(
-        model_type=mconstants.GCN_LINEAR_CLASSIFICATION,
+        model_type=mconstants.GCN_BJORCK_ORTHOGONAL,
         # model_type = mconstants.BGCN,
         #model_type = 'appnp',
         # dropout = 0.5,
@@ -76,18 +89,24 @@ if __name__ == '__main__':
         activation='leaky_relu', 
         leaky_relu_slope=0.01,
         freeze_residual_projection=False, 
-        use_spectral_norm_on_last_layer=False, 
+        use_spectral_norm_on_last_layer=True, 
         self_loop_fill_value=1.0, 
         cached=True,
         # bgcn = {},
         # reconstruction = reconstruction_cfg,
-        **spectral_norm_cfg,
+        # feature_reconstruction = feature_reconstruction_cfg,
+        #**spectral_norm_cfg,
+        #residual = True,
+        **orthogonal_cfg,
         )
+    
+    if not model_cfg.use_spectral_norm:
+        model_cfg.use_spectral_norm_on_last_layer = False
 
     run_cfg = configuration.RunConfiguration(
-        name='model_{0}_hidden_sizes_{1}_weight_scale_{2}_setting_{3}_ood_type_{4}', 
+        name='{0}-{1}-sn:{2}-son:{3}-{4}-ortho-reg', 
         args=[
-            'model:model_type', 'model:hidden_sizes', 'model:weight_scale', 'data:setting', 'data:ood_type',
+            'data:dataset', 'model:model_type', 'model:use_spectral_norm', 'model:use_spectral_norm_on_last_layer', 'model:residual', 'data:setting',
         ],
         split_idx = split_idx,
         initialization_idx = init_idx,
@@ -101,8 +120,9 @@ if __name__ == '__main__':
     }
 
     training_cfg = configuration.TrainingConfiguration(
-        max_epochs=1000, # 1000, 
-        learning_rate=0.001, 
+        max_epochs=1000, 
+        # min_epochs=500,
+        learning_rate=1e-3, 
         early_stopping={
             'monitor' : 'val_loss',
             'mode' : 'min',
@@ -111,8 +131,10 @@ if __name__ == '__main__':
         }, 
         gpus=1, 
         suppress_stdout=False, 
-        weight_decay=1e-3 #1 e-3,
+        weight_decay=1e-3,
+        #**orthonormal_reg,
         # **self_training,
+        #**bounded_svd,
         )
 
     ensemble_cfg = configuration.EnsembleConfiguration(
@@ -120,30 +142,45 @@ if __name__ == '__main__':
         num_samples = 1,
     )
 
+    logging_cfg = configuration.LoggingConfiguration(
+        # log_gradients = {
+        #     # 'backbone.convs.0.conv.lin.parametrizations.weight.original' : 'conv0_weight',
+        #     # 'backbone.convs.1.conv.lin.parametrizations.weight.original' : 'conv1_weight',
+        #     # 'backbone.convs.0.input_projection.linear.parametrizations.weight.original' : 'residual0_weight'
+
+        #     'backbone.convs.0.conv.lin.parametrizations.weight.original' : 'conv0_weight',
+        #     'backbone.convs.1.conv.lin.parametrizations.weight.original' : 'conv1_weight',
+        #     'backbone.convs.0.input_projection.linear.parametrizations.weight.original' : 'residual0_weight'
+        # },
+        # log_gradients_relative_to_parameter = True,
+        # log_gradients_relative_to_norm = True,
+        log_weight_matrix_spectrum_every = 1,
+    )
+
     if data_cfg.ood_type == dconstants.PERTURBATION:
         perturbation_pipeline = [
             {
-                            'type' : 'PerturbData',
-                            'base_data' : 'ood-val',
-                            'dataset_name' : 'ood-val-ber',
-                            'perturbation_type' : 'bernoulli',
-                            'budget' : 0.1,
-                            'parameters' : {
-                                'p' : 0.5,
-                            },
-                            'perturb_in_mask_only' : True,
-                        },
-                        {
-                            'type' : 'PerturbData',
-                            'base_data' : 'ood-val',
-                            'dataset_name' : 'ood-val-normal',
-                            'perturbation_type' : 'normal',
-                            'budget' : 0.1,
-                            'parameters' : {
-                                'scale' : 1.0,
-                            },
-                            'perturb_in_mask_only' : True,
-                        },
+                'type' : 'PerturbData',
+                'base_data' : 'ood-val',
+                'dataset_name' : 'ood-val-ber',
+                'perturbation_type' : 'bernoulli',
+                'budget' : 0.1,
+                'parameters' : {
+                    'p' : 0.5,
+                },
+                'perturb_in_mask_only' : True,
+            },
+            {
+                'type' : 'PerturbData',
+                'base_data' : 'ood-val',
+                'dataset_name' : 'ood-val-normal',
+                'perturbation_type' : 'normal',
+                'budget' : 0.1,
+                'parameters' : {
+                    'scale' : 1.0,
+                },
+                'perturb_in_mask_only' : True,
+            },
         ]
         ood_separation = 'ood'
         ood_datasets = {'ber' : 'ood-val-ber', 'normal' : 'ood-val-normal'}
@@ -157,6 +194,11 @@ if __name__ == '__main__':
 
     ood_pipeline = []
     for ood_name, ood_dataset in ood_datasets.items():
+        if True: # data_cfg.ood_type != dconstants.LEFT_OUT_CLASSES:
+            ood_pipeline += [{
+                'type' : 'ValidateAndTest',
+                'evaluate_on' : [ood_dataset],
+            },]
         ood_pipeline += [
             {
                 'type' : 'EvaluateAccuracy',
@@ -191,6 +233,37 @@ if __name__ == '__main__':
                 'separate_distributions_by' : ood_separation,
                 'separate_distributions_tolerance' : 0.1,
                 'name' : ood_name,
+            },
+            {
+                'type' : 'FitFeatureDensityGrid',
+                'fit_to' : ['train'],
+                'fit_to_ground_truth_labels' : ['train'],
+                'fit_to_mask_only' : True,
+                'fit_to_best_prediction' : False,
+                'fit_to_min_confidence' : 0.99,
+                'evaluate_on' : [ood_dataset],
+                'diffuse_features' : False,
+                'diffusion_iterations' : 16,
+                'teleportation_probability' : 0.2,
+                'density_types' : {
+                    'GaussianPerClass' : {
+                        'evaluation_kwargs_grid' : [{'mode' : ['weighted'], 'relative' : [False,]}],
+                        'covariance' : ['full', 'diag', 'eye', 'iso'],
+                    },
+                    # 'GaussianMixture' : {
+                    #     'diagonal_covariance' : [True],
+                    #     'number_components' : [-1],
+                    # }
+                },
+                'dimensionality_reductions' : {
+                    'none' : {
+                    }
+                },
+                'log_plots' : True,
+                'separate_distributions_by' : ood_separation,
+                'separate_distributions_tolerance' : 0.1,
+                'name' : f'{ood_name}-no-edges',
+                'model_kwargs_evaluate' : {'remove_edges' : True},
             },
             # {
             #     'type' : 'FitFeatureDensityGrid',
@@ -299,6 +372,38 @@ if __name__ == '__main__':
                 'separate_distributions_tolerance' : 0.1,
                 'name' : ood_name,
             },
+            {
+                'type' : 'EvaluateSoftmaxEntropy',
+                'evaluate_on' : [ood_dataset],
+                'separate_distributions_by' : ood_separation,
+                'separate_distributions_tolerance' : 0.1,
+                'name' : f'{ood_name}-no-edges',
+                'model_kwargs_evaluate' : {'remove_edges' : True},
+
+            },
+            {
+                'type' : 'EvaluateFeatureSpaceDistance',
+                'fit_to' : ['train'],
+                'evaluate_on' : [ood_dataset],
+                'log_plots' : True,
+                'separate_distributions_by' : ood_separation,
+                'separate_distributions_tolerance' : 0.1,
+                'k' : 5,
+                'layer' : -2,
+                'name' : ood_name,
+            },
+            {
+                'type' : 'EvaluateFeatureSpaceDistance',
+                'fit_to' : ['train'],
+                'evaluate_on' : [ood_dataset],
+                'log_plots' : True,
+                'separate_distributions_by' : ood_separation,
+                'separate_distributions_tolerance' : 0.1,
+                'k' : 5,
+                'layer' : -2,
+                'name' : f'{ood_name}-no-edges',
+                'model_kwargs_evaluate' : {'remove_edges' : True},
+            },
             # {
             #     'type' : 'EvaluateLogitEnergy',
             #     'evaluate_on' : [ood_dataset],
@@ -337,7 +442,7 @@ if __name__ == '__main__':
     )
 
 
-    out = ex.train(model=model_cfg, data = data_cfg, training=training_cfg, run=run_cfg, evaluation=evaluation_cfg, ensemble=ensemble_cfg)
+    out = ex.train(model=model_cfg, data = data_cfg, training=training_cfg, run=run_cfg, evaluation=evaluation_cfg, ensemble=ensemble_cfg, logging=logging_cfg)
 
     print()
     df = pd.DataFrame({k : {'Mean' : np.mean(v), 'Std' : np.std(v)} for k, v in out['results'].items()})
