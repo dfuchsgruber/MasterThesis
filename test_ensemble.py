@@ -55,7 +55,8 @@ if __name__ == '__main__':
         # bgcn = {},
         # reconstruction = reconstruction_cfg,
         laplace = {
-            'hessian_structure' : mconstants.FULL_HESSIAN,
+            'hessian_structure' : mconstants.DIAG_HESSIAN,
+            'batch_size' : 64,
         }
         )
 

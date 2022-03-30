@@ -32,6 +32,9 @@ class _SpectralNorm(Module):
         weight_mat = self._reshape_weight_to_matrix(weight)
         self._update_vectors(weight_mat)
 
+    def __repr__(self):
+        return f'SpectralNorm(rescaling={self.rescaling}, n_iter={self.n_power_iterations})'
+
     def _reshape_weight_to_matrix(self, weight: torch.Tensor) -> torch.Tensor:
         weight_mat = weight
         if self.dim != 0:
@@ -111,14 +114,56 @@ class BjorckOrthonormalization(nn.Module):
     n_iter : int, optional, default: 1
     """ 
 
-    def __init__(self, n_iter: int=1):
+    def __init__(self, n_iter: int=1, rescaling: float=1.0):
         super().__init__()
         self.n_iter = n_iter
+        self.rescaling = rescaling
 
     def forward(self, w: torch.Tensor) -> torch.Tensor:
         for _ in range(self.n_iter):
             w = 1.5 * w - 0.5 * w @ (w.T @ w)
-        return w
+        return w * self.rescaling
+
+    def __repr__(self):
+        return f'BjorckOrthonormalization(rescaling={self.rescaling}, n_iter={self.n_iter})'
+
+class ForbeniusNormalization(nn.Module):
+    """ Normalizes the forbenius norm of a matrix. 
+    
+    Parameters:
+    -----------
+    rescaling : float, optional, default: 1.0
+        The forbenius norm of the matrix.
+    """
+    def __init__(self, rescaling: float = 1.0):
+        super().__init__()
+        self.rescaling = rescaling
+
+    def forward(self, w: torch.Tensor) -> torch.Tensor:
+        scale = torch.linalg.norm(w, ord='fro') * self.rescaling
+        return w * scale
+
+    def __repr__(self):
+        return f'ForbeniusNormalization(rescaling={self.rescaling})'
+
+class Rescaling(nn.Module):
+    """ Rescales the weight matrix by a scalar offset. 
+    
+    Parameters:
+    -----------
+    rescaling : float, optional, default: 1.0
+        The rescaling factor.
+    """
+
+    def __init__(self, rescaling: float = 1.0):
+        super().__init__()
+        self.rescaling = rescaling
+    
+    def forward(self, w: torch.Tensor) -> torch.Tensor:
+        return w * self.rescaling
+
+    def __repr__(self):
+        return f'Rescaling(rescaling={self.rescaling})'
 
 def spectral_norm(module: Module,
                   name: str = 'weight',
@@ -188,7 +233,7 @@ def spectral_norm(module: Module,
     parametrize.register_parametrization(module, name, _SpectralNorm(weight, rescaling, n_power_iterations, dim, eps))
     return module
 
-def bjorck_orthonormalize(module: Module, name: str = 'weight', n_iter: int=1):
+def bjorck_orthonormalize(module: Module, name: str = 'weight', n_iter: int=1, rescaling: float=1.0):
     """ Applies Björck Orthonormalization as parametrization to a module's parameter.
     
     Parameters:
@@ -199,11 +244,53 @@ def bjorck_orthonormalize(module: Module, name: str = 'weight', n_iter: int=1):
         The weight to within the module to apply the parametrization to.
     n_iter : int, optional, default: 1
         The number of iterations to perform.
+    rescaling : float, optional, default: 1.0
+        Rescaling applied to the matrix.
 
     Returns:
     --------
     module : nn.Module
         The module that parametrization applied to it.
     """ 
-    parametrize.register_parametrization(module, name, BjorckOrthonormalization(n_iter=n_iter))
+    parametrize.register_parametrization(module, name, BjorckOrthonormalization(n_iter=n_iter, rescaling=rescaling))
+    return module
+
+def forbenius_normalization(module: Module, name: str = 'weight', rescaling: float=1.0):
+    """ Normalizes the Forbenius norm of a module's parameter.
+    
+    Parameters:
+    -----------
+    module : nn.Module
+        The module to apply parametrization to.
+    weight : str
+        The weight to within the module to apply the parametrization to.
+    rescaling : float, optional, default: 1.0
+        The desired forbenius norm.
+
+    Returns:
+    --------
+    module : nn.Module
+        The module that parametrization applied to it.
+    """ 
+    parametrize.register_parametrization(module, name, ForbeniusNormalization(rescaling=rescaling))
+    return module
+
+def rescaling(module: Module, name: str = 'weight', rescaling: float=1.0):
+    """ Rescales weight of a module's parameter.
+    
+    Parameters:
+    -----------
+    module : nn.Module
+        The module to apply parametrization to.
+    weight : str
+        The weight to within the module to apply the parametrization to.
+    rescaling : float, optional, default: 1.0
+        The desired scale.
+
+    Returns:
+    --------
+    module : nn.Module
+        The module that parametrization applied to it.
+    """ 
+    parametrize.register_parametrization(module, name, Rescaling(rescaling=rescaling))
     return module

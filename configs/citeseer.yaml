@@ -11,5 +11,6 @@ data:
   split_type: uniform
   type: npz
   drop_train_vertices_portion: 0.1
+  precompute_k_hop_neighbourhood: 2
 model:
   hidden_sizes: [64]

@@ -45,11 +45,12 @@ if __name__ == '__main__':
                                 ),
                                     model=ModelConfiguration(**base_config['model'])
                                 )
+                update_with_default_configuration(config)
 
-                if ood_type == dconstants.PERTURBATION:
-                    config.data.left_out_class_labels = []
-                    config.data.base_labels = config.data.train_labels
-                    config.data.corpus_labels = config.data.train_labels
+                # if ood_type == dconstants.PERTURBATION:
+                #     config.data.left_out_class_labels = []
+                #     config.data.base_labels = config.data.train_labels
+                #     config.data.corpus_labels = config.data.train_labels
 
 
                 for split_idx in tqdm(range(num_splits), desc='Exporting dataset splits...'):

@@ -5,8 +5,9 @@ import numpy as np
 import networkx as nx
 from collections import Mapping
 import scipy.sparse as sp
-from typing import Dict, Any, Iterable
+from typing import Dict, Any, Iterable, List
 from torch import Tensor
+import logging
 
 @contextmanager
 def suppress_stdout(supress=True):
@@ -130,6 +131,58 @@ def format_name(name_fmt, args, config, delimiter=':'):
         parsed_args.append(str(arg))
     return name_fmt.format(*parsed_args)
 
+
+
+
+def k_hop_neighbourhoods(A: sp.spmatrix, k_max: int) -> List[sp.spmatrix]:
+    """ Gets all <= k neighbourhoods of a graph. 
+    
+    Parameters:
+    -----------
+    A : sp.spmatrix, shape [n, n]
+        Adjacency matrix. Values > 0 are interpreted as links.
+    k_max : int
+        How many hops to look for.
+
+    Returns:
+    --------
+    A_sp_ks : list[sp.spmatrix, shape [n, n]]
+        A k-hop neighbour indicator matrix.
+    """
+    mat = sp.identity(A.shape[0], dtype=bool, format='csr')
+    result = sp.identity(A.shape[0], dtype=int, format='csr')
+    A = A.tocsc().astype(bool) # csr x csc is fast
+    
+    results = [mat]
+
+    # The k-i hop neighbourhood will have a value of 2^i in the resulting matrix
+    # Therefore, the biggest power of 2 represents the bfs number of each vertex
+    # i.e. entries with a 1 will have a bfs number of k
+    for it in range(k_max):
+        mat = (mat @ A).astype(bool)
+        result *= 2
+        result += mat
+
+        result_k = (result == 1)
+        result_k.eliminate_zeros()
+        results.append(result_k)
+        
+    return results
+
+def k_hop_neighbourhood_from_data(data, k: int) -> sp.spmatrix:
+    """ Gets the k-hop neighbourhood of a graph from potentially precomputed information in the data. """
+    n = data.x.size(0)
+    if hasattr(data, f'{k}_hop_neighbourhood_indptr') and hasattr(data, f'{k}_hop_neighbourhood_indices'):
+        # logging.info(f'Found {k} hop nbs in data.')
+        indptr = getattr(data, f'{k}_hop_neighbourhood_indptr').cpu().numpy().astype(int)
+        indices = getattr(data, f'{k}_hop_neighbourhood_indices').cpu().numpy().astype(int)
+        k_hop_nbs = sp.csr_matrix((np.ones(indices.shape[0]), indices, indptr), shape=(n, n), dtype=float)
+    else:
+        # logging.info(f'Did not find {k} hop nbs in data.')
+        edge_index = data.edge_index.cpu().numpy()
+        A = sp.coo_matrix((np.ones(edge_index.shape[1]), edge_index), shape=(n, n), dtype=bool)
+        k_hop_nbs = k_hop_neighbourhood(A, k).astype(int)
+    return k_hop_nbs
 
 def k_hop_neighbourhood(A: sp.spmatrix, k: int):
     """ Gets the k-hop neighbourhood of a graph. 

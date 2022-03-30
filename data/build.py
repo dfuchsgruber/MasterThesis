@@ -1,6 +1,8 @@
+from dataset_registry import DatasetRegistry
 import numpy as np
 import torch
 from typing import Tuple, Dict
+import logging
 
 from data.gust_dataset import GustDataset
 from data.npz import NpzDataset
@@ -93,10 +95,23 @@ def load_data_from_configuration(config: DataConfiguration, split_seed: int) -> 
     fixed_vertices : set
         The vertex ids (as in `data.vertex_to_idx`'s keys) of the common portion that will only be allocated to testing data. 
     """
-    if config.split_type == 'uniform':
-        return load_data_from_configuration_uniform_split(config, split_seed)
-    elif config.split_type == 'predefined':
-        return load_data_from_configuration_predefined_split(config, split_seed)
+    dataset_registry = DatasetRegistry()
+    if config.use_dataset_registry:
+        dataset_path = dataset_registry[(config, split_seed)]
     else:
-        raise RuntimeError(f'Unsupported dataset split type {config.split_type}')
-    
+        dataset_path = None
+    if dataset_path is None:
+        logging.info(f'Did not find precomputed dataset split.')
+        if config.split_type == 'uniform':
+            data_dict, fixed_vertices = load_data_from_configuration_uniform_split(config, split_seed)
+        elif config.split_type == 'predefined':
+            data_dict, fixed_vertices = load_data_from_configuration_predefined_split(config, split_seed)
+        else:
+            raise RuntimeError(f'Unsupported dataset split type {config.split_type}')
+        if config.use_dataset_registry:
+            dataset_registry[(config, split_seed)] = (data_dict, fixed_vertices)
+    else:
+        logging.info(f'Found precomputed dataset split at {dataset_path}')
+        data_dict, fixed_vertices = torch.load(dataset_path)
+
+    return data_dict, fixed_vertices

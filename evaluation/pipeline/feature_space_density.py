@@ -117,7 +117,7 @@ class FitFeatureDensityGrid(FeatureDensity):
     name = 'FitFeatureDensityGrid'
 
     def __init__(self, density_types={}, dimensionality_reductions={}, seed=1337,
-                    density_plots = ['pca', 'umap'], 
+                    density_plots = ['pca', 'umap'],
                     **kwargs):
         super().__init__(**kwargs)
         self.density_types = density_types
@@ -181,6 +181,18 @@ class FitFeatureDensityGrid(FeatureDensity):
                             )
                         density_model.fit(features_to_fit_reduced, predictions_to_fit, features_to_validate_reduced, predictions_to_validate)
                         pipeline_log(f'{self.name} fitted density {density_model.compressed_name}')
+
+                        # TODO: remove again
+                        # torch.save({
+                        #     'features_fit' : features_to_fit_reduced,
+                        #     'features_val' : features_to_validate_reduced,
+                        #     'features_eval' : features_to_evaluate_reduced,
+                        #     'predictions_fit' : predictions_to_fit,
+                        #     'predictions_val' : predictions_to_validate,
+                        #     'predictions_eval' : predictions_to_evaluate,
+                        #     'auroc_labels' : auroc_labels,
+                        #     'auroc_mask' : auroc_mask,
+                        # }, 'citeseer_debug.pt')
 
                         for eval_suffix, eval_kwargs in density_model.evaluation_kwargs:
                             log_density = density_model(features_to_evaluate_reduced, **eval_kwargs).cpu()

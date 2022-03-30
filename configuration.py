@@ -94,12 +94,16 @@ class LaplaceBayesianGCNConfiguration(BaseConfiguration):
     """ Configuration for laplace posterior approximation. """
     seed: int = attr.ib(default=1337, converter=int)
     hessian_structure = attr.ib(default=mconstants.DIAG_HESSIAN, converter=lambda s: s.lower(), validator=validators.in_((mconstants.DIAG_HESSIAN, mconstants.FULL_HESSIAN)))
+    batch_size: int = attr.ib(default=-1, converter=int) # If -1, the whole dataset is used (no batching) to optimize prior parameters
+
+    gpu: bool = attr.ib(default=False, converter=bool, metadata={'registry_attribute' : False})
 
 @attr.s
 class OrthongonalGCNConfiguration(BaseConfiguration):
     """ Configuration for laplace posterior approximation. """
     random_input_projection: bool = attr.ib(default=False, converter=bool)
     bjorck_orthonormalzation_n_iter: int = attr.ib(default=1, converter=int, validator=validators.gt(0))
+    bjorck_orthonormalzation_rescaling: float = attr.ib(default=1.0, converter=float, validator=validators.gt(0))
 
 @attr.s
 class ModelConfiguration(BaseConfiguration):
@@ -118,9 +122,17 @@ class ModelConfiguration(BaseConfiguration):
     dropout: float = attr.ib(default=0.0, validator=validators.and_(validators.ge(0), validators.le(1)), converter=float)
     drop_edge: float = attr.ib(default=0.0, validator=validators.and_(validators.ge(0), validators.le(1)), converter=float)
     use_spectral_norm_on_last_layer: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
+    use_bjorck_norm_on_last_layer: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
+    use_forbenius_norm_on_last_layer: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
+    use_rescaling_on_last_layer: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool), converter=bool)
     use_residual_on_last_layer: bool = attr.ib(default=False, converter=bool)
+    use_rescaling: bool = attr.ib(default=False, converter=bool)
     cached: bool = attr.ib(default=True, validator=attr.validators.instance_of(bool), converter=bool) # Cache will be cleared and disabled after training
     self_loop_fill_value: float = attr.ib(default=1.0, converter=float)
+    use_forbenius_norm: bool = attr.ib(default=False, converter=bool)
+    use_bjorck_norm: bool = attr.ib(default=False, converter=bool)
+    forbenius_norm: float = attr.ib(default=1.0, converter=float, validator=validators.gt(0))
+    initialization_scale: float = attr.ib(default=1.0, converter=float, validator=validators.gt(0))
 
     reconstruction: ReconstructionConfiguration = attr.ib(default={}, converter=make_cls_converter(ReconstructionConfiguration))
     feature_reconstruction: FeatureReconstructionConfiguration = attr.ib(default={}, converter=make_cls_converter(FeatureReconstructionConfiguration))
@@ -184,7 +196,15 @@ class DataConfiguration(BaseConfiguration):
     normalize: Optional[str] = attr.ib(default='l2', validator=validators.in_(('l1', 'l2', None)))
     vectorizer: str = attr.ib(default='tf-idf', validator=validators.in_(('tf-idf', 'count')), converter=lambda s: s.lower())
 
+    # Scale to the input features
+    feature_scale: float = attr.ib(default=1.0, converter=float)
+
     integrity_assertion: bool = attr.ib(default=False, converter=bool, metadata={'registry_attribute' : False})
+
+    # If the k-hop neighbourhood should be precomputed for all the graphs
+    precompute_k_hop_neighbourhood: int = attr.ib(default=2, converter=int)
+
+    use_dataset_registry: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
 
 @attr.s
 class EarlyStoppingConfiguration(BaseConfiguration):
@@ -216,6 +236,7 @@ class TrainingConfiguration(BaseConfiguration):
 
     # additional regularizers
     orthonormal_weight_regularization_strength: float = attr.ib(default=0.0, converter=float, validator=validators.ge(0))
+    orthonormal_weight_scale: float = attr.ib(default=1.0, converter=float, validator=validators.gt(0))
 
 @attr.s
 class EvaluationConfiguration(BaseConfiguration):
@@ -226,6 +247,7 @@ class EvaluationConfiguration(BaseConfiguration):
     log_plots: bool = attr.ib(default=False, converter=bool)
     save_artifacts: bool = attr.ib(default=False, converter=bool)
     sample: bool = attr.ib(default=False, converter=bool)
+    use_gpus: bool = attr.ib(default=False, converter=bool)
 
 DEFAULT_REGISTRY_COLLECTION_NAME = 'model_registry_v5'
 
@@ -248,7 +270,6 @@ class RunConfiguration(BaseConfiguration):
 
     # If set, some values are updated with defaults depending on the dataset
     use_default_configuration: bool = attr.ib(default=False, converter=bool, metadata={'registry_attribute' : False})
-
 
 @attr.s
 class _RegistryConfiguration(BaseConfiguration):

@@ -19,7 +19,7 @@ def run_model_on_datasets(model, data_loaders, gpus=0, callbacks=[
     evaluation.callbacks.make_callback_get_features(), 
     evaluation.callbacks.make_callback_get_predictions(), 
     evaluation.callbacks.make_callback_get_ground_truth(),
-], run_model=True, model_kwargs={}):
+], run_model=True, model_kwargs={}, compute_gradients=False):
     """ Extracts features of all data loaders. 
     
     model : torch.nn.Module
@@ -40,22 +40,28 @@ def run_model_on_datasets(model, data_loaders, gpus=0, callbacks=[
     results : tuple
         Results for each callback. Each result is a list per data loader.
     """
-    if gpus > 0:
-        model = model.to('cuda')
-    
-    results = tuple([] for _ in callbacks)
-    for loader in data_loaders:
-        assert len(loader) == 1, f'Feature extraction is currently only supported for single graphs.'
-        for data in loader:
+    with torch.set_grad_enabled(compute_gradients):
+        if run_model:
             if gpus > 0:
-                data = data.to('cuda')
-            if run_model:
-                output = model(data, **model_kwargs)
+                model = model.to('cuda')
             else:
-                output = None
-            for idx, callback in enumerate(callbacks):
-                results[idx].append(callback(data, output))
-    return results
+                model = model.to('cpu')
+        
+        results = tuple([] for _ in callbacks)
+        for loader in data_loaders:
+            assert len(loader) == 1, f'Feature extraction is currently only supported for single graphs.'
+            for data in loader:
+                if gpus > 0:
+                    data = data.to('cuda')
+                else:
+                    data = data.to('cpu')
+                if run_model:
+                    output = model(data, **model_kwargs)
+                else:
+                    output = None
+                for idx, callback in enumerate(callbacks):
+                    results[idx].append(callback(data, output))
+        return results
 
 def count_id_neighbours(data_loaders: List[DataLoader], k_max: int, mask: bool=True, fraction: bool=False) -> torch.Tensor:
     """ For each dataset counts the number of neighbours with the id attribute in set of k-hop neighbourhoods.

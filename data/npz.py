@@ -312,6 +312,8 @@ class NpzDataset(SingleGraphDataset):
         else:
             raise ValueError(f'Unsupported normalization {config.normalize}')
 
+        X *= config.feature_scale
+
         label_to_idx = {label : idx for idx, label in idx_to_label.items() if idx in y}
         y, label_to_idx, _ = data.util.compress_labels(y, label_to_idx)
         _data = SingleGraphDataset.build(X, np.array(A.nonzero()), y, vertex_to_idx, label_to_idx, np.ones_like(y), transform=transform, feature_to_idx=feature_to_idx).data

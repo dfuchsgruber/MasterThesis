@@ -13,7 +13,6 @@ from torch_geometric.utils import remove_self_loops, add_self_loops
 from configuration import FeatureReconstructionConfiguration, ModelConfiguration
 import logging
 from sklearn.metrics import roc_auc_score
-from util import get_parameters_with_dimensions
 from model.losses import *
 
 def log_metrics(module: pl.LightningModule, metrics, prefix=None):
@@ -30,7 +29,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
     """ Wrapper for networks that perform semi supervised node classification. """
     
     def __init__(self, backbone_configuration: ModelConfiguration, num_input_features, num_classes, learning_rate=1e-2, weight_decay=0.0,
-        orthnormal_regularizer: float=0.0):
+        orthnormal_regularizer: float=0.0, orthonormal_weight_scale: float=1.0):
         super().__init__()
         self.save_hyperparameters(ignore=["backbone_configuration"])
         self.backbone = make_model_by_configuration(backbone_configuration, num_input_features, num_classes)
@@ -38,6 +37,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         self.self_loop_fill_value = backbone_configuration.self_loop_fill_value
         self.weight_decay = weight_decay
         self.orthonormal_regularizer = orthnormal_regularizer
+        self.orthonormal_weight_scale = orthonormal_weight_scale
         self._self_training = False
         self.reconstruction_loss_weight = backbone_configuration.reconstruction.loss_weight
         self.feature_reconstruction_loss_weight = backbone_configuration.feature_reconstruction.loss_weight
@@ -54,6 +54,11 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
             self.reconstruction_loss.clear_and_disable_cache()
         if self.feature_reconstruction_loss_weight > 0:
             self.feature_reconstruction.clear_and_disable_cache()
+
+    def get_weights(self) -> Dict[str, nn.Parameter]:
+        return {
+            f'backbone.{name}' : param for name, param in self.backbone.get_weights().items()
+        }
 
     @property
     def self_training(self):
@@ -132,8 +137,8 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
 
         # Orthonormality 
         if self.orthonormal_regularizer > 0:
-            for pname, p in get_parameters_with_dimensions(self.backbone, order=2).items():
-                metrics[f'orthonormality_loss_{pname}'] = self.orthonormal_regularizer * orthonormal_regularization_loss(p)
+            for pname, p in self.backbone.get_weights().items():
+                metrics[f'orthonormality_loss_{pname}'] = self.orthonormal_regularizer * orthonormal_regularization_loss(p, spectrum=self.orthonormal_weight_scale)
                 loss += metrics[f'orthonormality_loss_{pname}']
                 
 
@@ -237,3 +242,11 @@ class Ensemble(pl.LightningModule):
         """ Clears and disables the cache. """
         for member in self.members:
             member.clear_and_disable_cache()
+
+    def get_weights(self) -> Dict[str, nn.Parameter]:
+        weights = {}
+        for idx, member in enumerate(self.members):
+            weights |= {
+                f'member{idx}.{name}' : param for name, param in member.get_weights().items()
+            }
+        return weights

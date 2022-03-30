@@ -8,5 +8,6 @@ data:
   split_type: predefined
   type: npz
   drop_train_vertices_portion: 0.1
+  precompute_k_hop_neighbourhood: 3
 model:
   hidden_sizes: [256, 256]

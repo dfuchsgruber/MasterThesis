@@ -113,6 +113,7 @@ class Pipeline:
         self.members = []
         self.ignore_exceptions = ignore_exceptions
         self.config = config
+        self.gpus = gpus
         idx = 0
         for idx, entry in enumerate(members):
             configs = pipeline_configs_from_grid(entry)
@@ -145,5 +146,7 @@ class Pipeline:
         return '\n'.join([
             'Evaluation Pipeline',
         ] + [
-            f'{member}' for member in self.members
-        ])
+            f'log_plots : {self.config.log_plots}',
+            f'ignore_exceptions : {self.ignore_exceptions}',
+            f'gpus : {self.gpus}',
+        ] + [f'{member}' for member in self.members])

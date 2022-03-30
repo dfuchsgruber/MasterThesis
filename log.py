@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import wandb
 from PIL import Image
 
-from util import get_parameters_with_dimensions
 from plot.histogram_evolution import plot_histogram_evolution, plot_heatmap2d
 
 class LogGradientsCallback(pl.callbacks.Callback):
@@ -65,7 +64,7 @@ class LogWeightMatrixSpectrum(pl.callbacks.Callback):
 
     def on_validation_epoch_start(self, trainer: pl.Trainer, model: pl.LightningModule):
         if trainer.global_step % self.log_every_epoch == 0:
-            weights = get_parameters_with_dimensions(model, order=2)
+            weights = model.get_weights()
             for name, weight in weights.items():
                 u, s, v = np.linalg.svd(weight.detach().cpu().numpy(), full_matrices=False)
                 self._buffer[name].append(s)

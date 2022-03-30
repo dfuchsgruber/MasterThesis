@@ -24,7 +24,7 @@ def _get_convolution_weights(conv: nn.Module) -> torch.Tensor:
         return _get_convolution_weights(conv.conv)
     if isinstance(conv, GCNConv):
         return conv.lin.weight.detach()
-    elif isinstance(conv, LinearWithSpectralNormaliatzion):
+    elif isinstance(conv, LinearWithParametrization):
         return conv.linear.weight.detach()
     elif isinstance(conv, BaysianGCNConv):
         return _get_convolution_weights(conv.lin)
@@ -64,7 +64,6 @@ class ModelBase(nn.Module):
         """ Gets additional losses based on the model parameters. """
         return {}
 
-
 class GCN(ModelBase):
     """ Vanilla GCN """
 
@@ -73,7 +72,16 @@ class GCN(ModelBase):
         self.residual = cfg.residual
         # self.dropout = cfg.dropout
         # self.drop_edge = cfg.drop_edge
-        self.convs = make_convolutions(input_dim, num_classes, cfg, self._make_gcn_conv_with_spectral_norm)
+        self.convs = make_convolutions(input_dim, num_classes, cfg, self._make_conv)
+
+    def get_weights(self) -> Dict[str, nn.Parameter]:
+        """ Gets all parameters of the model. """
+        params = {}
+        for idx, conv in enumerate(self.convs):
+            params |= {
+                f'conv{idx}.{name}' : param for name, param in conv.get_weights().items()
+            }
+        return params
 
     def clear_and_disable_cache(self):
         """ Clears and disables the cache. """
@@ -81,12 +89,14 @@ class GCN(ModelBase):
             conv.clear_and_disable_cache()
 
     @staticmethod
-    def _make_gcn_conv_with_spectral_norm(input_dim, output_dim, config: ModelConfiguration, *args, use_spectral_norm: bool = False, **kwargs):
+    def _make_conv(input_dim, output_dim, config: ModelConfiguration, *args, 
+            use_spectral_norm: bool = False, 
+            use_bjorck_norm: bool=False, 
+            use_forbenius_norm: bool=False, 
+            use_rescaling: bool=False, **kwargs):
         """ Method to create a convolution operator with spectral normalization """
-        conv = GCNConv(input_dim, output_dim, *args, **kwargs, add_self_loops=False, cached=config.cached, bias=config.use_bias)
-        if use_spectral_norm:
-            conv.lin = spectral_norm(conv.lin, name='weight', rescaling=config.weight_scale)
-        return conv
+        return GCNConv(input_dim, output_dim, config, *args, **kwargs, use_spectral_norm=use_spectral_norm, use_bjorck_norm=use_bjorck_norm,
+            use_rescaling=use_rescaling, use_forbenius_norm=use_forbenius_norm, add_self_loops=False, cached=config.cached, bias=config.use_bias)
 
     def forward(self, data, sample=None):
         x, edge_index, edge_weight, sample = self._unpack_inputs_and_sample(data, sample=sample)
@@ -116,16 +126,27 @@ class GCNLinearClassification(GCN):
         # Hacky workaround: Create one additional convolution that will then be replaced with a linear layer
         cfg_convs = deepcopy(cfg)
         cfg_convs.hidden_sizes = cfg.hidden_sizes[:-1] + [cfg.hidden_sizes[-1], cfg.hidden_sizes[-1]]
-        self.convs = make_convolutions(input_dim, num_classes, cfg_convs, self._make_gcn_conv_with_spectral_norm)[:-1]
-        if cfg.residual and cfg.use_residual_on_last_layer:
-            self.head = ResidualBlock(cfg.hidden_sizes[-1], num_classes, LinearWithSpectralNormaliatzion(
+        self.convs = make_convolutions(input_dim, num_classes, cfg_convs, self._make_conv)[:-1]
+        head_conv = LinearWithParametrization(
                 cfg.hidden_sizes[-1], num_classes, cfg, use_spectral_norm=cfg.use_spectral_norm_on_last_layer,
-            ), None, cfg, use_spectral_norm=cfg.use_spectral_norm_on_last_layer)
-        else:
-            self.head = BasicBlock(cfg.hidden_sizes[-1], num_classes, LinearWithSpectralNormaliatzion(
-                cfg.hidden_sizes[-1], num_classes, cfg, use_spectral_norm=cfg.use_spectral_norm_on_last_layer,
-            ), None, cfg)
+                use_bjorck_norm=cfg.use_bjorck_norm_on_last_layer, use_forbenius_norm=cfg.use_bjorck_norm_on_last_layer,
+                use_rescaling=cfg.use_rescaling,
+            )
 
+        if cfg.residual and cfg.use_residual_on_last_layer:
+            self.head = ResidualBlock(cfg.hidden_sizes[-1], num_classes, head_conv, None, cfg, 
+                use_spectral_norm=cfg.use_spectral_norm_on_last_layer, 
+                use_bjorck_norm=cfg.use_bjorck_norm_on_last_layer, 
+                use_forbenius_norm=cfg.use_bjorck_norm_on_last_layer,
+                use_rescaling=cfg.use_rescaling_on_last_layer,
+                )
+        else:
+            self.head = BasicBlock(cfg.hidden_sizes[-1], num_classes, head_conv, None, cfg)
+
+    def get_weights(self) -> Dict[str, nn.Parameter]:
+        return super().get_weights() | {
+            f'head.{name}' : param for name, param in self.head.get_weights().items()
+        }
 
     def clear_and_disable_cache(self):
         """ Clears and disables the cache. """
@@ -181,6 +202,8 @@ class GCNLaplace(ModelBase):
             x = layer(x, edge_index, edge_weight=edge_weight, sample=sample)
             embeddings.append(x)
         if sample:
+            # print(x.device)
+            # print(x.device, {name : param.device for name, param in self.head.parameters()})
             # Always draw only one sample: The samples themselves will be aggregated by the framework 
             # in `semi_supervised_node_classification.py`
             x = self.head.predictive_samples(x, n_samples=1)[0, ...]
@@ -255,7 +278,7 @@ class GCNLaplace(ModelBase):
 
 #         # Helper to build a GIN layer with spectral norm applied to its feature transformation module (single linear layer)
 #         def GINConv_with_spectral_norm(in_dim, out_dim, bias=True, use_spectral_norm=True, weight_scale=1.0):
-#             linear = LinearWithSpectralNormaliatzion(in_dim, out_dim, use_bias=bias, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale)
+#             linear = LinearWithParametrization(in_dim, out_dim, use_bias=bias, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale)
 #             return torch_geometric.nn.GINConv(linear)
 
 #         self.convs = make_convolutions(input_dim, num_classes, hidden_dims, GINConv_with_spectral_norm,
@@ -279,7 +302,7 @@ class GCNLaplace(ModelBase):
 #         super().__init__()
 #         self.activation = activation
 
-#         self.convs = make_convolutions(input_dim, num_classes, hidden_dims, LinearWithSpectralNormaliatzion,
+#         self.convs = make_convolutions(input_dim, num_classes, hidden_dims, LinearWithParametrization,
 #                                                 use_bias=use_bias, use_spectral_norm=use_spectral_norm, weight_scale=weight_scale)
 
 #     def forward(self, data):
@@ -347,61 +370,6 @@ class BayesianGCN(ModelBase):
         }
 
 
-class OrthogonalGCN(ModelBase):
-
-    def __init__(self, input_dim, num_classes, cfg: ModelConfiguration):
-        super().__init__(cfg)
-        if cfg.orthogonal.random_input_projection:
-            self.input_projection = nn.Linear(input_dim, cfg.hidden_sizes[0], bias=False)
-            self.input_projection.weight.requires_grad = False
-            input_dim = cfg.hidden_sizes[0]
-            self._indim = input_dim
-        else:
-            self.input_projection = None
-        self.convs = make_convolutions(input_dim, num_classes, cfg, self._make_conv)
-
-    def clear_and_disable_cache(self):
-        """ Clears and disables the cache. """
-        for conv in self.convs:
-            conv.clear_and_disable_cache()
-
-    @staticmethod
-    def _make_conv(input_dim, output_dim, config: ModelConfiguration, *args, **kwargs):
-        """ Method to create a convolution operator with spectral normalization """
-        conv = OrthogonalGCNConv(input_dim, output_dim, *args, singular_values=config.weight_scale,
-            add_self_loops=False, cached=config.cached, bias=config.use_bias)
-        return conv
-
-    def forward(self, data, sample=None):
-        x, edge_index, edge_weight, sample = self._unpack_inputs_and_sample(data, sample=sample)
-        if self.input_projection is not None:
-            x = self.input_projection(x)
-        embeddings = [x]
-        for num, layer in enumerate(self.convs):
-            x = layer(x, edge_index, edge_weight=edge_weight, sample=sample)
-            embeddings.append(x)
-        return Prediction(
-            features = embeddings,
-            **{
-                LOGITS : x,
-                SOFT_PREDICTIONS : F.softmax(x, dim=1),
-                INPUTS : data.x,
-            } 
-            )
-
-    def get_output_weights(self):
-        raise NotImplemented
-
-class BjorckOrthonormalGCN(OrthogonalGCN):
-    """ GCN that uses bjorck orthonormalized weight matrices. """
-
-    @staticmethod
-    def _make_conv(input_dim, output_dim, config: ModelConfiguration, *args, use_spectral_norm: bool = False, **kwargs):
-        """ Method to create a convolution operator with bjorck normalization """
-        conv = GCNConv(input_dim, output_dim, *args, **kwargs, add_self_loops=False, cached=config.cached, bias=config.use_bias)
-        conv.lin = bjorck_orthonormalize(conv.lin, name='weight', n_iter=config.orthogonal.bjorck_orthonormalzation_n_iter)
-        return conv
-
 # class BGCN(ModelBase):
 #     """ Bayesian GCN that samples weights. """
 
@@ -460,7 +428,7 @@ class APPNP(ModelBase):
     def __init__(self, input_dim, num_classes, cfg: ModelConfiguration,):
         super().__init__(cfg)
         self.activation = make_activation_by_configuration(cfg)
-        self.blocks = make_convolutions(input_dim, num_classes, cfg, LinearWithSpectralNormaliatzion)
+        self.blocks = make_convolutions(input_dim, num_classes, cfg, LinearWithParametrization)
         self.diffusion = APPNPConv(cfg.appnp.diffusion_iterations, cfg.appnp.teleportation_probability, cached=cfg.cached)
 
     def clear_and_disable_cache(self):
@@ -534,10 +502,6 @@ def make_model_by_configuration(cfg: ModelConfiguration, input_dim, output_dim):
         return GCNLinearClassification(input_dim, output_dim, cfg)
     elif cfg.model_type == mconst.GCN_LAPLACE:
         return GCNLinearClassificationLaplaceBackbone(input_dim, output_dim, cfg)
-    elif cfg.model_type == mconst.GCN_ORTHOGONAL:
-        return OrthogonalGCN(input_dim, output_dim, cfg)
-    elif cfg.model_type == mconst.GCN_BJORCK_ORTHOGONAL:
-        return BjorckOrthonormalGCN(input_dim, output_dim, cfg)
     else:
         raise RuntimeError(f'Unsupported model type {cfg.model_type}')
         

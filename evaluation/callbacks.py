@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import scipy.sparse as sp
-from util import k_hop_neighbourhood
+from util import k_hop_neighbourhood_from_data
 from model.prediction import Prediction
 from data.util import labels_to_idx
 
@@ -88,10 +88,7 @@ def make_callback_count_neighbours_with_attribute(attribute_getter, k, mask=True
     """
     def callback(data, output: Prediction):
         has_attribute = attribute_getter(data, output)
-        n = data.x.size(0)
-        edge_index = data.edge_index.cpu().numpy()
-        A = sp.coo_matrix((np.ones(edge_index.shape[1]), edge_index), shape=(n, n), dtype=bool)
-        k_hop_nbs = k_hop_neighbourhood(A, k).astype(int)
+        k_hop_nbs = k_hop_neighbourhood_from_data(data, k).astype(int)
         result = torch.tensor(k_hop_nbs.multiply(has_attribute[None, :]).sum(1)).squeeze().long()
         num_nbs = torch.tensor(k_hop_nbs.sum(1)).squeeze().long()
         result = torch.stack([result, num_nbs], 1)
@@ -108,7 +105,7 @@ def make_callback_get_degree(hops=1, mask=True, cpu=True):
         n = data.x.size(0)
         edge_index = data.edge_index.cpu().numpy()
         A = sp.coo_matrix((np.ones(edge_index.shape[1]), edge_index), shape=(n, n), dtype=bool)
-        k_hop_nbs = k_hop_neighbourhood(A, hops).astype(int)
+        k_hop_nbs = k_hop_neighbourhood_from_data(data, hops).astype(int)
         result = torch.tensor(np.array(k_hop_nbs.sum(1))).to(data.x.device).squeeze()
         if mask:
             result = result[data.mask]

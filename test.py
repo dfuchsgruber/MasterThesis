@@ -22,15 +22,16 @@ if __name__ == '__main__':
                         split_type='uniform',
                         type='npz',
                         preprocessing='none',
-                        # ood_type = dconstants.LEFT_OUT_CLASSES,
-                        ood_type = dconstants.PERTURBATION,
+                        ood_type = dconstants.LEFT_OUT_CLASSES,
+                        # ood_type = dconstants.PERTURBATION,
                         # setting = dconstants.HYBRID,
-                        setting = dconstants.TRANSDUCTIVE,
+                        setting = dconstants.HYBRID,
                         #preprocessing='word_embedding',
                         #language_model = 'bert-base-uncased',
                         #language_model = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
                         #language_model = 'allenai/longformer-base-4096',
                         drop_train_vertices_portion = 0.1,
+                        # feature_scale=20.0,
                         )
 
     if data_cfg.ood_type == dconstants.PERTURBATION:
@@ -41,7 +42,9 @@ if __name__ == '__main__':
     spectral_norm_cfg = {
         'use_spectral_norm' : True,
         'residual' : True,
-        'weight_scale' : 20.0,
+        'weight_scale' : 10.0,
+        'use_spectral_norm_on_last_layer' : False,
+        # 'self_loop_fill_value' : 5.0,
     }
 
     reconstruction_cfg = {
@@ -60,17 +63,20 @@ if __name__ == '__main__':
         'num_samples' : 100,
     }
 
-    orthogonal_cfg = {
-        'weight_scale' : 1.0,
+    bjorck_cfg = {
+        # 'weight_scale' : 1.0,
         'orthogonal' : {
             'random_input_projection' : False,
-            'bjorck_orthonormalzation_n_iter' : 1,
+            'bjorck_orthonormalzation_n_iter' : 3,
+            'bjorck_orthonormalzation_rescaling' : 10.0,
         },
-        'residual' : False,
+        'use_bjorck_norm' : True,
+        'residual' : True,
     }
 
     orthonormal_reg = {
         'orthonormal_weight_regularization_strength' : 1e-0,
+        'orthonormal_weight_scale' : 10.0,
     }
 
     bounded_svd = {
@@ -78,8 +84,34 @@ if __name__ == '__main__':
         'singular_value_bounding_eps' : 1.0,
     }
 
+    forbenius_norm_cfg = {
+        'use_forbenius_norm_on_last_layer' : True,
+        'forbenius_norm' : 20.0,
+        'residual' : True,
+    }
+
+    init_scale_cfg = {
+        'initialization_scale' : 50.0,
+        'residual' : True,
+    }
+
+    rescaling_cfg = {
+        'residual' : True,
+        'use_rescaling_on_last_layer' : False,
+        'weight_scale' : 40.0,
+        'use_rescaling' : True,
+
+    }
+
+    spectral_last_cfg = {
+        'use_spectral_norm_on_last_layer' : True,
+        'weight_scale' : 10,
+        # 'use_spectral_norm' : True,
+        'residual' : True,
+    }
+
     model_cfg = configuration.ModelConfiguration(
-        model_type=mconstants.GCN_BJORCK_ORTHOGONAL,
+        model_type=mconstants.GCN,
         # model_type = mconstants.BGCN,
         #model_type = 'appnp',
         # dropout = 0.5,
@@ -89,22 +121,27 @@ if __name__ == '__main__':
         activation='leaky_relu', 
         leaky_relu_slope=0.01,
         freeze_residual_projection=False, 
-        use_spectral_norm_on_last_layer=True, 
-        self_loop_fill_value=1.0, 
+        # use_spectral_norm_on_last_layer=True, 
+        # self_loop_fill_value=1.0, 
         cached=True,
         # bgcn = {},
         # reconstruction = reconstruction_cfg,
         # feature_reconstruction = feature_reconstruction_cfg,
-        #**spectral_norm_cfg,
+        # **spectral_norm_cfg,
         #residual = True,
-        **orthogonal_cfg,
+        # **orthogonal_cfg,
+        # **forbenius_norm_cfg,
+        # **bjorck_cfg,
+        #  **init_scale_cfg,
+         #**rescaling_cfg,
+        # **spectral_last_cfg,
         )
     
-    if not model_cfg.use_spectral_norm:
-        model_cfg.use_spectral_norm_on_last_layer = False
+    # if not model_cfg.use_spectral_norm:
+    #     model_cfg.use_spectral_norm_on_last_layer = False
 
     run_cfg = configuration.RunConfiguration(
-        name='{0}-{1}-sn:{2}-son:{3}-{4}-ortho-reg', 
+        name='{0}-{1}-sn:{2}-son:{3}-{4}', 
         args=[
             'data:dataset', 'model:model_type', 'model:use_spectral_norm', 'model:use_spectral_norm_on_last_layer', 'model:residual', 'data:setting',
         ],
@@ -132,7 +169,7 @@ if __name__ == '__main__':
         gpus=1, 
         suppress_stdout=False, 
         weight_decay=1e-3,
-        #**orthonormal_reg,
+        # **orthonormal_reg,
         # **self_training,
         #**bounded_svd,
         )
@@ -183,7 +220,7 @@ if __name__ == '__main__':
             },
         ]
         ood_separation = 'ood'
-        ood_datasets = {'ber' : 'ood-val-ber', 'normal' : 'ood-val-normal'}
+        ood_datasets = {'ber' : 'ood-val-ber', }#'normal' : 'ood-val-normal'}
     elif data_cfg.ood_type == dconstants.LEFT_OUT_CLASSES:
         perturbation_pipeline = []
         ood_separation = 'ood-and-neighbourhood'

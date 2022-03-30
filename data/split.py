@@ -9,6 +9,8 @@ from copy import deepcopy
 import configuration
 from typing import Optional, Set, Tuple, Dict
 import logging
+from util import k_hop_neighbourhood, k_hop_neighbourhoods
+import scipy.sparse as sp
 
 from seed import DATA_SPLIT_FIXED_TEST_SEED
 
@@ -175,11 +177,12 @@ def predefined_split(data: tg.data.Data, split_seed: int, config: configuration.
             if config.ood_type == dconstants.LEFT_OUT_CLASSES:
                 is_ood_base = dutils.get_label_mask(y_base, left_out_class_labels)
             elif config.ood_type == dconstants.PERTURBATION:
-                is_ood_base = dutils.split_from_mask_stratified(~is_train, y_base, sizes = [config.perturbation_budget, 1 - config.perturbation_budget], rng=rng)[:, 0]
+                perturbation_budget = config.perturbation_budget / ((~is_train).sum() / is_train.shape[0]) # Since we cant sample form the full pool, rescale ratio
+                is_ood_base = dutils.split_from_mask_stratified(~is_train, y_base, sizes = [perturbation_budget, 1 - perturbation_budget], rng=rng)[:, 0]
         
             # Create a graph for training, validation, testing and one for the ood experiments (validation and testing)
-            mask_dropped_id = dutils.split_from_mask_stratified((~is_ood_base) & (~is_train), y_base, sizes = [config.drop_train_vertices_portion, 1 - config.drop_train_vertices_portion], rng=rng)[:, 0]
-            
+            drop_train_vertices_portion = config.drop_train_vertices_portion / (((~is_ood_base) & (~is_train)).sum() / is_train.shape[0])
+            mask_dropped_id = dutils.split_from_mask_stratified((~is_ood_base) & (~is_train), y_base, sizes = [drop_train_vertices_portion, 1 - drop_train_vertices_portion], rng=rng)[:, 0]
             if config.setting == dconstants.TRANSDUCTIVE:
                 x_train, edge_index_train, y_train, vertex_to_idx_train, mask_train_graph = (x_base.copy(), edge_index_base.copy(), y_base.copy(), 
                 deepcopy(vertex_to_idx_base), np.ones_like(y_base, dtype=bool))
@@ -220,12 +223,22 @@ def predefined_split(data: tg.data.Data, split_seed: int, config: configuration.
                 mask_ood_val = mask_ood_graph & (is_ood_base | mask_dropped_id) & mask_non_fixed
             else:
                 raise ValueError
+
+
+            logging.info(f'Precompute <= {config.precompute_k_hop_neighbourhood} neighbourhoods of ood graph.')
+            # Precompute k-hop neighbourhoods for evaluation
+            A_ood_graph = sp.coo_matrix((np.ones(edge_index_ood.shape[1]), edge_index_ood), shape=(x_ood.shape[0], x_ood.shape[0]))
+            A_ood_graph_k_hop_nbs = {}
+            for k, A_k in enumerate(k_hop_neighbourhoods(A_ood_graph, config.precompute_k_hop_neighbourhood)):
+                A_ood_graph_k_hop_nbs[f'{k}_hop_neighbourhood_indptr'] = A_k.indptr
+                A_ood_graph_k_hop_nbs[f'{k}_hop_neighbourhood_indices'] = A_k.indices
+
             data_ood_val = SingleGraphDataset.build(x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, mask_ood_val[mask_ood_graph],
-                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph])
+                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], **A_ood_graph_k_hop_nbs)
 
             mask_ood_test = (is_ood_base | mask_dropped_id) & mask_fixed
             data_ood_test = SingleGraphDataset.build(x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, mask_ood_test[mask_ood_graph],
-                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph])
+                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], **A_ood_graph_k_hop_nbs)
 
             datasets = {
                 dconstants.TRAIN : data_train,
@@ -352,15 +365,24 @@ def uniform_split_with_fixed_test_portion(data: tg.data.Data, split_seed: int, c
                 mask_ood_val = mask_ood_graph & (is_ood_base | mask_dropped_id) & mask_non_fixed
             else:
                 raise ValueError
+
+            logging.info(f'Precompute <= {config.precompute_k_hop_neighbourhood} neighbourhoods of ood graph.')
+            # Precompute k-hop neighbourhoods for evaluation
+            A_ood_graph = sp.coo_matrix((np.ones(edge_index_ood.shape[1]), edge_index_ood), shape=(x_ood.shape[0], x_ood.shape[0]))
+            A_ood_graph_k_hop_nbs = {}
+            for k, A_k in enumerate(k_hop_neighbourhoods(A_ood_graph, config.precompute_k_hop_neighbourhood)):
+                A_ood_graph_k_hop_nbs[f'{k}_hop_neighbourhood_indptr'] = A_k.indptr
+                A_ood_graph_k_hop_nbs[f'{k}_hop_neighbourhood_indices'] = A_k.indices
+
             data_ood_val = SingleGraphDataset.build(x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, mask_ood_val[mask_ood_graph],
-                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph])
+                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], **A_ood_graph_k_hop_nbs)
 
             # TODO: Potentially, use the same sampling strategy as well?
             #  Note that the test-ood set may have not `num_samples` vertices per class in any split, so we might need to reduce the actual number
             #  of samples to the minimal class count
             mask_ood_test = (is_ood_base | mask_dropped_id) & mask_fixed
             data_ood_test = SingleGraphDataset.build(x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, mask_ood_test[mask_ood_graph],
-                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph])
+                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], **A_ood_graph_k_hop_nbs)
 
             datasets = {
                 dconstants.TRAIN : data_train,

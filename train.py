@@ -12,7 +12,7 @@ import numpy as np
 
 from log import LogGradientsCallback, LogWeightMatrixSpectrum
 from configuration import *
-from util import suppress_stdout as context_supress_stdout, get_parameters_with_dimensions
+from util import suppress_stdout as context_supress_stdout
 import warnings
 from model_registry import ModelRegistry
 import data.constants as dconstants
@@ -46,12 +46,13 @@ class SingularValueBounding(pl.callbacks.Callback):
 
     def on_train_batch_end(self, trainer: pl.Trainer, model: pl.LightningModule, *args, **kwargs):
         with torch.no_grad():
-            for weight in get_parameters_with_dimensions(model, order=2).values():
+            for weight in model.get_weights().values():
                 u, s, v = np.linalg.svd(weight.detach().cpu().numpy(), full_matrices=False)
                 s = np.clip(s, 1 / (1 + self.eps), 1 + self.eps)
                 weight[:, :] = torch.Tensor(u @ s @ v)
 
-def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], logger: Optional[Any]=None):
+def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], 
+        logger: Optional[Any]=None, callbacks: List[pl.callbacks.Callback] = []):
     """ Trains a model that can be trained with pytorch lightning. 
     
     Parameters:
@@ -66,6 +67,8 @@ def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, a
         Data loaders used for training. See `data.constants` for keys.
     logger : Any, optional, default: None
         Logger to use for training progress.
+    callbacks : List[pl.callbacks.Callback], default: []
+        Callbacks that are executed on model training.
     
     Returns:
     --------
@@ -86,7 +89,7 @@ def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, a
         patience=config.training.early_stopping.patience,
         min_delta=config.training.early_stopping.min_delta,
     )
-    callbacks = []
+    callbacks = [cb for cb in callbacks] # Copy list
     if config.training.self_training:
         callbacks.append(SelfTrainingCallback(config.training.num_warmup_epochs))
     if config.training.singular_value_bounding:
@@ -163,8 +166,9 @@ def train_parameterless_model(model: ParameterlessBase, config: ExperimentConfig
     logging.info(f'Fit {model.__class__}.')
     return model
 
-def train_laplace(model: Any, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], logger: Optional[Any]=None) -> GCNLaplace:
-    """ Trains a model if neccessary.
+def train_laplace(model: Any, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], 
+        logger: Optional[Any]=None, callbacks: List[pl.callbacks.Callback] = []) -> GCNLaplace:
+    """ Trains a model if neccessary and applies laplace approximation to a linear output layer.
     
     Parameters:
     -----------
@@ -178,22 +182,32 @@ def train_laplace(model: Any, config: ExperimentConfiguration, artifact_dir: str
         Data loaders used for training. See `data.constants` for keys.
     logger : Any, optional, default: None
         Logger to use for training progress.
+    callbacks : List[pl.callbacks.Callback], default: []
+        Callbacks that are executed on model training.
     
     Returns:
     --------
     model : Any
         The input model, but after training.
     """
-    assert isinstance(model.backbone, GCNLinearClassification), f'Laplace posterior can only be fit to Linear classification architectures, not to {type(model.backbone)}'
-    encoder: GCNLinearClassification = train_pl_model(model, config, artifact_dir, data_loaders, logger=logger).backbone
+    assert isinstance(model.backbone, GCNLinearClassification), f'Laplace posterior can only be fit to linear classification architectures, not to {type(model.backbone)}'
+    encoder: GCNLinearClassification = train_pl_model(model, config, artifact_dir, data_loaders, logger=logger, callbacks=callbacks).backbone
+    if config.training.gpus:
+        encoder = encoder.cuda()
     logging.info('Decomposing classifier')
     # Construct a simple tensor dataset x, y
     data_train = data_loaders[dconstants.TRAIN].dataset[0]
     data_val = data_loaders[dconstants.VAL].dataset[0]
     encoder.eval()
+    encoder_devices = list(set(p.device for p in encoder.parameters()))
+    if len(encoder_devices) != 1:
+        raise RuntimeError(f'Multiple encoder devices found: {encoder_devices}')
+    device = encoder_devices[0]
+    encoder = encoder.to(device)
+    logging.info(f'Using device {device}')
     with torch.no_grad():
-        h_train = encoder(data_train, sample=False).get_features(layer=-2)
-        h_val = encoder(data_val, sample=False).get_features(layer=-2)
+        h_train = encoder(data_train.to(device), sample=False).get_features(layer=-2).to(device)
+        h_val = encoder(data_val.to(device), sample=False).get_features(layer=-2).to(device)
 
     laplace_data_train = TensorDataset(
         h_train[data_train.mask], data_train.y[data_train.mask]
@@ -201,9 +215,21 @@ def train_laplace(model: Any, config: ExperimentConfiguration, artifact_dir: str
     laplace_data_val = TensorDataset(
         h_val[data_val.mask], data_val.y[data_val.mask]
     )
-    laplace_loader_train = DataLoader(laplace_data_train, batch_size=len(laplace_data_train), shuffle=False)
-    laplace_loader_val = DataLoader(laplace_data_val, batch_size=len(laplace_data_val), shuffle=False)
+    if not config.model.laplace.gpu:
+        encoder = encoder.cpu()
+        laplace_data_train.tensors = tuple(t.to('cpu') for t in laplace_data_train.tensors)
+        laplace_data_val.tensors = tuple(t.to('cpu') for t in laplace_data_val.tensors)
+
+    if config.model.laplace.batch_size > 0:
+        batch_size_train, batch_size_val = config.model.laplace.batch_size, config.model.laplace.batch_size
+    else:
+        batch_size_train, batch_size_val = len(laplace_data_train), len(laplace_data_val)
+
+    laplace_loader_train = DataLoader(laplace_data_train, batch_size=batch_size_train, shuffle=False)
+    laplace_loader_val = DataLoader(laplace_data_val, batch_size=batch_size_val, shuffle=False)
     head = encoder.head.conv.linear
+
+
 
     la = laplace.Laplace(
         head,
@@ -218,9 +244,10 @@ def train_laplace(model: Any, config: ExperimentConfiguration, artifact_dir: str
     la.optimize_prior_precision(method='CV', val_loader=laplace_loader_val)
 
     model.backbone = GCNLaplace(encoder.convs, la, config.model)
-    return model
+    return model.cpu()
 
-def train_model(model: Any, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], logger: Optional[Any]=None,) -> Any:
+def train_model(model: Any, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], logger: Optional[Any]=None,
+    callbacks: List[pl.callbacks.Callback] = []) -> Any:
     """ Trains a model if neccessary.
     
     Parameters:
@@ -237,6 +264,8 @@ def train_model(model: Any, config: ExperimentConfiguration, artifact_dir: str, 
         Logger to use for training progress.
     return_trainer : bool, optional, default: False
         If the trainer should also be returned.
+    callbacks : List[pl.callbacks.Callback], default: []
+        Callbacks that are executed on model training.
     
     Returns:
     --------
@@ -244,10 +273,10 @@ def train_model(model: Any, config: ExperimentConfiguration, artifact_dir: str, 
         The input model, but after training.
     """
     if model.training_type == mconstants.TRAIN_PL:
-        return train_pl_model(model, config, artifact_dir, data_loaders, logger=logger)
+        return train_pl_model(model, config, artifact_dir, data_loaders, logger=logger, callbacks=callbacks)
     elif model.training_type == mconstants.TRAIN_PARAMETERLESS:
         return train_parameterless_model(model, config, artifact_dir, data_loaders, logger=logger)
     elif model.training_type == mconstants.TRAIN_LAPLACE:
-        return train_laplace(model, config, artifact_dir, data_loaders, logger=logger)
+        return train_laplace(model, config, artifact_dir, data_loaders, logger=logger, callbacks=callbacks)
     else:
         raise ValueError(f'Training for type {model.training_type} not implemented.')

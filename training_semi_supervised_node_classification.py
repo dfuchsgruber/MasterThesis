@@ -91,8 +91,9 @@ class ExperimentWrapper:
         all_logs = [] # Logs from each run
         all_artifacts = [] # Paths to all artifacts generated during evaluation
 
+        pipeline_use_gpus = config.evaluation.use_gpus and config.training.gpus
         # Setup evaluation pipeline
-        pipeline = Pipeline(config.evaluation.pipeline, config.evaluation, gpus=config.training.gpus, 
+        pipeline = Pipeline(config.evaluation.pipeline, config.evaluation, gpus=pipeline_use_gpus, 
             ignore_exceptions=config.evaluation.ignore_exceptions)
 
         # Model loading and training
@@ -112,7 +113,7 @@ class ExperimentWrapper:
             ensembles.append(model)
 
         # An ensemble of 1 model behaves just like one model of this type: 
-        # Therefore we always deal with an "ensemble", even if there is only one member
+        # Therefore we always instanciate an "ensemble", even if there is only one member
         model = Ensemble(ensembles, config.ensemble.num_samples, sample_at_eval=config.evaluation.sample)
         model.clear_and_disable_cache()
 
@@ -149,7 +150,7 @@ class ExperimentWrapper:
             json.dump({metric : values for metric, values in result.items()}, f)
         finish_logging(logger)
 
-        # Remove artifacts if they were not to be logged
+        # Remove artifacts if they are not to be logged
         if not config.evaluation.save_artifacts:
             l.info(f'Deleting pipeline artifacts...')
             for path in all_artifacts:

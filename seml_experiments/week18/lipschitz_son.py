@@ -15,7 +15,7 @@ def build():
     with open(osp.join(dir, fn + '.base.yaml')) as f:
         base = yaml.safe_load(f)
 
-    for dataset, jobs in (('cora_full', 16),  ('amazon_photo', 8), ('ogbn_arxiv', 1), ('citeseer', 16)):
+    for dataset, jobs in (('cora_full', 16),  ('amazon_photo', 8), ('citeseer', 16)):
         cfg = deepcopy({k : base[k] for k in BASE_KEYS})
         cfg['fixed']['data.dataset'] = dataset
         cfg['slurm']['experiments_per_job'] = jobs
@@ -165,37 +165,41 @@ def build_experiments(cfg):
                         ('_fit-mask', {'fit_to_mask_only' : True}),
                         ('_fit-95conf', {'fit_to_mask_only' : False, 'fit_to_best_prediction' : False, 'fit_to_min_confidence' : 0.95}),
                     ):
-                        pipeline.append({
-                            'type' : 'FitFeatureDensityGrid',
-                            'fit_to' : ['train'],
-                            'fit_to_ground_truth_labels' : ['train', 'val'],
-                            'evaluate_on' : [ood_dataset],
-                            'diffuse_features' : False,
-                            'diffusion_iterations' : 16,
-                            'teleportation_probability' : 0.2,
-                            'density_types' : {
-                                'GaussianPerClass' : {
-                                'covariance' : ['full', 'diag', 'eye', 'iso'],
-                                'evaluation_kwargs_grid' : [{'mode' : ['weighted', 'max'], 'relative' : [False, True]}],
+                        for no_edges_suffix, no_edge_cfg in (
+                            ('-no-edges', {'model_kwargs_evaluate': {'remove_edges' : True}}),
+                            ('', {})
+                        ):
+                            pipeline.append({
+                                'type' : 'FitFeatureDensityGrid',
+                                'fit_to' : ['train'],
+                                'fit_to_ground_truth_labels' : ['train', 'val'],
+                                'evaluate_on' : [ood_dataset],
+                                'diffuse_features' : False,
+                                'diffusion_iterations' : 16,
+                                'teleportation_probability' : 0.2,
+                                'density_types' : {
+                                    'GaussianPerClass' : {
+                                    'covariance' : ['full', 'diag', 'eye', 'iso'],
+                                    'evaluation_kwargs_grid' : [{'mode' : ['weighted', 'max'], 'relative' : [False, True]}],
+                                    },
                                 },
-                            },
-                            'dimensionality_reductions' : {
-                                'none' : {
-                                }
-                            },
-                            'log_plots' : False,
-                            'name' : f'{ood_name}{fitting_suffix}{suffix}',
-                        } | deepcopy(args) | deepcopy(ood_args) | deepcopy(fitting_args))
-                        pipeline.append({
-                            'type' : 'EvaluateFeatureSpaceDistance',
-                            'fit_to' : ['train'],
-                            'evaluate_on' : [ood_dataset],
-                            'log_plots' : False,
-                            'k' : 5,
-                            'layer' : -2,
-                            'name' : f'{ood_name}{fitting_suffix}{suffix}',
-                        } | deepcopy(args) | deepcopy(ood_args))
-                        pass
+                                'dimensionality_reductions' : {
+                                    'none' : {
+                                    }
+                                },
+                                'log_plots' : False,
+                                'name' : f'{ood_name}{fitting_suffix}{suffix}{no_edges_suffix}',
+                            } | deepcopy(args) | deepcopy(ood_args) | deepcopy(fitting_args)) | deepcopy(no_edge_cfg)
+                            pipeline.append({
+                                'type' : 'EvaluateFeatureSpaceDistance',
+                                'fit_to' : ['train'],
+                                'evaluate_on' : [ood_dataset],
+                                'log_plots' : False,
+                                'k' : 5,
+                                'layer' : -2,
+                                'name' : f'{ood_name}{fitting_suffix}{suffix}{no_edges_suffix}',
+                            } | deepcopy(args) | deepcopy(ood_args)) | deepcopy(no_edge_cfg)
+                            pass
 
                         
 
@@ -210,7 +214,7 @@ def build_experiments(cfg):
 
             for spectral_norm, weight_scales, sons in (
                 (False, (1.0,), (False, )),
-                (True, (0.5, 0.9, 1.0, 1.1, 1.5, 2.0, 5.0, 10.0, 15.0, 20.0), (False, True))):
+                (True, (0.5, 0.9, 1.0, 1.1, 1.5, 2.0, 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0, 200.0), (False, True))):
                 for weight_scale in weight_scales:
                     for use_son in sons:
                         subcfg = {
