@@ -215,6 +215,19 @@ class EarlyStoppingConfiguration(BaseConfiguration):
     monitor: str = attr.ib(default='val_loss')
     min_delta: float = attr.ib(default=1e-3, validator=validators.ge(0), converter=float)
 
+@attr.s
+class FinetuningConfiguration(BaseConfiguration):
+    """ Configuration for model finetuning. """
+    max_epochs: Optional[int] = attr.ib(default=10)
+    enable: bool = attr.ib(default=False)
+
+    reconstruction: Optional[ReconstructionConfiguration] = attr.ib(default=None, converter=make_cls_converter(ReconstructionConfiguration, optional=True))
+    feature_reconstruction: Optional[FeatureReconstructionConfiguration] = attr.ib(default=None, converter=make_cls_converter(FeatureReconstructionConfiguration, optional=True))
+
+    # Deprecated, only to compatbility with previous registry
+    # Pass `None` to not enable this kind of finetuning.
+    reconstruction_weight: Optional[float] = attr.ib(default=None) 
+    feature_reconstruction_weight: Optional[float] = attr.ib(default=None)
 
 @attr.s
 class TrainingConfiguration(BaseConfiguration):
@@ -237,6 +250,9 @@ class TrainingConfiguration(BaseConfiguration):
     # additional regularizers
     orthonormal_weight_regularization_strength: float = attr.ib(default=0.0, converter=float, validator=validators.ge(0))
     orthonormal_weight_scale: float = attr.ib(default=1.0, converter=float, validator=validators.gt(0))
+
+    # Finetuning
+    finetuning: FinetuningConfiguration = attr.ib(default={}, converter=make_cls_converter(FinetuningConfiguration))
 
 @attr.s
 class EvaluationConfiguration(BaseConfiguration):
@@ -324,7 +340,7 @@ def get_default_configuration_by_dataset(dataset: str) -> Dict:
     configuration : dict
         The default configuration values.
     """
-    # dir = osp.dirname('__file__')
+    # dir = osp.dirname('__file__') # Doesn't work, because seml won't copy the configuration files to the server...
     dir = '.'
     cfg_fns = {
         dconstants.AMAZON_COMPUTERS : 'amazon_computers.yaml',

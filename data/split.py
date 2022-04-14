@@ -99,7 +99,7 @@ def _make_base_data(data: tg.data.Data, config: configuration.DataConfiguration)
     x, edge_index, y, vertex_to_idx, label_to_idx, mask = dutils.graph_select_labels(data.x.numpy(), 
         data.edge_index.numpy(), data.y.numpy(), data.vertex_to_idx, data.label_to_idx, set(dutils.labels_to_idx(config.base_labels, data)), 
         connected=True, _compress_labels=True)
-    data = SingleGraphDataset.build(x, edge_index, y, vertex_to_idx, label_to_idx, np.ones(y.shape[0]).astype(bool))[0]
+    data = SingleGraphDataset.build(x, edge_index, y, vertex_to_idx, label_to_idx, np.ones(y.shape[0]).astype(bool), feature_to_idx=data.feature_to_idx)[0]
     mask_fixed, mask_non_fixed = dutils.stratified_split(data.y.numpy(), np.array([DATA_SPLIT_FIXED_TEST_SEED]), [config.test_portion_fixed, 1 - config.test_portion_fixed])[:, 0, :]
 
     train_labels = set(dutils.labels_to_idx(config.train_labels, data))
@@ -162,6 +162,7 @@ def predefined_split(data: tg.data.Data, split_seed: int, config: configuration.
     _data = data
     data, mask, mask_fixed, mask_non_fixed, x_base, edge_index_base, y_base, vertex_to_idx_base, label_to_idx_base, base_labels, train_labels, \
         left_out_class_labels = _make_base_data(data, config)
+    feature_to_idx = data.feature_to_idx
     logging.info('Splitting - Reduced to base labels')
 
     # print(vars(data))
@@ -205,14 +206,14 @@ def predefined_split(data: tg.data.Data, split_seed: int, config: configuration.
 
             # Sample dataset masks
             mask_train = is_train & (~(is_ood_base | mask_dropped_id))
-            data_train = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_train[mask_train_graph])
+            data_train = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_train[mask_train_graph], feature_to_idx=feature_to_idx)
 
             mask_val = is_val & (~(is_ood_base | mask_dropped_id))
-            data_val = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_val[mask_train_graph])
+            data_val = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_val[mask_train_graph], feature_to_idx=feature_to_idx)
 
             # TODO: Potentially, use a sampling strategy here as well?
             mask_test = mask_train_graph & ~is_ood_base & ~mask_dropped_id & mask_fixed
-            data_test = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_test[mask_train_graph])
+            data_test = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_test[mask_train_graph], feature_to_idx=feature_to_idx)
 
             # The ood masks are exclusively among vertices that were marked as either 
             #   i) ood or 
@@ -234,11 +235,11 @@ def predefined_split(data: tg.data.Data, split_seed: int, config: configuration.
                 A_ood_graph_k_hop_nbs[f'{k}_hop_neighbourhood_indices'] = A_k.indices
 
             data_ood_val = SingleGraphDataset.build(x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, mask_ood_val[mask_ood_graph],
-                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], **A_ood_graph_k_hop_nbs)
+                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], feature_to_idx=feature_to_idx, **A_ood_graph_k_hop_nbs)
 
             mask_ood_test = (is_ood_base | mask_dropped_id) & mask_fixed
             data_ood_test = SingleGraphDataset.build(x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, mask_ood_test[mask_ood_graph],
-                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], **A_ood_graph_k_hop_nbs)
+                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], feature_to_idx=feature_to_idx, **A_ood_graph_k_hop_nbs)
 
             datasets = {
                 dconstants.TRAIN : data_train,
@@ -302,6 +303,7 @@ def uniform_split_with_fixed_test_portion(data: tg.data.Data, split_seed: int, c
     """
     data, _, mask_fixed, mask_non_fixed, x_base, edge_index_base, y_base, vertex_to_idx_base, label_to_idx_base, base_labels, train_labels, \
         left_out_class_labels = _make_base_data(data, config)
+    feature_to_idx = data.feature_to_idx
     
     rng = np.random.RandomState(split_seed)
     for attempt in range(config.max_attempts_per_split):
@@ -340,14 +342,14 @@ def uniform_split_with_fixed_test_portion(data: tg.data.Data, split_seed: int, c
 
             # Sample dataset masks
             mask_train = dutils.sample_uniformly(y_base, train_labels, config.train_portion, mask_train_graph & ~is_ood_base & ~mask_dropped_id & mask_non_fixed, rng=rng)
-            data_train = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_train[mask_train_graph])
+            data_train = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_train[mask_train_graph], feature_to_idx=feature_to_idx)
 
             mask_val = dutils.sample_uniformly(y_base, train_labels, config.val_portion, mask_train_graph & ~is_ood_base & ~mask_dropped_id & (~mask_train) & mask_non_fixed, rng=rng)
-            data_val = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_val[mask_train_graph])
+            data_val = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_val[mask_train_graph], feature_to_idx=feature_to_idx)
 
             # TODO: Potentially, use a sampling strategy here as well?
             mask_test = mask_train_graph & ~is_ood_base & ~mask_dropped_id & mask_fixed
-            data_test = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_test[mask_train_graph])
+            data_test = SingleGraphDataset.build(x_train, edge_index_train, y_train, vertex_to_idx_train, label_to_idx_base, mask_test[mask_train_graph], feature_to_idx=feature_to_idx)
 
             # The ood masks are exclusively among vertices that were marked as either 
             #   i) ood or 
@@ -375,14 +377,14 @@ def uniform_split_with_fixed_test_portion(data: tg.data.Data, split_seed: int, c
                 A_ood_graph_k_hop_nbs[f'{k}_hop_neighbourhood_indices'] = A_k.indices
 
             data_ood_val = SingleGraphDataset.build(x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, mask_ood_val[mask_ood_graph],
-                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], **A_ood_graph_k_hop_nbs)
+                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], feature_to_idx=feature_to_idx, **A_ood_graph_k_hop_nbs)
 
             # TODO: Potentially, use the same sampling strategy as well?
             #  Note that the test-ood set may have not `num_samples` vertices per class in any split, so we might need to reduce the actual number
             #  of samples to the minimal class count
             mask_ood_test = (is_ood_base | mask_dropped_id) & mask_fixed
             data_ood_test = SingleGraphDataset.build(x_ood, edge_index_ood, y_ood, vertex_to_idx_ood, label_to_idx_base, mask_ood_test[mask_ood_graph],
-                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], **A_ood_graph_k_hop_nbs)
+                is_out_of_distribution=is_ood_base[mask_ood_graph], is_train_graph_vertex = mask_train_graph[mask_ood_graph], feature_to_idx=feature_to_idx, **A_ood_graph_k_hop_nbs)
 
             datasets = {
                 dconstants.TRAIN : data_train,

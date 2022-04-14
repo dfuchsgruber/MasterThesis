@@ -3,6 +3,7 @@ import torch
 from warnings import warn
 from torch_geometric.data import Dataset, Data
 from torch_geometric.transforms import Compose
+import logging
 
 class SingleGraphDataset(Dataset):
     """ Dataset that only consists of a single graph with vertex masks. 
@@ -69,7 +70,7 @@ class SingleGraphDataset(Dataset):
         dataset : SingleGraphDataset
             The dataset.
         """
-        
+        print(f'Build SingleGraphDataset with additional attribute {kwargs.keys()}')
         if edge_weight is None:
             edge_weight = torch.ones(edge_index.shape[1]).float()
         else:

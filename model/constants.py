@@ -9,6 +9,7 @@ SAGE = 'sage'
 BGCN = 'bgcn'
 GCN_LINEAR_CLASSIFICATION = 'gcn_linear_classification'
 GCN_LAPLACE = 'gcn_laplace'
+MLP = 'mlp'
 
 # Baselines
 APPR_DIFFUSION = 'appr_diffusion'
@@ -17,7 +18,7 @@ GDK = 'graph_dirichlet_kernel'
 
 # Collect all valid model types
 MODEL_TYPES = (GCN, APPNP, GAT, GIN, SAGE, BGCN, APPR_DIFFUSION, INPUT_DISTANCE, GDK, 
-    GCN_LINEAR_CLASSIFICATION, GCN_LAPLACE, )
+    GCN_LINEAR_CLASSIFICATION, GCN_LAPLACE, MLP)
 
 # --- Laplace Parameters ---
 FULL_HESSIAN = 'full'

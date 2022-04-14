@@ -42,6 +42,33 @@ class GCNConv(torch_geometric.nn.GCNConv):
         lines = [f'  {l}' for l in lines]
         return '\n'.join(['GCNConv'] + lines)
 
+class GATConv(torch_geometric.nn.GATConv):
+    """ GAT convolution that can clear and disable the cahce. """ 
+
+    can_sample = False
+
+    def __init__(self, input_dim: int, output_dim: int, config: ModelConfiguration, *args, use_spectral_norm: bool=False, 
+            use_bjorck_norm: bool=False, use_forbenius_norm: bool=False, use_rescaling: bool=False, **kwargs):
+        super().__init__(input_dim, output_dim, *args, heads=config.gat.num_heads, concat=False, **kwargs)
+        self.lin_src = LinearWithParametrization(input_dim, config.gat.num_heads * output_dim, config, use_spectral_norm=use_spectral_norm, 
+            use_bjorck_norm=use_bjorck_norm, use_forbenius_norm=use_forbenius_norm, use_rescaling=use_rescaling)
+        self.lin_dst = self.lin_src
+
+    def get_weights(self) -> Dict[str, nn.Parameter]:
+        return {f'lin.{name}' : param for name, param in self.lin_src.get_weights().items()}
+
+    def clear_and_disable_cache(self):
+        """ Clears and disables the cache. """
+        logging.info(f'{self.__class__} disabled cache (no action as it does not have one).')
+
+    def __repr__(self) -> str:
+        lines = repr(self.lin_src).split('\n')
+        lines = [f'  {l}' for l in lines]
+        return '\n'.join([str(self.__class__)] + lines)
+
+    def forward(self, x, edge_index, edge_weight=None):
+        return super().forward(x, edge_index)
+
 class APPNPConv(torch_geometric.nn.APPNP):
     """ APPNP convolution that allows to clear and disable the cache that was used during training. """
 
@@ -267,9 +294,14 @@ class ResidualBlock(BasicBlock):
         return x + h
 
     def get_weights(self) -> Dict[str, nn.Parameter]:
-        return self.conv.get_weights() | {
-            f'residual_projection.{name}' : param for name, param in self.input_projection.get_weights().items()
-        }
+        if self.input_projection:
+            input_projection_weights = {
+                    f'residual_projection.{name}' : param for name, param in self.input_projection.get_weights().items()
+                }
+        else:
+            input_projection_weights = {}
+        return self.conv.get_weights() | input_projection_weights
+
 
 def make_convolutions(input_dim: int, num_classes: int, cfg: ModelConfiguration, make_conv, *args, **kwargs) -> nn.ModuleList:
     """ Makes convolutions from a class and a set of input, hidden and output dimensions. """

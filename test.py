@@ -22,10 +22,10 @@ if __name__ == '__main__':
                         split_type='uniform',
                         type='npz',
                         preprocessing='none',
-                        ood_type = dconstants.LEFT_OUT_CLASSES,
-                        # ood_type = dconstants.PERTURBATION,
-                        # setting = dconstants.HYBRID,
+                        # ood_type = dconstants.LEFT_OUT_CLASSES,
+                        ood_type = dconstants.PERTURBATION,
                         setting = dconstants.HYBRID,
+                        # setting = dconstants.TRANSDUCTIVE,
                         #preprocessing='word_embedding',
                         #language_model = 'bert-base-uncased',
                         #language_model = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
@@ -42,23 +42,19 @@ if __name__ == '__main__':
     spectral_norm_cfg = {
         'use_spectral_norm' : True,
         'residual' : True,
-        'weight_scale' : 10.0,
+        'weight_scale' : 125.0,
         'use_spectral_norm_on_last_layer' : False,
         # 'self_loop_fill_value' : 5.0,
     }
 
     reconstruction_cfg = {
         'loss_weight' : 1.0, # Use for BCE-based  and mconstants.ENERGY
-        #'loss_weight' : 10.0, # Use higher values for distance based mconstants.TRIPLET
-        'sample' : True,
-        'num_samples' : 1000,
         'reconstruction_type' : mconstants.ENERGY,
-        'margin_constrastive_loss' : 0.0,
     }
 
     feature_reconstruction_cfg = {
         'loss_weight' : 1.0,
-        'loss' : 'weighted_bce',
+        'loss' : 'energy',
         'log_metrics_every' : 5,
         'num_samples' : 100,
     }
@@ -110,8 +106,35 @@ if __name__ == '__main__':
         'residual' : True,
     }
 
+
+    gcn_cfg = {
+        'model_type' : mconstants.GCN,
+    }
+
+    gat_cfg = {
+        'model_type' : mconstants.GAT,
+        'gat' : {
+            'num_heads' : 8,
+        },
+    }
+
+    appnp_cfg = {
+        'model_type' : mconstants.APPNP,
+        'appnp' : {
+            'diffusion_iterations' : 16,
+            'teleportation_probability' : 0.2,
+        }
+    }
+
+    mlp_cfg = {
+        'model_type' : mconstants.MLP,
+    }
+
     model_cfg = configuration.ModelConfiguration(
-        model_type=mconstants.GCN,
+         **gcn_cfg,
+        # **appnp_cfg,
+        #**mlp_cfg,
+        # model_type=mconstants.GAT,
         # model_type = mconstants.BGCN,
         #model_type = 'appnp',
         # dropout = 0.5,
@@ -135,6 +158,7 @@ if __name__ == '__main__':
         #  **init_scale_cfg,
          #**rescaling_cfg,
         # **spectral_last_cfg,
+        # **gat_cfg,
         )
     
     # if not model_cfg.use_spectral_norm:
@@ -147,7 +171,7 @@ if __name__ == '__main__':
         ],
         split_idx = split_idx,
         initialization_idx = init_idx,
-        use_pretrained_model = False,
+        use_pretrained_model = True,
         use_default_configuration = True,
     )
 
@@ -156,8 +180,16 @@ if __name__ == '__main__':
         'num_warmup_epochs' : 100,
     }
 
+    finetuning_cfg = {
+        'finetuning' : {
+            'enable' : True,
+            'reconstruction' : reconstruction_cfg,
+            'max_epochs' : 5,
+        }
+    }
+
     training_cfg = configuration.TrainingConfiguration(
-        max_epochs=1000, 
+        max_epochs=1, 
         # min_epochs=500,
         learning_rate=1e-3, 
         early_stopping={
@@ -172,6 +204,7 @@ if __name__ == '__main__':
         # **orthonormal_reg,
         # **self_training,
         #**bounded_svd,
+        **finetuning_cfg,
         )
 
     ensemble_cfg = configuration.EnsembleConfiguration(

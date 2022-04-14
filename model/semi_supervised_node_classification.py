@@ -10,7 +10,7 @@ from model.reconstruction import ReconstructionLoss
 from model.feature_reconstruction import FeatureReconstruction
 import model.constants as mconst
 from torch_geometric.utils import remove_self_loops, add_self_loops
-from configuration import FeatureReconstructionConfiguration, ModelConfiguration
+from configuration import FeatureReconstructionConfiguration, ModelConfiguration, ReconstructionConfiguration
 import logging
 from sklearn.metrics import roc_auc_score
 from model.losses import *
@@ -39,13 +39,36 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         self.orthonormal_regularizer = orthnormal_regularizer
         self.orthonormal_weight_scale = orthonormal_weight_scale
         self._self_training = False
-        self.reconstruction_loss_weight = backbone_configuration.reconstruction.loss_weight
-        self.feature_reconstruction_loss_weight = backbone_configuration.feature_reconstruction.loss_weight
+        self.add_reconstruction_loss(backbone_configuration.reconstruction)
+        self.add_feature_reconstruction(num_input_features, backbone_configuration.feature_reconstruction)
+
+    def add_reconstruction_loss(self, config: ReconstructionConfiguration):
+        """ Adds edge reconstruction to the model. 
+        
+        Parameters:
+        -----------
+        config : ReconstructionConfiguration
+            Configuration for reconstruction.
+        """
+        self.reconstruction_loss_weight = config.loss_weight
         if self.reconstruction_loss_weight > 0:
-            self.reconstruction_loss = ReconstructionLoss(backbone_configuration.reconstruction)
+            self.reconstruction_loss = ReconstructionLoss(config)
+
+    def add_feature_reconstruction(self, num_input_features: int, config: FeatureReconstructionConfiguration):
+        """ Adds feature reconstruction to the model. 
+        
+        Parameters:
+        -----------
+        num_input_features : int
+            The number of input features
+        config : FeatureReconstructionConfiguration
+            Configuration for feature reconstruction.
+        """
+        self.feature_reconstruction_loss_weight = config.loss_weight
         if self.feature_reconstruction_loss_weight > 0:
-            self.feature_reconstruction = FeatureReconstruction(num_input_features, backbone_configuration)
-            self.feature_reconstruction_log_metrics_period = backbone_configuration.feature_reconstruction.log_metrics_every
+            self.feature_reconstruction = FeatureReconstruction(num_input_features, config)
+            self.feature_reconstruction_log_metrics_period = config.log_metrics_every
+
 
     def clear_and_disable_cache(self):
         """ Clears and disables the cache. """
@@ -120,7 +143,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
             reco_loss, reco_proxy, reco_target = self.reconstruction_loss(output.get_features(-2, average=True), batch.edge_index)
             metrics['reconstruction_loss'] =  reco_loss * self.reconstruction_loss_weight
             metrics['reconstruction_auroc'] = roc_auc_score(reco_target.detach().cpu().numpy().astype(bool), reco_proxy.detach().cpu().numpy())
-            loss += reco_loss
+            loss += self.reconstruction_loss_weight * reco_loss
 
         # Feature reconstruction
         if self.feature_reconstruction_loss_weight > 0:
@@ -133,7 +156,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
             for m, v in feature_reco_metrics.items():
                 metrics[f'feature_reconstruction_{m}'] = v
             metrics['feature_reconstruction_loss'] = feature_reco_loss * self.feature_reconstruction_loss_weight
-            loss += feature_reco_loss
+            loss += feature_reco_loss * self.feature_reconstruction_loss_weight
 
         # Orthonormality 
         if self.orthonormal_regularizer > 0:

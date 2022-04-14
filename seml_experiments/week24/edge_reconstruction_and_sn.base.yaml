@@ -1,0 +1,79 @@
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week24_edge_reconstruction_and_sn
+  output_dir: /nfs/students/fuchsgru/seml_output/week24
+  project_root_dir: ../../..
+
+slurm:
+  experiments_per_job: 8 # Dont make it too large, especially for ogbn arxiv
+  sbatch_options:
+    gres: gpu:1       # num GPUs
+    mem: 128GB          # memory
+    cpus-per-task: 2  # num cores
+    time: 0-48:00     # max time, D-HH:MM
+    partition: gpu_large
+
+
+###### BEGIN PARAMETER CONFIGURATION ######
+
+
+
+fixed:
+  run.args:
+    - model:residual
+    - model:use_spectral_norm
+    - data:setting
+    - model:reconstruction:reconstruction_type
+    - data:dataset
+    - model:reconstruction:loss_weight
+  run.use_default_configuration: true
+    
+  training.early_stopping.patience: 50
+  training.early_stopping.mode: min
+  training.early_stopping.monitor: val_loss
+  training.early_stopping.min_delta: 1e-2
+  training.max_epochs: 1000
+  training.gpus: 1
+  training.learning_rate: 0.001
+
+  
+  data.ood_sampling_strategy: all
+  data.preprocessing: none
+  data.train_portion : 20
+  data.test_portion_fixed : 0.2
+  data.split_type: uniform
+  data.type: npz
+  data.drop_train_vertices_portion: 0.1
+
+  model.use_bias: true
+  model.activation: leaky_relu
+  model.leaky_relu_slope: 0.01
+  model.model_type: gcn
+  model.hidden_sizes: [64]
+  model.reconstruction.loss_weight: 1.0
+  model.residual: true
+  model.use_spectral_norm: true
+
+  evaluation.ignore_exceptions: false
+  evaluation.log_plots: false
+  evaluation.sample: false # Important for ensembles and BNN, but disable otherwise
+
+  ensemble.num_members: 1
+  ensemble.num_samples: 1
+  
+grid:
+  data.setting:
+    type: choice
+    options: [transductive, hybrid]
+  run.initialization_idx:
+    type: choice
+    options: [0, 1, 2]
+  run.split_idx:
+    type: choice
+    options: [0, 1, 2]
+  model.reconstruction.reconstruction_type:
+    type: choice
+    options: ['autoencoder', 'triplet', 'energy']
+  model.weight_scale:
+    type: choice
+    options: [1.0, 5.0, 10.0, 100.0, 200.0]

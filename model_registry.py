@@ -7,6 +7,11 @@ from configuration import ExperimentConfiguration, DEFAULT_REGISTRY_COLLECTION_N
 from typing import List
 import logging
 import datetime
+import json
+import numpy as np
+from time import time
+from collections import defaultdict
+from tqdm import tqdm
 
 class ModelRegistry:
     """ Model registry class that saves and loads trained model checkpoints. 
@@ -28,18 +33,19 @@ class ModelRegistry:
         self.directory_path = directory_path 
         self.copy_checkpoints_to_registry = copy_checkpoints_to_registry
 
-    def _new_filename(self):
+    def _new_filename(self, cfg_hash: int):
         """ Gets an unused random filename for the model registry. """
-        keys = set(osp.splitext(p)[0] for p in os.listdir(self.directory_path))
+        rng = np.random.RandomState(seed=(cfg_hash & 0xFFFFFFFF))
         while True:
-            new_key = str(random.randint(0, 1 << 32))
+            keys = set(osp.splitext(p)[0] for p in os.listdir(self.directory_path))
+            new_key = '-'.join([str(cfg_hash), str(time()).replace('.', '-'), str(rng.randint(0, 1 << 32))])
             if new_key not in keys:
                 return new_key
 
-    def _copy_checkpoint_to_new_file(self, cptk_path):
+    def _copy_checkpoint_to_new_file(self, cptk_path, cfg_hash: int):
         """ Copies a checkpoint to a new file in the registry. """
         suffix = osp.splitext(cptk_path)[1]
-        dst = osp.join(self.directory_path, self._new_filename() + suffix)
+        dst = osp.join(self.directory_path, self._new_filename(cfg_hash) + suffix)
         shutil.copy2(cptk_path, dst)
         return dst
 
@@ -92,12 +98,48 @@ class ModelRegistry:
         """ Sets the path of a trained model with a given configuration set. """
         collection = self.database.get_collection(self.collection_name)
         paths_overwritten = self.remove(cfg)
-        if len(paths_overwritten) > 0:
-            logging.info(f'Paths {paths_overwritten} were overwritten with {cptk_path}')
+        cfg_hash = hash(json.dumps(cfg.registry_configuration, sort_keys=True))
+        cptk_path_src = cptk_path
         if self.copy_checkpoints_to_registry:
-            cptk_path = self._copy_checkpoint_to_new_file(cptk_path)
+            cptk_path = self._copy_checkpoint_to_new_file(cptk_path, cfg_hash)
+        if len(paths_overwritten) > 0:
+            logging.info(f'Paths {paths_overwritten} were overwritten with {cptk_path} (copied from {cptk_path_src}).')
         collection.insert_one({
             'config' : cfg.registry_configuration,
             'path' : cptk_path,
             'time' : str(datetime.datetime.now()),
         })
+
+
+    def remove_duplicates(self, dry_run=True):
+        """ Removes paths that are referenced by multiple configurations. (no idea how that could happen)... """
+
+        collection = self.database.get_collection(self.collection_name)
+        path_to_idxs = defaultdict(list)
+        for doc in collection.find():
+            path_to_idxs[doc['path']].append(doc['_id'])
+        num_removed = 0
+        for path, idxs in path_to_idxs.items():
+            if len(idxs) > 1:
+                if not dry_run:
+                    for idx in idxs:
+                        collection.delete_one({'_id' : idx})
+                print(f'Removed configuration with ids {list(idxs)}.')
+                num_removed += len(idxs)
+        print(f'Removed {num_removed} configurations pointing to duplicate paths. Dry-Run: {dry_run}')
+
+    def clean_directory(self, dry_run=True):
+        """ Removes all files in the checkpoint directory that are not referenced by the current model registry. CAUTION! """
+
+        files = set(osp.join(self.directory_path, p) for p in os.listdir(self.directory_path))
+        collection = self.database.get_collection(self.collection_name)
+        in_registry = set(doc['path'] for doc in collection.find())
+            
+        print(f'Number of files in directory {len(files)}.\nNumber of files in registry {len(in_registry)}.')
+        num_deleted = 0
+        for file in tqdm([f for f in files if f not in in_registry], desc=f'Removing checkpoints from {self.directory_path}'):
+            if not dry_run:
+                os.remove(file)
+            # print(f'Removed file {file}')
+            num_deleted += 1
+        print(f'Deleted {num_deleted} of {len(files)} files.')

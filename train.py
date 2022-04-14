@@ -1,11 +1,14 @@
 
+from audioop import add
+from copy import deepcopy
+from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
 import torch
 from torch.utils.data import TensorDataset
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from torch_geometric.loader import DataLoader
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Tuple
 import os
 import logging
 import numpy as np
@@ -20,6 +23,79 @@ import model.constants as mconstants
 from model.gnn import GCNLaplace, GCNLinearClassification
 from model.parameterless import ParameterlessBase
 import laplace
+
+class Callbacks:
+    """ Class to manage all callbacks used during training. """
+
+    def __init__(self, config: ExperimentConfiguration, artifact_dir: str, 
+            additional_callbacks: Union[Dict[str, pl.callbacks.Callback], List[pl.callbacks.Callback]] = {}):
+
+        self._artifact_dir = artifact_dir
+        self.reset_early_stopping(config.training.early_stopping)
+        self.reset_checkpoint(config.training.early_stopping)
+
+        if config.training.self_training:
+            self.self_training = (SelfTrainingCallback(config.training.num_warmup_epochs))
+        else:
+            self.self_training = None
+        if config.training.singular_value_bounding:
+            self.singular_value_bounding = (SingularValueBounding(config.training.singular_value_bounding_eps))
+        else:
+            self.singular_value_bounding = None
+        if config.logging.log_gradients:
+            self.log_gradients = LogGradientsCallback(config.logging.log_gradients,
+                log_relative=config.logging.log_gradients_relative_to_parameter,
+                log_normalized=config.logging.log_gradients_relative_to_norm)
+        else:
+            self.log_gradients = None
+        if config.logging.log_weight_matrix_spectrum_every > 0:
+            self.log_weight_matrix_spectrum = LogWeightMatrixSpectrum(
+                log_every_epoch=config.logging.log_weight_matrix_spectrum_every,
+                save_buffer_to=config.logging.log_weight_matrix_spectrum_to_file,
+            )
+        else:
+            self.log_weight_matrix_spectrum = None
+
+        self.additional_callbacks = {}
+
+        if isinstance(additional_callbacks, list):
+            for cb in additional_callbacks:
+                self.add(cb)
+        elif isinstance(additional_callbacks, Mapping):
+            for name, cb in additional_callbacks.items():
+                self.add(cb, name=name)
+        else:
+            raise RuntimeError(f'Callback buffer is to be initialized with unsupported datatype {type(additional_callbacks)}')
+
+    def reset_early_stopping(self, config: EarlyStoppingConfiguration):
+        """ Sets up a new early stopping callback. """
+        self.early_stopping = EarlyStopping(
+            monitor=config.monitor,
+            mode=config.mode,
+            patience=config.patience,
+            min_delta=config.min_delta,
+            )
+
+    def reset_checkpoint(self, config: EarlyStoppingConfiguration):
+        """ Sets up a new checkpoint callback. """ 
+        self.checkpoint = ModelCheckpoint(
+            self._artifact_dir,
+            monitor=config.monitor,
+            mode=config.mode,
+            save_top_k=1,
+            )
+
+    def add(self, callback: pl.callbacks.Callback, name: Optional[str] = None):
+        """ Adds a callback to the buffer. """
+        if name is None:
+            name = f'callback_{len(self.additional_callbacks)}'
+            self.additional_callbacks[name] = callback
+
+    def to_list(self) -> List[pl.callbacks.Callback]:
+        """ Returns all callbacks as list. """
+        cbs = [self.checkpoint, self.early_stopping, self.self_training, self.singular_value_bounding, self.log_gradients, self.log_weight_matrix_spectrum]
+        cbs += list(self.additional_callbacks.values())
+        return [cb for cb in cbs if cb is not None]
 
 class SelfTrainingCallback(pl.callbacks.Callback):
     """ Callback that activates self-training after a certain amounts of epochs. """
@@ -51,8 +127,124 @@ class SingularValueBounding(pl.callbacks.Callback):
                 s = np.clip(s, 1 / (1 + self.eps), 1 + self.eps)
                 weight[:, :] = torch.Tensor(u @ s @ v)
 
+def finetune_pl_model(model: SemiSupervisedNodeClassification, config: ExperimentConfiguration, logger, callback_buffer: Callbacks, 
+        data_loaders: Dict[str, DataLoader]) -> Tuple[str, pl.Trainer]:
+    """ Performs finetuning on a trained model. 
+    
+    Parameters:
+    -----------
+    model : pl.Module
+        The model to train
+    config : ExperimentConfiguration
+        The configuration for the whole experiment
+    logger : Any
+        The logger to log the finetuning with.
+    callback_buffer : Callbacks
+        A buffer for all callbacks. Early stopping and checkpointing will be reset.
+    data_loaders : Dict[str, DataLoader]
+        Data loaders used for training. See `data.constants` for keys.
+    
+    Returns:
+    --------
+    path : str
+        Path to the model checkpoint.
+    trainer : pl.Trainer
+        The trainer used for finetuning.
+    """
+    # Reset callbacks for early stopping and checkpointing
+    callback_buffer.reset_early_stopping(config.training.early_stopping)
+    callback_buffer.reset_checkpoint(config.training.early_stopping)
+
+    # Create a trainer
+    trainer = pl.Trainer(max_epochs=config.training.finetuning.max_epochs,
+                            deterministic=False, callbacks = callback_buffer.to_list(),
+                            logger=logger,
+                            progress_bar_refresh_rate=0,
+                            gpus=config.training.gpus,
+                            )
+    # Finetuning
+    if config.training.finetuning.reconstruction is not None:
+        model.add_reconstruction_loss(config.training.finetuning.reconstruction)
+        logging.info(f'Added reconstruction loss.')
+    if config.training.finetuning.feature_reconstruction is not None:
+        model.add_feature_reconstruction(
+            data_loaders[dconstants.TRAIN].dataset[0].x.size(1),
+            config.training.finetuning.feature_reconstruction,
+        )
+        logging.info(f'Added feature reconstruction loss.')
+    trainer.fit(model, data_loaders[dconstants.TRAIN], data_loaders[dconstants.VAL])
+    return callback_buffer.checkpoint.best_model_path, trainer
+
+def _train_pl_model_impl(model: SemiSupervisedNodeClassification, config: ExperimentConfiguration, 
+    trainer: pl.Trainer, logger, callback_buffer: Callbacks, data_loaders: Dict[str, DataLoader]) -> Tuple[str, pl.Trainer]:
+    """ Performs model training with given trainer or loads the model from the registry. 
+    In the case of finetuning a modelo, this function recurses to train the base model.
+
+    Parameters:
+    -----------
+    model : SemiSupervisedNodeClassification
+        The model to train.
+    config : ExperimentConfiguration
+        The configuration associated with the experiment.
+    trainer : pl.Trainer
+        The trainer instance to train with.
+    logger : Any
+        The logger.
+    callback_buffer : Callbacks
+        The callbacks that are executed.
+    data_loaders : Dict[str, DataLoader]
+        Data loaders to train on.
+    
+    Returns:
+    --------
+    path : str
+        Path to the trained model checkpoint.
+    trainer : pl.Trainer
+        The (last) trainer used for training. In the case of finetuning, this might be the finetuning trainer
+        (only if the model was not loaded from the model registry storage).
+    """ 
+    model_registry = ModelRegistry(collection_name=config.run.model_registry_collection_name)
+    
+    # Try finding a pretrained checkpoint
+    if config.run.use_pretrained_model:
+        best_model_path = model_registry[config]
+        if best_model_path is None:
+            logging.info(f'Could not find pre-trained model.')
+    else:
+        best_model_path = None
+
+    if best_model_path is None:
+        # Train the model with a given trainer
+        if config.training.finetuning.enable:
+
+            # (Recursively) get a base model
+            base_config = deepcopy(config)
+            base_config.training.finetuning = FinetuningConfiguration(enable=False)
+            logging.info(f'Training / loading base model...')
+            best_model_path, _ = _train_pl_model_impl(model, base_config, trainer, logger, callback_buffer, data_loaders)
+            logging.info(f'Loading base model from {best_model_path}')
+            model.load_from_checkpoint(best_model_path, strict=False, backbone_configuration=base_config.model)
+
+            # Finetune base model
+            best_model_path, trainer = finetune_pl_model(model, config, logger, callback_buffer, data_loaders)
+        else:
+            logging.info('Starting model training.')
+            # Train a model
+            trainer.fit(model, data_loaders[dconstants.TRAIN], data_loaders[dconstants.VAL])
+            best_model_path = callback_buffer.checkpoint.best_model_path
+
+        # Model was either trained or finetuned, but in any case `config` was not present in the registry
+        model_registry[config] = best_model_path # Copies the checkpoint to the registry storage directory
+        os.remove(best_model_path) # Clean the checkpoint from the artifact directory
+        best_model_path = model_registry[config] # Gets the path in the registroy storage directory
+
+    else:
+        logging.info(f'Found pre-trained model at {best_model_path}')
+
+    return best_model_path, trainer
+
 def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], 
-        logger: Optional[Any]=None, callbacks: List[pl.callbacks.Callback] = []):
+        logger: Optional[Any]=None, callbacks: Union[List[pl.callbacks.Callback], Dict[str, pl.callbacks.Callback]] = []):
     """ Trains a model that can be trained with pytorch lightning. 
     
     Parameters:
@@ -67,7 +259,7 @@ def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, a
         Data loaders used for training. See `data.constants` for keys.
     logger : Any, optional, default: None
         Logger to use for training progress.
-    callbacks : List[pl.callbacks.Callback], default: []
+    callbacks : Union[List[pl.callbacks.Callback], Dict[str, pl.callbacks.Callback]], default: []
         Callbacks that are executed on model training.
     
     Returns:
@@ -75,60 +267,18 @@ def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, a
     model : pl.Module
         The input but after training.
     """
-    model_registry = ModelRegistry(collection_name=config.run.model_registry_collection_name)
+    callback_buffer = Callbacks(config, artifact_dir, additional_callbacks=callbacks)
 
-    checkpoint_callback = ModelCheckpoint(
-        artifact_dir,
-        monitor=config.training.early_stopping.monitor,
-        mode=config.training.early_stopping.mode,
-        save_top_k=1,
-    )
-    early_stopping_callback = EarlyStopping(
-        monitor=config.training.early_stopping.monitor,
-        mode=config.training.early_stopping.mode,
-        patience=config.training.early_stopping.patience,
-        min_delta=config.training.early_stopping.min_delta,
-    )
-    callbacks = [cb for cb in callbacks] # Copy list
-    if config.training.self_training:
-        callbacks.append(SelfTrainingCallback(config.training.num_warmup_epochs))
-    if config.training.singular_value_bounding:
-        callbacks.append(SingularValueBounding(config.training.singular_value_bounding_eps))
-    if config.logging.log_gradients:
-        callbacks.append(LogGradientsCallback(config.logging.log_gradients,
-            log_relative=config.logging.log_gradients_relative_to_parameter,
-            log_normalized=config.logging.log_gradients_relative_to_norm)
-        )
-    if config.logging.log_weight_matrix_spectrum_every > 0:
-        callbacks.append(LogWeightMatrixSpectrum(
-            log_every_epoch=config.logging.log_weight_matrix_spectrum_every,
-            save_buffer_to=config.logging.log_weight_matrix_spectrum_to_file,
-        ))
-
-    # Model training
     with context_supress_stdout(supress=config.training.suppress_stdout), warnings.catch_warnings():
         warnings.filterwarnings("ignore")
         trainer = pl.Trainer(max_epochs=config.training.max_epochs, min_epochs=config.training.min_epochs,
-                            deterministic=False, callbacks=[ checkpoint_callback, early_stopping_callback, ] + callbacks,
+                            deterministic=False, callbacks = callback_buffer.to_list(),
                             logger=logger,
                             progress_bar_refresh_rate=0,
                             gpus=config.training.gpus,
                             )
-        if config.run.use_pretrained_model:
-            best_model_path = model_registry[config]
-            if best_model_path is None:
-                logging.info(f'Could not find pre-trained model.')
-        else:
-            best_model_path = None
-        if best_model_path is None:
-            trainer.fit(model, data_loaders[dconstants.TRAIN], data_loaders[dconstants.VAL])
-            best_model_path = checkpoint_callback.best_model_path
-            model_registry[config] = best_model_path
-            os.remove(best_model_path) # Clean the checkpoint from the artifact directory
-            best_model_path = model_registry[config]
-        else:
-            logging.info(f'Loading pre-trained model from {best_model_path}')
-
+        best_model_path, trainer = _train_pl_model_impl(model, config, trainer, logger, callback_buffer, data_loaders)
+        logging.info(f'Loading model for evaluation from {best_model_path}.')
         model = model.load_from_checkpoint(best_model_path, strict=False, backbone_configuration=config.model)
         model.eval()
         
