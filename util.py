@@ -2,12 +2,9 @@ from contextlib import contextmanager
 import os, sys
 import torch
 import numpy as np
-import networkx as nx
 from collections import Mapping
 import scipy.sparse as sp
 from typing import Dict, Any, Iterable, List
-from torch import Tensor
-import logging
 
 @contextmanager
 def suppress_stdout(supress=True):
@@ -434,3 +431,33 @@ def get_parameters_with_dimensions(module: torch.nn.Module, order: int=2) -> Dic
         The parameters with that dimension.
     """
     return {n : p for n, p in module.named_parameters() if len(p.size()) == order}
+
+def deepdictcmp(a, b, prefix=[]):
+    """ Compares to dicts and prints mismatching values. """
+    keys = set(a.keys()).union(set(b.keys()))
+    for k in keys:
+        k_print = '.'.join(prefix + [k])
+        if k not in a:
+            print(f'{k_print} not in first but second')
+        elif k not in b:
+            print(f'{k_print} not in second but first')
+        else:
+            v_a, v_b = a[k], b[k]
+            if type(v_a) != type(v_b):
+                print(f'Mismatching types for {k_print}: First: {type(v_a)}, second : {(type(v_b))}')
+            elif isinstance(v_a, dict):
+                deepdictcmp(v_a, v_b, prefix=prefix + [k])
+            elif v_a != v_b:
+                print(f'Mismatch at {k_print}: First : {v_a}, Second: {v_b}')
+            
+def make_key_collatable(key: str) -> str:
+    """ Makes a key collatable for tg. That is, it removes 
+    substrings "batch", "index" and "face" (yes, stupid indeed...) """
+    replaces = {
+        'batch' : 'b#atch',
+        'index' : 'i#ndex',
+        'face' : 'f#ace'
+    }
+    for old, new in replaces.items():
+        key = key.replace(old, new)
+    return key

@@ -232,15 +232,20 @@ class UncertaintyQuantification(OODSeparation):
         log_metrics(kwargs['logs'], {f'ood_aucpr_{proxy_name}{self.suffix}' : aucpr}, f'{proxy_name}_plots')
 
         # Calculate area under the ROC for finding correctly classified instances
-        misclassification_auroc = roc_auc_score(is_correctly_classified.cpu().long().numpy(), proxy.cpu().numpy()) 
+        # Calculate the area under the PR curve separating in-distribution (label 1) from out of distribution (label 0)
+        misclassification_target = is_correctly_classified.cpu().long().numpy()
+        if len(np.unique(misclassification_target)) > 1:
+            misclassification_auroc = roc_auc_score(misclassification_target, proxy.cpu().numpy()) 
+            misclassification_precision, misclassification_recall, _ = precision_recall_curve(misclassification_target, proxy.cpu().numpy())
+            misclassification_aucpr = auc(misclassification_recall, misclassification_precision)
+        else:
+            logging.info(f'Correctly classified has targets only of label {np.unique(misclassification_target)}: Misclassification metrics meaningless.')
+            misclassification_auroc = np.nan
+            misclassification_aucpr = np.nan
         kwargs['metrics'][f'misclassification_auroc_{proxy_name}{self.suffix}'] = misclassification_auroc
         log_metrics(kwargs['logs'], {f'misclassification_auroc_{proxy_name}{self.suffix}' : misclassification_auroc}, f'{proxy_name}_plots')
         logging.info(f'misclassification_auroc_{proxy_name}{self.suffix} : {misclassification_auroc}')
         logging.info(f'aucpr_{proxy_name}{self.suffix} : {aucpr}')
-
-        # Calculate the area under the PR curve separating in-distribution (label 1) from out of distribution (label 0)
-        misclassification_precision, misclassification_recall, _ = precision_recall_curve(is_correctly_classified.cpu().long().numpy(), proxy.cpu().numpy())
-        misclassification_aucpr = auc(misclassification_recall, misclassification_precision)
         kwargs['metrics'][f'misclassification_aucpr_{proxy_name}{self.suffix}'] = misclassification_aucpr
         log_metrics(kwargs['logs'], {f'misclassification_aucpr_{proxy_name}{self.suffix}' : misclassification_aucpr}, f'{proxy_name}_plots')
 

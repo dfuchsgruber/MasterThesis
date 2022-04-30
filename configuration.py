@@ -9,6 +9,7 @@ from typing import Dict, List, Union, Optional, Any
 import os.path as osp
 import yaml
 import logging
+from util import make_key_collatable
 
 def make_cls_converter(cls, optional=False):
     """ Converter function that initializes a class with a dict or keeps the class as is. """
@@ -155,6 +156,13 @@ class ModelConfiguration(BaseConfiguration):
     # num_gaussians: int = attr.ib(default=0, converter=int)
     # alpha_evidence_scale: str = attr.ib(default='latent-new', converter='str')
 
+def sanitize_labels(labels):
+    if not isinstance(str, labels):
+        return [make_key_collatable(k) for k in labels]
+    else:
+        return labels
+    
+
 @attr.s
 class DataConfiguration(BaseConfiguration):
     """ Configuration for dataset splitting and building. """
@@ -219,6 +227,7 @@ class EarlyStoppingConfiguration(BaseConfiguration):
 class FinetuningConfiguration(BaseConfiguration):
     """ Configuration for model finetuning. """
     max_epochs: Optional[int] = attr.ib(default=10)
+    min_epochs: Optional[int] = attr.ib(default=1)
     enable: bool = attr.ib(default=False)
 
     reconstruction: Optional[ReconstructionConfiguration] = attr.ib(default=None, converter=make_cls_converter(ReconstructionConfiguration, optional=True))
@@ -228,6 +237,13 @@ class FinetuningConfiguration(BaseConfiguration):
     # Pass `None` to not enable this kind of finetuning.
     reconstruction_weight: Optional[float] = attr.ib(default=None) 
     feature_reconstruction_weight: Optional[float] = attr.ib(default=None)
+
+@attr.s
+class TemperatureScalingConfiguration(BaseConfiguration):
+    """ Configuration for applying temperature scaling post-hoc. """
+    criterion: str = attr.ib(default=mconstants.NLL, validator=attr.validators.in_(mconstants.TEMPERATURE_SCALING_OBJECTIVES))
+    learning_rate: float = attr.ib(default=1e-2, validator=attr.validators.gt(0))
+    max_epochs: int = attr.ib(default=50, validator=attr.validators.gt(0))
 
 @attr.s
 class TrainingConfiguration(BaseConfiguration):
@@ -253,6 +269,9 @@ class TrainingConfiguration(BaseConfiguration):
 
     # Finetuning
     finetuning: FinetuningConfiguration = attr.ib(default={}, converter=make_cls_converter(FinetuningConfiguration))
+
+    # Temperature scaling
+    temperature_scaling: TemperatureScalingConfiguration = attr.ib(default=None, converter=make_cls_converter(TemperatureScalingConfiguration, optional=True))
 
 @attr.s
 class EvaluationConfiguration(BaseConfiguration):

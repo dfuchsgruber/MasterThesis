@@ -39,6 +39,8 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         self.orthonormal_regularizer = orthnormal_regularizer
         self.orthonormal_weight_scale = orthonormal_weight_scale
         self._self_training = False
+        # Temperature in log space to ensure positivity
+        self.log_temperature = nn.Parameter(torch.zeros(1))
         self.add_reconstruction_loss(backbone_configuration.reconstruction)
         self.add_feature_reconstruction(num_input_features, backbone_configuration.feature_reconstruction)
 
@@ -97,7 +99,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
             logging.info(f'Self-training in model changed to {value}')
             self._self_training = value
 
-    def forward(self, batch, *args, remove_edges: bool=False, sample: bool=None, **kwargs) -> Prediction:
+    def forward(self, batch, *args, remove_edges: bool=False, sample: bool=None, temperature_scaling=True, **kwargs) -> Prediction:
 
         edge_index, edge_weight = batch.edge_index, batch.edge_weight
         
@@ -112,7 +114,10 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
         batch.edge_index = edge_index
         batch.edge_weight = edge_weight
 
-        return self.backbone(batch, *args, sample=sample, **kwargs)
+        if temperature_scaling and not self.training: # Do not use temperature scaling during training
+            kwargs.setdefault('temperature', (torch.exp(self.log_temperature).item()))
+        prediction = self.backbone(batch, *args, sample=sample, **kwargs)
+        return prediction
 
     def configure_optimizers(self): 
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
@@ -176,6 +181,7 @@ class SemiSupervisedNodeClassification(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         metrics = self.step(batch, batch_idx, is_training=True)
         log_metrics(self, metrics, prefix='train')
+        # print('train metrics', metrics)
         return metrics['loss']
 
     def validation_step(self, batch, batch_idx):

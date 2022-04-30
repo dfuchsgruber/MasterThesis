@@ -38,3 +38,7 @@ RELU = 'relu'
 TRAIN_PL = 'train-pytorch-lightning'
 TRAIN_PARAMETERLESS = 'train-parameterless'
 TRAIN_LAPLACE = 'train-laplace'
+
+# --- Temperature scaling objectives ---
+NLL = 'nll'
+TEMPERATURE_SCALING_OBJECTIVES = (NLL, )

@@ -1,8 +1,9 @@
-
-from audioop import add
 from copy import deepcopy
+from metrics import expected_calibration_error
 from model.semi_supervised_node_classification import SemiSupervisedNodeClassification
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import TensorDataset
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
@@ -12,6 +13,7 @@ from typing import Optional, Any, Dict, Tuple
 import os
 import logging
 import numpy as np
+import tempfile
 
 from log import LogGradientsCallback, LogWeightMatrixSpectrum
 from configuration import *
@@ -157,6 +159,7 @@ def finetune_pl_model(model: SemiSupervisedNodeClassification, config: Experimen
 
     # Create a trainer
     trainer = pl.Trainer(max_epochs=config.training.finetuning.max_epochs,
+                            min_epochs=config.training.finetuning.min_epochs,
                             deterministic=False, callbacks = callback_buffer.to_list(),
                             logger=logger,
                             progress_bar_refresh_rate=0,
@@ -175,10 +178,76 @@ def finetune_pl_model(model: SemiSupervisedNodeClassification, config: Experimen
     trainer.fit(model, data_loaders[dconstants.TRAIN], data_loaders[dconstants.VAL])
     return callback_buffer.checkpoint.best_model_path, trainer
 
+def fit_temperature_scaling(model: SemiSupervisedNodeClassification, config: TemperatureScalingConfiguration, logger, callback_buffer: Callbacks, 
+        data_loaders: Dict[str, DataLoader]) -> Tuple[str, pl.Trainer]:
+    """ Performs fitting an optimal temperature parameter to the model on the validation data. 
+    
+    Parameters:
+    -----------
+    model : pl.Module
+        The model to train
+    config : ExperimentConfiguration
+        The configuration for the whole experiment
+    logger : Any
+        The logger to log the finetuning with.
+    callback_buffer : Callbacks
+        A buffer for all callbacks. Unused.
+    data_loaders : Dict[str, DataLoader]
+        Data loaders used for training. See `data.constants` for keys.
+    
+    Returns:
+    --------
+    path : str
+        Path to the model checkpoint.
+    trainer : pl.Trainer
+        The trainer used for finetuning.
+    """
+    trainer = pl.Trainer()
+    model.eval()
+    trainer.validate(model, data_loaders[dconstants.VAL])
+
+    data_val = data_loaders[dconstants.VAL].dataset[0]
+    with torch.no_grad():
+        logits = model(data_val, sample=False).get_logits()[data_val.mask]
+        labels = data_val.y[data_val.mask]
+
+    if config.criterion == mconstants.NLL:
+        criterion = F.cross_entropy
+    else:
+        raise RuntimeError(f'Unsupported criterion for temperature scaling: {config.criterion}')
+
+    optimizer = torch.optim.LBFGS([model.log_temperature], lr=config.learning_rate, max_iter=config.max_epochs)
+    def iteration():
+        optimizer.zero_grad()
+        scaled = logits * torch.exp(-model.log_temperature)
+        probs = F.softmax(scaled, dim=1)
+        loss = criterion(scaled, labels)
+        loss.backward()
+
+        # Logging
+        if logger is not None:
+            logger.log_metrics({
+                'temperature_scaling/loss' : loss.item(),
+                'temperature_scaling/temperature' : torch.exp(model.log_temperature).item(),
+                'temperature_scaling/ece' : expected_calibration_error(probs, labels, bins=10)
+                        })
+        return loss
+    optimizer.step(iteration)
+
+    # Create a named tmp file to store the model checkpoint (w/ temperature) at
+    fn = tempfile.NamedTemporaryFile('w+', suffix='.ckpt', delete=False)
+    fn.close()
+
+    # Use a trainer to connect the model to in order to save checkpoints
+    trainer.validate(model, data_loaders[dconstants.VAL])
+    trainer.save_checkpoint(fn.name)
+
+    return fn.name, trainer
+
 def _train_pl_model_impl(model: SemiSupervisedNodeClassification, config: ExperimentConfiguration, 
     trainer: pl.Trainer, logger, callback_buffer: Callbacks, data_loaders: Dict[str, DataLoader]) -> Tuple[str, pl.Trainer]:
     """ Performs model training with given trainer or loads the model from the registry. 
-    In the case of finetuning a modelo, this function recurses to train the base model.
+    In the case of finetuning a model, this function recurses to train the base model.
 
     Parameters:
     -----------
@@ -220,13 +289,30 @@ def _train_pl_model_impl(model: SemiSupervisedNodeClassification, config: Experi
             # (Recursively) get a base model
             base_config = deepcopy(config)
             base_config.training.finetuning = FinetuningConfiguration(enable=False)
-            logging.info(f'Training / loading base model...')
+            logging.info(f'Training / loading base model for finetuning...')
             best_model_path, _ = _train_pl_model_impl(model, base_config, trainer, logger, callback_buffer, data_loaders)
             logging.info(f'Loading base model from {best_model_path}')
-            model.load_from_checkpoint(best_model_path, strict=False, backbone_configuration=base_config.model)
+            model = model.load_from_checkpoint(best_model_path, strict=False, backbone_configuration=base_config.model)
 
             # Finetune base model
             best_model_path, trainer = finetune_pl_model(model, config, logger, callback_buffer, data_loaders)
+            logging.info(f'Finished finetuning with checkpoint at {best_model_path}')
+
+        elif config.training.temperature_scaling:
+
+            # (Recursively) get a base model
+            base_config = deepcopy(config)
+            base_config.training.temperature_scaling = None
+            logging.info(f'Training / loading base model for temperature scaling...')
+            best_model_path, trainer = _train_pl_model_impl(model, base_config, trainer, logger, callback_buffer, data_loaders)
+            logging.info(f'Loading base model from {best_model_path}')
+            model = model.load_from_checkpoint(best_model_path, strict=False, backbone_configuration=base_config.model)
+            #print(model.get_weights())
+
+            # # Apply temperature scaling
+            best_model_path, _ = fit_temperature_scaling(model, config.training.temperature_scaling, logger, callback_buffer, data_loaders)
+            logging.info(f'Finished temperature scaling with checkpoint at {best_model_path}')
+
         else:
             logging.info('Starting model training.')
             # Train a model
@@ -244,7 +330,7 @@ def _train_pl_model_impl(model: SemiSupervisedNodeClassification, config: Experi
     return best_model_path, trainer
 
 def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], 
-        logger: Optional[Any]=None, callbacks: Union[List[pl.callbacks.Callback], Dict[str, pl.callbacks.Callback]] = []):
+        logger: Optional[Any]=None, callbacks: Union[List[pl.callbacks.Callback], Dict[str, pl.callbacks.Callback]] = []) -> SemiSupervisedNodeClassification:
     """ Trains a model that can be trained with pytorch lightning. 
     
     Parameters:
@@ -285,6 +371,7 @@ def train_pl_model(model: pl.LightningModule, config: ExperimentConfiguration, a
         # Final validation
         trainer.validate(model, data_loaders[dconstants.VAL])
 
+        print(torch.exp(model.log_temperature))
         return model
 
 def train_parameterless_model(model: ParameterlessBase, config: ExperimentConfiguration, artifact_dir: str, data_loaders: Dict[str, DataLoader], logger: Optional[Any]=None):
@@ -309,10 +396,11 @@ def train_parameterless_model(model: ParameterlessBase, config: ExperimentConfig
         The input model, but after training.
     """
     data_loader_train = data_loaders[dconstants.TRAIN]
+    data_loader_val = data_loaders[dconstants.VAL]
     assert len(data_loader_train) == 1
-    for batch in data_loader_train:
+    for batch_train, batch_val in zip(data_loader_train, data_loader_val):
         pass
-    model.fit(batch)
+    model.fit(batch_train, batch_val)
     logging.info(f'Fit {model.__class__}.')
     return model
 

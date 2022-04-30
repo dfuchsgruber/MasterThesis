@@ -96,7 +96,7 @@ class GCN(ModelBase):
         return GCNConv(input_dim, output_dim, config, *args, **kwargs, use_spectral_norm=use_spectral_norm, use_bjorck_norm=use_bjorck_norm,
             use_rescaling=use_rescaling, use_forbenius_norm=use_forbenius_norm, add_self_loops=False, bias=config.use_bias)
 
-    def forward(self, data, sample=None):
+    def forward(self, data, sample=None, temperature=1.0):
         # print(data.x.device, data.edge_index.device, data.edge_weight.device)
         x, edge_index, edge_weight, sample = self._unpack_inputs_and_sample(data, sample=sample)
         embeddings = [x]
@@ -108,8 +108,7 @@ class GCN(ModelBase):
         return Prediction(
             features = embeddings,
             **{
-                LOGITS : x,
-                SOFT_PREDICTIONS : F.softmax(x, dim=1),
+                LOGITS : x / temperature,
                 INPUTS : data.x,
             } 
             )
@@ -185,7 +184,7 @@ class GCNLinearClassification(GCN):
         """ Gets the weights of the output layer. """
         return _get_convolution_weights(self.head)
 
-    def forward(self, data, sample=None):
+    def forward(self, data, sample=None, temperature=1.0):
         x, edge_index, edge_weight, sample = self._unpack_inputs_and_sample(data, sample=sample)
         embeddings = [x]
         for num, layer in enumerate(self.convs):
@@ -196,8 +195,7 @@ class GCNLinearClassification(GCN):
         return Prediction(
             features = embeddings,
             **{
-                LOGITS : x,
-                SOFT_PREDICTIONS : F.softmax(x, dim=1),
+                LOGITS : x / temperature,
                 INPUTS : data.x,
             })
 
@@ -223,7 +221,7 @@ class GCNLaplace(ModelBase):
         """ Gets the weights of the output layer. """
         return _get_convolution_weights(self.head)
 
-    def forward(self, data, sample=None):
+    def forward(self, data, sample=None, temperature=1.0):
         x, edge_index, edge_weight, sample = self._unpack_inputs_and_sample(data, sample=sample)
         embeddings = [x]
         for num, layer in enumerate(self.convs):
@@ -241,8 +239,7 @@ class GCNLaplace(ModelBase):
         return Prediction(
             features = embeddings,
             **{
-                LOGITS : x,
-                SOFT_PREDICTIONS : F.softmax(x, dim=1),
+                LOGITS : x / temperature,
                 INPUTS : data.x,
             })
 
@@ -368,7 +365,7 @@ class BayesianGCN(ModelBase):
         )
         return conv
 
-    def forward(self, data: torch_geometric.data.Data, sample: bool=None) -> Prediction:
+    def forward(self, data: torch_geometric.data.Data, sample: bool=None, temperature=1.0) -> Prediction:
         x, edge_index, edge_weight, sample = self._unpack_inputs_and_sample(data, sample=sample)
         embeddings = [x]
         for num, layer in enumerate(self.convs):
@@ -379,8 +376,7 @@ class BayesianGCN(ModelBase):
             log_prior = self.log_prior(),
             log_q = self.log_q(),
             **{
-                LOGITS : x,
-                SOFT_PREDICTIONS : F.softmax(x, dim=1),
+                LOGITS : x / temperature,
                 INPUTS : data.x,
             },
             )
@@ -422,7 +418,6 @@ class BayesianGCN(ModelBase):
 #             embeddings, 
 #             inputs = data.x,
 #             logits = x,
-#             soft = F.softmax(x, dim=1),
 #             )
 
 #     def clear_and_disable_cache(self):
@@ -463,7 +458,7 @@ class APPNP(GCNLinearClassification):
         self.diffusion.clear_and_disable_cache()
         self.head.clear_and_disable_cache()
 
-    def forward(self, data, sample=None) -> Prediction:
+    def forward(self, data, sample=None, temperature=1.0) -> Prediction:
         x, edge_index, edge_weight, sample = self._unpack_inputs_and_sample(data, sample=sample)
         embeddings = [x]
         for num, layer in enumerate(self.convs):
@@ -480,8 +475,7 @@ class APPNP(GCNLinearClassification):
             features = embeddings,
             **{
                 INPUTS : data.x,
-                LOGITS : logits,
-                SOFT_PREDICTIONS : F.softmax(logits, dim=1),
+                LOGITS : logits / temperature,
             }
         )
 

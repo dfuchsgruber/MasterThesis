@@ -84,6 +84,19 @@ def cov_and_mean(x, rowvar=False, bias=False, ddof=None, aweights=None):
 
     return c.squeeze(), avg
 
+def _attempt_eval(cov: torch.Tensor) -> bool:
+    """ Attempts to use a covariance matrix as input for a Multivariate Normal. """
+    mean = torch.zeros((1, cov.size(0)))
+    try:
+        _ = MultivariateNormal(mean.cpu(), 
+                    covariance_matrix=cov.cpu(), 
+                    validate_args=False).log_prob(
+                        mean.cpu()
+                    )
+        return True
+    except:
+        return False
+
 def _make_covariance_psd_symmetric(cov, eps=1e-12, tol=1e-6):
     """ If a covariance matrix is not psd (numerical errors) and symmetric, a small value is added to its diagonal to make it psd.
 
@@ -103,7 +116,7 @@ def _make_covariance_psd_symmetric(cov, eps=1e-12, tol=1e-6):
     """
     # Make covariance psd in case of numerical inaccuracies
     while not (np.allclose(cov.numpy(), cov.numpy().T) and
-              np.all(np.linalg.eigvalsh(cov.numpy()) > tol)):
+              np.all(np.linalg.eigvalsh(cov.numpy()) > tol) and _attempt_eval(cov)):
         # print(f'Matrix not positive semi-definite. Adding {eps} to the diagnoal.')
         cov += torch.eye(cov.numpy().shape[0]) * eps
         cov = 0.5 * (cov + cov.T) # Hacky way to make the matrix symmetric without changing its values too much (the diagonal stays intact for sure)

@@ -1,0 +1,4856 @@
+fixed:
+  data.dataset: cora_full
+  data.drop_train_vertices_portion: 0.1
+  data.ood_sampling_strategy: all
+  data.preprocessing: none
+  data.split_type: uniform
+  data.test_portion_fixed: 0.2
+  data.train_portion: 20
+  data.type: npz
+  ensemble.num_members: 1
+  ensemble.num_samples: 1
+  evaluation.ignore_exceptions: false
+  evaluation.log_plots: false
+  evaluation.sample: false
+  model.activation: leaky_relu
+  model.hidden_sizes:
+  - 64
+  model.leaky_relu_slope: 0.01
+  model.model_type: gcn
+  model.use_bias: true
+  run.args:
+  - data:setting
+  - data:dataset
+  run.use_default_configuration: true
+  training.early_stopping.min_delta: 1e-2
+  training.early_stopping.mode: min
+  training.early_stopping.monitor: val_loss
+  training.early_stopping.patience: 50
+  training.gpus: 1
+  training.learning_rate: 0.001
+  training.max_epochs: 1000
+  training.temperature_scaling.learning_rate: 1e-2
+  training.temperature_scaling.max_epochs: 50
+grid:
+  data.setting:
+    options:
+    - transductive
+    - hybrid
+    type: choice
+  run.initialization_idx:
+    options:
+    - 0
+    - 1
+    - 2
+    type: choice
+  run.split_idx:
+    options:
+    - 0
+    - 1
+    - 2
+    type: choice
+left-out-classes:
+  fixed:
+    data.ood_type: left-out-classes
+    evaluation.pipeline:
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: loc_fit-mask_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-mask_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: loc_fit-95conf_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-95conf_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: loc_fit-mask_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-mask_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: loc_fit-95conf_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-95conf_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    run.name: dataset:{1}-setting:{0}-ood_type:loc
+left-out-classes-reco:
+  fixed:
+    data.ood_type: left-out-classes
+    evaluation.pipeline:
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: loc_fit-mask_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-mask_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: loc_fit-95conf_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-95conf_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: loc_fit-mask_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-mask_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: loc_fit-95conf_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-95conf_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    model.reconstruction.loss_weight: 1.0
+    model.reconstruction.reconstruction_type: energy
+    run.name: reco:dataset:{1}-setting:{0}-ood_type:loc
+left-out-classes-sn:
+  fixed:
+    data.ood_type: left-out-classes
+    evaluation.pipeline:
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: loc_fit-mask_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-mask_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: loc_fit-95conf_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-95conf_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-mask-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: loc_fit-95conf-no-edges_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: loc_fit-mask_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-mask_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: loc_fit-95conf_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ood-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: loc_fit-95conf_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: EvaluateFeatureSpaceDistance
+    model.residual: true
+    model.use_spectral_norm: true
+    model.weight_scale: 200.0
+    run.name: sn:dataset:{1}-setting:{0}-ood_type:loc
+perturbations:
+  fixed:
+    data.ood_type: perturbations
+    evaluation.pipeline:
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - base_data: ood-val
+      dataset_name: ber-val
+      log_plots: false
+      name: val
+      parameters:
+        p: 0.5
+      perturbation_type: bernoulli
+      type: PerturbData
+    - base_data: ood-val
+      dataset_name: normal-val
+      log_plots: false
+      name: val
+      parameters:
+        scale: 1.0
+      perturbation_type: normal
+      type: PerturbData
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: ber_fit-mask_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-mask_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: ber_fit-95conf_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-95conf_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: normal_fit-mask_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-mask_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: normal_fit-95conf_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-95conf_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - base_data: ood-test
+      dataset_name: ber-test
+      log_plots: false
+      name: test
+      parameters:
+        p: 0.5
+      perturbation_type: bernoulli
+      type: PerturbData
+    - base_data: ood-test
+      dataset_name: normal-test
+      log_plots: false
+      name: test
+      parameters:
+        scale: 1.0
+      perturbation_type: normal
+      type: PerturbData
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: ber_fit-mask_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-mask_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: ber_fit-95conf_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-95conf_test
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: normal_fit-mask_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-mask_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: normal_fit-95conf_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-95conf_test
+      type: EvaluateFeatureSpaceDistance
+    run.name: dataset:{1}-setting:{0}-ood_type:per
+perturbations-reco:
+  fixed:
+    data.ood_type: perturbations
+    evaluation.pipeline:
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - base_data: ood-val
+      dataset_name: ber-val
+      log_plots: false
+      name: val
+      parameters:
+        p: 0.5
+      perturbation_type: bernoulli
+      type: PerturbData
+    - base_data: ood-val
+      dataset_name: normal-val
+      log_plots: false
+      name: val
+      parameters:
+        scale: 1.0
+      perturbation_type: normal
+      type: PerturbData
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: ber_fit-mask_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-mask_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: ber_fit-95conf_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-95conf_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: normal_fit-mask_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-mask_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: normal_fit-95conf_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-95conf_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - base_data: ood-test
+      dataset_name: ber-test
+      log_plots: false
+      name: test
+      parameters:
+        p: 0.5
+      perturbation_type: bernoulli
+      type: PerturbData
+    - base_data: ood-test
+      dataset_name: normal-test
+      log_plots: false
+      name: test
+      parameters:
+        scale: 1.0
+      perturbation_type: normal
+      type: PerturbData
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: ber_fit-mask_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-mask_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: ber_fit-95conf_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-95conf_test
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: normal_fit-mask_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-mask_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: normal_fit-95conf_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-95conf_test
+      type: EvaluateFeatureSpaceDistance
+    model.reconstruction.loss_weight: 1.0
+    model.reconstruction.reconstruction_type: energy
+    run.name: reco:dataset:{1}-setting:{0}-ood_type:per
+perturbations-sn:
+  fixed:
+    data.ood_type: perturbations
+    evaluation.pipeline:
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_val
+      type: EvaluateCalibration
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - val
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_val
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - base_data: ood-val
+      dataset_name: ber-val
+      log_plots: false
+      name: val
+      parameters:
+        p: 0.5
+      perturbation_type: bernoulli
+      type: PerturbData
+    - base_data: ood-val
+      dataset_name: normal-val
+      log_plots: false
+      name: val
+      parameters:
+        scale: 1.0
+      perturbation_type: normal
+      type: PerturbData
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: ber_fit-mask_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-mask_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: ber_fit-95conf_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-95conf_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_val
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: normal_fit-mask_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-mask_val
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: normal_fit-95conf_val
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-val
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-95conf_val
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      name: -no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: -no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs:
+        remove_edges: true
+      model_kwargs_evaluate:
+        temperature_scaling: true
+      name: -temperature-scaling-no-edges_test
+      type: EvaluateCalibration
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      name: noise_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - evaluate_on:
+      - test
+      log_plots: false
+      max_perturbation: 10.0
+      min_perturbation: 0.1
+      model_kwargs:
+        remove_edges: true
+      name: noise-no-edges_test
+      num_perturbations: 20
+      num_perturbations_per_sample: 5
+      perturbation_type: noise
+      seed: 1337
+      type: EvaluateEmpircalLowerLipschitzBounds
+    - base_data: ood-test
+      dataset_name: ber-test
+      log_plots: false
+      name: test
+      parameters:
+        p: 0.5
+      perturbation_type: bernoulli
+      type: PerturbData
+    - base_data: ood-test
+      dataset_name: normal-test
+      log_plots: false
+      name: test
+      parameters:
+        scale: 1.0
+      perturbation_type: normal
+      type: PerturbData
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber-no-edges_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-mask-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: ber_fit-95conf-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: ber_fit-mask_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-mask_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: ber_fit-95conf_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - ber-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: ber_fit-95conf_test
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal-no-edges_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-mask-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      model_kwargs_evaluate:
+        remove_edges: true
+      name: normal_fit-95conf-no-edges_test
+      type: EvaluateFeatureSpaceDistance
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateSoftmaxEntropy
+    - evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_test
+      type: EvaluateLogitEnergy
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: true
+      log_plots: false
+      name: normal_fit-mask_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-mask_test
+      type: EvaluateFeatureSpaceDistance
+    - density_types:
+        GaussianPerClass:
+          covariance:
+          - full
+          - diag
+          - eye
+          - iso
+          evaluation_kwargs_grid:
+          - mode:
+            - weighted
+            - max
+            relative:
+            - false
+            - true
+      diffuse_features: false
+      diffusion_iterations: 16
+      dimensionality_reductions:
+        none: {}
+      evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      fit_to_best_prediction: false
+      fit_to_ground_truth_labels:
+      - train
+      - val
+      fit_to_mask_only: false
+      fit_to_min_confidence: 0.95
+      log_plots: false
+      name: normal_fit-95conf_test
+      teleportation_probability: 0.2
+      type: FitFeatureDensityGrid
+    - evaluate_on:
+      - normal-test
+      fit_to:
+      - train
+      k: 5
+      layer: -2
+      log_plots: false
+      name: normal_fit-95conf_test
+      type: EvaluateFeatureSpaceDistance
+    model.residual: true
+    model.use_spectral_norm: true
+    model.weight_scale: 200.0
+    run.name: sn:dataset:{1}-setting:{0}-ood_type:per
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week26_gcn_all
+  output_dir: /nfs/students/fuchsgru/seml_output/week26
+  project_root_dir: ../../..
+slurm:
+  experiments_per_job: 6
+  sbatch_options:
+    cpus-per-task: 2
+    gres: gpu:1
+    mem: 128GB
+    partition: gpu_large
+    time: 0-48:00

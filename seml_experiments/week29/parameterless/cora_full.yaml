@@ -1,0 +1,226 @@
+fixed:
+  data.dataset: cora_full
+  data.drop_train_vertices_portion: 0.1
+  data.ood_sampling_strategy: all
+  data.preprocessing: none
+  data.split_type: uniform
+  data.test_portion_fixed: 0.2
+  data.train_portion: 20
+  data.type: npz
+  ensemble.num_members: 1
+  ensemble.num_samples: 1
+  model.appnp.diffusion_iterations: 16
+  model.appnp.teleportation_probability: 0.2
+  model.gdk.reduction: max
+  model.gdk.sigma: 1.0
+  model.input_distance.centroids: false
+  model.input_distance.k: 5
+  run.args:
+  - data:setting
+  - data:dataset
+  - model:model_type
+  run.use_default_configuration: true
+grid:
+  data.setting:
+    options:
+    - transductive
+    - hybrid
+    type: choice
+  model.model_type:
+    options:
+    - appr_diffusion
+    - input_distance
+    - graph_dirichlet_kernel
+    type: choice
+  run.initialization_idx:
+    options:
+    - 0
+    type: choice
+  run.split_idx:
+    options:
+    - 0
+    - 1
+    - 2
+    type: choice
+left-out-classes_parameterless:
+  fixed:
+    data.ood_type: left-out-classes
+    evaluation.pipeline:
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: val
+      type: EvaluateCalibration
+    - attribute: evidence_total
+      evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_total_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: UncertaintyQuantificationByPredictionAttribute
+    - attribute: evidence_prediction
+      evaluate_on:
+      - ood-val
+      log_plots: false
+      name: loc_prediction_val
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: UncertaintyQuantificationByPredictionAttribute
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: test
+      type: EvaluateCalibration
+    - attribute: evidence_total
+      evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_total_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: UncertaintyQuantificationByPredictionAttribute
+    - attribute: evidence_prediction
+      evaluate_on:
+      - ood-test
+      log_plots: false
+      name: loc_prediction_test
+      separate_distributions_by: ood-and-neighbourhood
+      separate_distributions_tolerance: 0.1
+      type: UncertaintyQuantificationByPredictionAttribute
+    run.name: parameterless-model:{2}-dataset:{1}-setting:{0}-ood_type:loc
+perturbations_parameterless:
+  fixed:
+    data.ood_type: perturbations
+    evaluation.pipeline:
+    - evaluate_on:
+      - val
+      log_plots: false
+      name: val
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - val
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: val
+      type: EvaluateCalibration
+    - base_data: ood-val
+      dataset_name: ber-val
+      log_plots: false
+      name: val
+      parameters:
+        p: 0.5
+      perturbation_type: bernoulli
+      type: PerturbData
+    - base_data: ood-val
+      dataset_name: normal-val
+      log_plots: false
+      name: val
+      parameters:
+        scale: 1.0
+      perturbation_type: normal
+      type: PerturbData
+    - attribute: evidence_total
+      evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_total_val
+      type: UncertaintyQuantificationByPredictionAttribute
+    - attribute: evidence_prediction
+      evaluate_on:
+      - ber-val
+      log_plots: false
+      name: ber_prediction_val
+      type: UncertaintyQuantificationByPredictionAttribute
+    - attribute: evidence_total
+      evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_total_val
+      type: UncertaintyQuantificationByPredictionAttribute
+    - attribute: evidence_prediction
+      evaluate_on:
+      - normal-val
+      log_plots: false
+      name: normal_prediction_val
+      type: UncertaintyQuantificationByPredictionAttribute
+    - evaluate_on:
+      - test
+      log_plots: false
+      name: test
+      type: EvaluateAccuracy
+    - evaluate_on:
+      - test
+      log_plots: false
+      model_kwargs_evaluate:
+        temperature_scaling: false
+      name: test
+      type: EvaluateCalibration
+    - base_data: ood-test
+      dataset_name: ber-test
+      log_plots: false
+      name: test
+      parameters:
+        p: 0.5
+      perturbation_type: bernoulli
+      type: PerturbData
+    - base_data: ood-test
+      dataset_name: normal-test
+      log_plots: false
+      name: test
+      parameters:
+        scale: 1.0
+      perturbation_type: normal
+      type: PerturbData
+    - attribute: evidence_total
+      evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_total_test
+      type: UncertaintyQuantificationByPredictionAttribute
+    - attribute: evidence_prediction
+      evaluate_on:
+      - ber-test
+      log_plots: false
+      name: ber_prediction_test
+      type: UncertaintyQuantificationByPredictionAttribute
+    - attribute: evidence_total
+      evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_total_test
+      type: UncertaintyQuantificationByPredictionAttribute
+    - attribute: evidence_prediction
+      evaluate_on:
+      - normal-test
+      log_plots: false
+      name: normal_prediction_test
+      type: UncertaintyQuantificationByPredictionAttribute
+    run.name: parameterless-model:{2}-dataset:{1}-setting:{0}-ood_type:per
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week28_dropout
+  output_dir: /nfs/students/fuchsgru/seml_output/week29
+  project_root_dir: ../../..
+slurm:
+  experiments_per_job: 32
+  sbatch_options:
+    cpus-per-task: 2
+    gres: gpu:1
+    mem: 512GB
+    time: 0-48:00

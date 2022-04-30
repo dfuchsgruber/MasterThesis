@@ -1,0 +1,56 @@
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week28_dropout
+  output_dir: /nfs/students/fuchsgru/seml_output/week29
+  project_root_dir: ../../..
+
+slurm:
+  experiments_per_job: 8 # Dont make it too large, especially for ogbn arxiv
+  sbatch_options:
+    gres: gpu:1       # num GPUs
+    mem: 512GB          # memory
+    cpus-per-task: 2  # num cores
+    time: 0-48:00     # max time, D-HH:MM
+
+
+###### BEGIN PARAMETER CONFIGURATION ######
+
+fixed:
+  run.args:
+    - data:setting
+    - data:dataset
+    - model:model_type
+  run.use_default_configuration: true
+    
+  data.ood_sampling_strategy: all
+  data.preprocessing: none
+  data.train_portion : 20
+  data.test_portion_fixed : 0.2
+  data.split_type: uniform
+  data.type: npz
+  data.drop_train_vertices_portion: 0.1
+
+
+  model.appnp.diffusion_iterations: 16
+  model.appnp.teleportation_probability: 0.2
+  model.input_distance.centroids: False
+  model.input_distance.k: 5
+  model.gdk.sigma: 1.0
+  model.gdk.reduction: max
+
+  ensemble.num_members: 1
+  ensemble.num_samples: 1
+  
+grid:
+  data.setting:
+    type: choice
+    options: [transductive, hybrid]
+  run.initialization_idx:
+    type: choice
+    options: [0]
+  run.split_idx:
+    type: choice
+    options: [0, 1, 2]
+  model.model_type:
+    type: choice
+    options: [appr_diffusion, input_distance, graph_dirichlet_kernel]

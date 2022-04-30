@@ -17,15 +17,17 @@ class ParameterlessBase(nn.Module):
     def clear_and_disable_cache(self):
         logging.info('Parameterless model base class disabled and cleared cache (with no effect).')
 
-    def fit(self, batch: Data):
+    def fit(self, batch_train: Data, batch_val: Data):
         """ Memorizes all instances in the train dataset using the `vertex_to_idx` attribute. 
         
-        batch : Data
+        batch_train : Data
+            The batch to memorize.
+        batch_val : Data
             The batch to memorize.
         """
         if not self.training:
             raise RuntimeError(f'Model was not set to eval mode.')
-        self._train_instances = [v for v, idx in batch.vertex_to_idx.items() if batch.mask[idx]]
+        self._train_instances = [v for v, idx in batch_train.vertex_to_idx.items() if (batch_train.mask[idx] or batch_val.mask[idx])]
     
     def get_fit_idxs(self, batch: Data) -> List[int]:
         """ Gets the idx of train instances on any given graph. 

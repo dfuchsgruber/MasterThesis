@@ -32,6 +32,7 @@ if __name__ == '__main__':
                         #language_model = 'allenai/longformer-base-4096',
                         drop_train_vertices_portion = 0.1,
                         # feature_scale=20.0,
+                        use_dataset_registry = True,
                         )
 
     if data_cfg.ood_type == dconstants.PERTURBATION:
@@ -42,7 +43,7 @@ if __name__ == '__main__':
     spectral_norm_cfg = {
         'use_spectral_norm' : True,
         'residual' : True,
-        'weight_scale' : 125.0,
+        'weight_scale' : 200.0,
         'use_spectral_norm_on_last_layer' : False,
         # 'self_loop_fill_value' : 5.0,
     }
@@ -130,6 +131,11 @@ if __name__ == '__main__':
         'model_type' : mconstants.MLP,
     }
 
+    temperature_scaling_cfg = {
+        'learning_rate' : 1e-2,
+        'max_epochs' : 200,
+    }
+
     model_cfg = configuration.ModelConfiguration(
          **gcn_cfg,
         # **appnp_cfg,
@@ -184,12 +190,13 @@ if __name__ == '__main__':
         'finetuning' : {
             'enable' : True,
             'reconstruction' : reconstruction_cfg,
-            'max_epochs' : 5,
+            'max_epochs' : 1000,
+            'min_epochs' : 1000,
         }
     }
 
     training_cfg = configuration.TrainingConfiguration(
-        max_epochs=1, 
+        max_epochs=1000, 
         # min_epochs=500,
         learning_rate=1e-3, 
         early_stopping={
@@ -204,7 +211,8 @@ if __name__ == '__main__':
         # **orthonormal_reg,
         # **self_training,
         #**bounded_svd,
-        **finetuning_cfg,
+        # **finetuning_cfg,
+        temperature_scaling=temperature_scaling_cfg,
         )
 
     ensemble_cfg = configuration.EnsembleConfiguration(
@@ -224,7 +232,7 @@ if __name__ == '__main__':
         # },
         # log_gradients_relative_to_parameter = True,
         # log_gradients_relative_to_norm = True,
-        log_weight_matrix_spectrum_every = 1,
+        # log_weight_matrix_spectrum_every = 1,
     )
 
     if data_cfg.ood_type == dconstants.PERTURBATION:
@@ -288,7 +296,7 @@ if __name__ == '__main__':
                 'density_types' : {
                     'GaussianPerClass' : {
                         'evaluation_kwargs_grid' : [{'mode' : ['weighted'], 'relative' : [False,]}],
-                        'covariance' : ['full', 'diag', 'eye', 'iso'],
+                        'covariance' : ['diag'],
                     },
                     # 'GaussianMixture' : {
                     #     'diagonal_covariance' : [True],
@@ -304,37 +312,37 @@ if __name__ == '__main__':
                 'separate_distributions_tolerance' : 0.1,
                 'name' : ood_name,
             },
-            {
-                'type' : 'FitFeatureDensityGrid',
-                'fit_to' : ['train'],
-                'fit_to_ground_truth_labels' : ['train'],
-                'fit_to_mask_only' : True,
-                'fit_to_best_prediction' : False,
-                'fit_to_min_confidence' : 0.99,
-                'evaluate_on' : [ood_dataset],
-                'diffuse_features' : False,
-                'diffusion_iterations' : 16,
-                'teleportation_probability' : 0.2,
-                'density_types' : {
-                    'GaussianPerClass' : {
-                        'evaluation_kwargs_grid' : [{'mode' : ['weighted'], 'relative' : [False,]}],
-                        'covariance' : ['full', 'diag', 'eye', 'iso'],
-                    },
-                    # 'GaussianMixture' : {
-                    #     'diagonal_covariance' : [True],
-                    #     'number_components' : [-1],
-                    # }
-                },
-                'dimensionality_reductions' : {
-                    'none' : {
-                    }
-                },
-                'log_plots' : True,
-                'separate_distributions_by' : ood_separation,
-                'separate_distributions_tolerance' : 0.1,
-                'name' : f'{ood_name}-no-edges',
-                'model_kwargs_evaluate' : {'remove_edges' : True},
-            },
+            # {
+            #     'type' : 'FitFeatureDensityGrid',
+            #     'fit_to' : ['train'],
+            #     'fit_to_ground_truth_labels' : ['train'],
+            #     'fit_to_mask_only' : True,
+            #     'fit_to_best_prediction' : False,
+            #     'fit_to_min_confidence' : 0.99,
+            #     'evaluate_on' : [ood_dataset],
+            #     'diffuse_features' : False,
+            #     'diffusion_iterations' : 16,
+            #     'teleportation_probability' : 0.2,
+            #     'density_types' : {
+            #         'GaussianPerClass' : {
+            #             'evaluation_kwargs_grid' : [{'mode' : ['weighted'], 'relative' : [False,]}],
+            #             'covariance' : ['full', 'diag', 'eye', 'iso'],
+            #         },
+            #         # 'GaussianMixture' : {
+            #         #     'diagonal_covariance' : [True],
+            #         #     'number_components' : [-1],
+            #         # }
+            #     },
+            #     'dimensionality_reductions' : {
+            #         'none' : {
+            #         }
+            #     },
+            #     'log_plots' : True,
+            #     'separate_distributions_by' : ood_separation,
+            #     'separate_distributions_tolerance' : 0.1,
+            #     'name' : f'{ood_name}-no-edges',
+            #     'model_kwargs_evaluate' : {'remove_edges' : True},
+            # },
             # {
             #     'type' : 'FitFeatureDensityGrid',
             #     'fit_to' : ['train'],
@@ -442,38 +450,38 @@ if __name__ == '__main__':
                 'separate_distributions_tolerance' : 0.1,
                 'name' : ood_name,
             },
-            {
-                'type' : 'EvaluateSoftmaxEntropy',
-                'evaluate_on' : [ood_dataset],
-                'separate_distributions_by' : ood_separation,
-                'separate_distributions_tolerance' : 0.1,
-                'name' : f'{ood_name}-no-edges',
-                'model_kwargs_evaluate' : {'remove_edges' : True},
+            # {
+            #     'type' : 'EvaluateSoftmaxEntropy',
+            #     'evaluate_on' : [ood_dataset],
+            #     'separate_distributions_by' : ood_separation,
+            #     'separate_distributions_tolerance' : 0.1,
+            #     'name' : f'{ood_name}-no-edges',
+            #     'model_kwargs_evaluate' : {'remove_edges' : True},
 
-            },
-            {
-                'type' : 'EvaluateFeatureSpaceDistance',
-                'fit_to' : ['train'],
-                'evaluate_on' : [ood_dataset],
-                'log_plots' : True,
-                'separate_distributions_by' : ood_separation,
-                'separate_distributions_tolerance' : 0.1,
-                'k' : 5,
-                'layer' : -2,
-                'name' : ood_name,
-            },
-            {
-                'type' : 'EvaluateFeatureSpaceDistance',
-                'fit_to' : ['train'],
-                'evaluate_on' : [ood_dataset],
-                'log_plots' : True,
-                'separate_distributions_by' : ood_separation,
-                'separate_distributions_tolerance' : 0.1,
-                'k' : 5,
-                'layer' : -2,
-                'name' : f'{ood_name}-no-edges',
-                'model_kwargs_evaluate' : {'remove_edges' : True},
-            },
+            # },
+            # {
+            #     'type' : 'EvaluateFeatureSpaceDistance',
+            #     'fit_to' : ['train'],
+            #     'evaluate_on' : [ood_dataset],
+            #     'log_plots' : True,
+            #     'separate_distributions_by' : ood_separation,
+            #     'separate_distributions_tolerance' : 0.1,
+            #     'k' : 5,
+            #     'layer' : -2,
+            #     'name' : ood_name,
+            # },
+            # {
+            #     'type' : 'EvaluateFeatureSpaceDistance',
+            #     'fit_to' : ['train'],
+            #     'evaluate_on' : [ood_dataset],
+            #     'log_plots' : True,
+            #     'separate_distributions_by' : ood_separation,
+            #     'separate_distributions_tolerance' : 0.1,
+            #     'k' : 5,
+            #     'layer' : -2,
+            #     'name' : f'{ood_name}-no-edges',
+            #     'model_kwargs_evaluate' : {'remove_edges' : True},
+            # },
             # {
             #     'type' : 'EvaluateLogitEnergy',
             #     'evaluate_on' : [ood_dataset],
@@ -505,7 +513,15 @@ if __name__ == '__main__':
             },
             {
                 'type' : 'EvaluateCalibration',
-                'evaluate_on' : ['val'],
+                'evaluate_on' : ['test'],
+            },
+            {
+                'type' : 'EvaluateCalibration',
+                'evaluate_on' : ['test'],
+                'model_kwargs_evaluate' : {
+                    'temperature_scaling' : False,
+                },
+                'name' : 'no-temperature-scaling',
             },
         ],
         # sample = True,

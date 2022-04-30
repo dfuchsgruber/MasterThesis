@@ -44,7 +44,7 @@ if __name__ == '__main__':
 
 
     model_cfg = configuration.ModelConfiguration(
-        model_type=mconstants.GDK,
+        model_type=mconstants.INPUT_DISTANCE,
         appnp = {
             'diffusion_iterations' : 16,
             'teleportation_probability' : 0.2,
@@ -112,7 +112,7 @@ if __name__ == '__main__':
                 'type' : 'UncertaintyQuantificationByPredictionAttribute',
                 'evaluate_on' : [ood_dataset],
                 'attribute' : 'evidence_total',
-                'log_plots' : True,
+                'log_plots' : False,
                 'separate_distributions_by' : ood_separation,
                 'separate_distributions_tolerance' : 0.1,
                 'name' : ood_name + '_total',
@@ -121,7 +121,7 @@ if __name__ == '__main__':
                 'type' : 'UncertaintyQuantificationByPredictionAttribute',
                 'evaluate_on' : [ood_dataset],
                 'attribute' : 'evidence_prediction',
-                'log_plots' : True,
+                'log_plots' : False,
                 'separate_distributions_by' : ood_separation,
                 'separate_distributions_tolerance' : 0.1,
                 'name' : ood_name + '_prediction',

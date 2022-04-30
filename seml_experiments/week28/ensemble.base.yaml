@@ -1,0 +1,65 @@
+seml:
+  executable: training_semi_supervised_node_classification.py
+  name: week28_dropout
+  output_dir: /nfs/students/fuchsgru/seml_output/week28
+  project_root_dir: ../../..
+
+slurm:
+  experiments_per_job: 8 # Dont make it too large, especially for ogbn arxiv
+  sbatch_options:
+    gres: gpu:1       # num GPUs
+    mem: 128GB          # memory
+    cpus-per-task: 2  # num cores
+    time: 0-48:00     # max time, D-HH:MM
+    partition: gpu_large
+
+
+###### BEGIN PARAMETER CONFIGURATION ######
+
+fixed:
+  run.args:
+    - data:setting
+    - data:dataset
+  run.use_default_configuration: true
+    
+  training.early_stopping.patience: 50
+  training.early_stopping.mode: min
+  training.early_stopping.monitor: val_loss
+  training.early_stopping.min_delta: 1e-2
+  training.max_epochs: 1000
+  training.gpus: 1
+  training.learning_rate: 0.001
+  training.temperature_scaling.learning_rate: 1e-2
+  training.temperature_scaling.max_epochs: 50
+  
+  data.ood_sampling_strategy: all
+  data.preprocessing: none
+  data.train_portion : 20
+  data.test_portion_fixed : 0.2
+  data.split_type: uniform
+  data.type: npz
+  data.drop_train_vertices_portion: 0.1
+
+  model.use_bias: true
+  model.activation: leaky_relu
+  model.leaky_relu_slope: 0.01
+  model.model_type: gcn
+  model.hidden_sizes: [64]
+
+  evaluation.ignore_exceptions: false
+  evaluation.log_plots: false
+  evaluation.sample: false # Important for dropout and BNN, but disable otherwise
+
+  ensemble.num_members: 5
+  ensemble.num_samples: 1
+  
+grid:
+  data.setting:
+    type: choice
+    options: [transductive, hybrid]
+  run.initialization_idx:
+    type: choice
+    options: [0, 1, 2]
+  run.split_idx:
+    type: choice
+    options: [0, 1, 2]

@@ -1,4 +1,4 @@
-from multiprocessing.sharedctypes import Value
+from typing import Any, Mapping
 import configuration
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,8 +14,23 @@ from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 import torch
 import logging
+import util
 
 from transformers import AutoModel, AutoTokenizer
+
+def make_mapping_collatable(d: Mapping[str, Any]) -> Mapping[str, Any]:
+    """ Fixes the keys in a mapping so that they do not contain keys the tg collator is senstitive to.
+    That includes the substrings 'batch', 'index', 'face' (yes, very stupid...)
+    """
+    result = {}
+    for k, v in d.items():
+        old_k, k = k, util.make_key_collatable(k)
+        if k in result:
+            raise RuntimeError(f'Duplicate keys {k} by sanitizing.')
+        if k != old_k:
+            logging.info(f'Making mapping collatable: Sanitized "{old_k}" to "{k}"')
+        result[k] = v
+    return result
 
 def load_embedded_word_features(dataset_name, language_model, cache_dir=osp.join(get_cache_path(), 'npz-word-features'), max_length=512):
     """
@@ -294,11 +309,13 @@ class NpzDataset(SingleGraphDataset):
                 X = sp.csr_matrix((loader['attr_data'], loader['attr_indices'], loader['attr_indptr']), shape=loader['attr_shape'])[vertices_to_keep].todense()
                 vertex_to_idx = NpzDataset._build_vertex_to_idx(idx_to_node, vertices_to_keep)
             if 'attr_names' in loader and len(loader['attr_names']):
-                feature_to_idx = {feature : idx for idx, feature in enumerate(loader['attr_names'])}
+                feature_to_idx = {f'{feature}' : int(idx) for idx, feature in enumerate(loader['attr_names'])}
             elif 'idx_to_attr' in loader:
-                feature_to_idx = {attr : idx for idx, attr in loader['idx_to_attr'].item().items()}
+                feature_to_idx = {f'{attr}' : int(idx) for idx, attr in loader['idx_to_attr'].item().items()}
             else:
                 feature_to_idx = {f'feature_{i}' : i for i in range(X.shape[1])}
+            assert len(feature_to_idx) == X.shape[1], f'Mismatching sizes for attr_names {len(feature_to_idx)} != {X.shape[1]}'
+            assert len(set(feature_to_idx.values())) == X.shape[1]
         else:
             raise ValueError(f'Unknown preprocessing for features of type {config.preprocessing}')
         logging.info('Data Loading - Built attribute matrix.')
@@ -312,11 +329,16 @@ class NpzDataset(SingleGraphDataset):
         else:
             raise ValueError(f'Unsupported normalization {config.normalize}')
 
+        # Fix a bug with the collator: No 
+
         X *= config.feature_scale
 
-        label_to_idx = {label : idx for idx, label in idx_to_label.items() if idx in y}
+        label_to_idx = make_mapping_collatable({label : idx for idx, label in idx_to_label.items() if idx in y})
         y, label_to_idx, _ = data.util.compress_labels(y, label_to_idx)
-        _data = SingleGraphDataset.build(X, np.array(A.nonzero()), y, vertex_to_idx, label_to_idx, np.ones_like(y), transform=transform, feature_to_idx=feature_to_idx).data
+        _data = SingleGraphDataset.build(X, np.array(A.nonzero()), y, 
+            make_mapping_collatable(vertex_to_idx), 
+            (label_to_idx), np.ones_like(y), transform=transform, 
+            feature_to_idx=make_mapping_collatable(feature_to_idx)).data
         
         # Add additional attributes to the data by the dataset
         if config.dataset == dconst.OGBN_ARXIV:
