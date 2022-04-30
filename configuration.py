@@ -11,6 +11,9 @@ import yaml
 import logging
 from util import make_key_collatable
 
+DEFAULT_REGISTRY_COLLECTION_NAME = 'model_registry_v5'
+DEFAULT_DATASET_REGISTRY_COLLECTION_NAME = 'dataset_registry'
+
 def make_cls_converter(cls, optional=False):
     """ Converter function that initializes a class with a dict or keeps the class as is. """
     def _convert(value):
@@ -213,6 +216,8 @@ class DataConfiguration(BaseConfiguration):
     precompute_k_hop_neighbourhood: int = attr.ib(default=2, converter=int)
 
     use_dataset_registry: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
+    dataset_registry_collection_name: str = attr.ib(default=DEFAULT_DATASET_REGISTRY_COLLECTION_NAME, metadata={'registry_attribute' : False})
+    dataset_registry_directory: str = attr.ib(default='/nfs/students/fuchsgru/dataset_registry', metadata={'registry_attribute' : False})
 
 @attr.s
 class EarlyStoppingConfiguration(BaseConfiguration):
@@ -284,7 +289,6 @@ class EvaluationConfiguration(BaseConfiguration):
     sample: bool = attr.ib(default=False, converter=bool)
     use_gpus: bool = attr.ib(default=False, converter=bool)
 
-DEFAULT_REGISTRY_COLLECTION_NAME = 'model_registry_v5'
 
 @attr.s
 class RunConfiguration(BaseConfiguration):
@@ -302,6 +306,7 @@ class RunConfiguration(BaseConfiguration):
 
     use_pretrained_model: bool = attr.ib(default=True, converter=bool, metadata={'registry_attribute' : False})
     model_registry_collection_name: str = attr.ib(default=DEFAULT_REGISTRY_COLLECTION_NAME, converter=str, metadata={'registry_attribute' : False})
+    model_registry_directory: str = attr.ib(default='/nfs/students/fuchsgru/model_registry', metadata={'registry_attribute' : False})
 
     # If set, some values are updated with defaults depending on the dataset
     use_default_configuration: bool = attr.ib(default=False, converter=bool, metadata={'registry_attribute' : False})

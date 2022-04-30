@@ -95,7 +95,7 @@ def load_data_from_configuration(config: DataConfiguration, split_seed: int) -> 
     fixed_vertices : set
         The vertex ids (as in `data.vertex_to_idx`'s keys) of the common portion that will only be allocated to testing data. 
     """
-    dataset_registry = DatasetRegistry()
+    dataset_registry = DatasetRegistry(collection_name=config.dataset_registry_collection_name, directory_path=config.dataset_registry_directory)
     if config.use_dataset_registry:
         dataset_path = dataset_registry[(config, split_seed)]
     else:

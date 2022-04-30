@@ -272,7 +272,7 @@ def _train_pl_model_impl(model: SemiSupervisedNodeClassification, config: Experi
         The (last) trainer used for training. In the case of finetuning, this might be the finetuning trainer
         (only if the model was not loaded from the model registry storage).
     """ 
-    model_registry = ModelRegistry(collection_name=config.run.model_registry_collection_name)
+    model_registry = ModelRegistry(collection_name=config.run.model_registry_collection_name, directory_path=config.run.model_registry_directory)
     
     # Try finding a pretrained checkpoint
     if config.run.use_pretrained_model:
