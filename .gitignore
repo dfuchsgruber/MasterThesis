@@ -145,3 +145,5 @@ data/raw/*
 .exported_datasets/*
 
 *.pt
+
+jupyter_notebooks/**/*.pdf
