@@ -151,7 +151,26 @@ class Cora(Dataset):
         path = download_url('https://linqs-data.soe.ucsc.edu/public/lbc/cora.tgz', self.raw_dir)
         print('Extracting...')
         with tarfile.open(osp.join(self.raw_dir, 'cora.tgz'), "r:gz") as tar:
-            tar.extractall(path=self.raw_dir)
+            def is_within_directory(directory, target):
+                
+                abs_directory = os.path.abspath(directory)
+                abs_target = os.path.abspath(target)
+            
+                prefix = os.path.commonprefix([abs_directory, abs_target])
+                
+                return prefix == abs_directory
+            
+            def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+            
+                for member in tar.getmembers():
+                    member_path = os.path.join(path, member.name)
+                    if not is_within_directory(path, member_path):
+                        raise Exception("Attempted Path Traversal in Tar File")
+            
+                tar.extractall(path, members, numeric_owner=numeric_owner) 
+                
+            
+            safe_extract(tar, path=self.raw_dir)
             tar.close()
 
     def process(self):
@@ -186,7 +205,26 @@ class Citeseer(Dataset):
         path = download_url('https://linqs-data.soe.ucsc.edu/public/lbc/citeseer.tgz', self.raw_dir)
         print('Extracting...')
         with tarfile.open(osp.join(self.raw_dir, 'citeseer.tgz'), "r:gz") as tar:
-            tar.extractall(path=self.raw_dir)
+            def is_within_directory(directory, target):
+                
+                abs_directory = os.path.abspath(directory)
+                abs_target = os.path.abspath(target)
+            
+                prefix = os.path.commonprefix([abs_directory, abs_target])
+                
+                return prefix == abs_directory
+            
+            def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+            
+                for member in tar.getmembers():
+                    member_path = os.path.join(path, member.name)
+                    if not is_within_directory(path, member_path):
+                        raise Exception("Attempted Path Traversal in Tar File")
+            
+                tar.extractall(path, members, numeric_owner=numeric_owner) 
+                
+            
+            safe_extract(tar, path=self.raw_dir)
             tar.close()
 
     def process(self):
@@ -221,7 +259,26 @@ class Pubmed(Dataset):
         path = download_url('https://linqs-data.soe.ucsc.edu/public/Pubmed-Diabetes.tgz', self.raw_dir)
         print('Extracting...')
         with tarfile.open(osp.join(self.raw_dir, 'Pubmed-Diabetes.tgz'), "r:gz") as tar:
-            tar.extractall(path=self.raw_dir)
+            def is_within_directory(directory, target):
+                
+                abs_directory = os.path.abspath(directory)
+                abs_target = os.path.abspath(target)
+            
+                prefix = os.path.commonprefix([abs_directory, abs_target])
+                
+                return prefix == abs_directory
+            
+            def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+            
+                for member in tar.getmembers():
+                    member_path = os.path.join(path, member.name)
+                    if not is_within_directory(path, member_path):
+                        raise Exception("Attempted Path Traversal in Tar File")
+            
+                tar.extractall(path, members, numeric_owner=numeric_owner) 
+                
+            
+            safe_extract(tar, path=self.raw_dir)
             tar.close()
 
     def process(self):
